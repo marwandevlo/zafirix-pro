@@ -6,17 +6,7 @@ import { normalizeManualPlan } from '@/app/lib/atlas-manual-subscription';
 import { sendEmailViaResend } from '@/app/lib/atlas-email-resend';
 import { buildPaidSubscriptionActivatedEmailHtml } from '@/app/lib/atlas-email-templates';
 import { getWhatsAppOpsPhoneDigits, sendWhatsAppMessage } from '@/app/lib/whatsapp-service';
-
-function requireBearer(request: NextRequest): string | null {
-  const auth = request.headers.get('authorization') ?? '';
-  if (!auth.toLowerCase().startsWith('bearer ')) return null;
-  return auth.slice(7).trim() || null;
-}
-
-function isAdminFromUser(user: { app_metadata?: Record<string, unknown> } | null): boolean {
-  const r = String((user?.app_metadata?.role as string | undefined) ?? '');
-  return r === 'admin' || r === 'owner';
-}
+import { requireAdmin } from '@/app/lib/admin/require-admin';
 
 function isUuid(value: string): boolean {
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value);
@@ -42,17 +32,10 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: 'not_enabled' }, { status: 400 });
   }
 
-  const token = requireBearer(request);
-  if (!token) return NextResponse.json({ error: 'auth_required' }, { status: 401 });
+  const guard = await requireAdmin(request);
+  if (!guard.ok) return guard.response;
 
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
-  const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
-  const userClient = createClient(supabaseUrl, supabaseAnonKey, {
-    global: { headers: { Authorization: `Bearer ${token}` } },
-  });
-  const { data: auth } = await userClient.auth.getUser();
-  if (!auth.user) return NextResponse.json({ error: 'auth_required' }, { status: 401 });
-  if (!isAdminFromUser(auth.user)) return NextResponse.json({ error: 'forbidden' }, { status: 403 });
 
   const body = (await request.json().catch(() => null)) as null | { id?: string };
   const id = String(body?.id ?? '').trim();

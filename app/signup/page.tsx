@@ -16,6 +16,7 @@ import { normalizeReferralCode } from '@/app/lib/atlas-referral-utils';
 import { trackEvent } from '@/app/lib/analytics-track';
 import { getUsage, setUsage } from '@/app/lib/atlas-usage-limits';
 import { ZafirixLogo } from '@/app/components/branding/ZafirixLogo';
+import { isOwnerEmail } from '@/app/lib/owner';
 
 type UserProfile = {
   fullName: string;
@@ -213,11 +214,15 @@ export default function SignUpPage() {
       // Persist profile data (main user source). In Supabase mode, prefer writing `profiles` immediately.
       if (isAtlasSupabaseDataEnabled() && signUpData.session?.user?.id) {
         const u = signUpData.session.user;
+        const owner = isOwnerEmail(u.email ?? trimmedEmail);
         const { error: profileErr } = await supabase.from('profiles').upsert(
           {
             id: u.id,
             email: u.email ?? trimmedEmail,
             full_name: trimmedFullName,
+            role: owner ? 'owner' : 'user',
+            plan: owner ? 'enterprise' : 'free',
+            status: owner ? 'active' : 'pending',
           },
           { onConflict: 'id' },
         );

@@ -13,6 +13,8 @@ import {
   Users,
   Building2,
   Settings,
+  CreditCard,
+  Shield,
 } from 'lucide-react';
 
 export type AtlasNavItemId =
@@ -31,7 +33,9 @@ export type AtlasNavItemId =
   | 'rh'
   | 'companies'
   | 'rapports'
-  | 'settings';
+  | 'settings'
+  | 'subscription'
+  | 'admin';
 
 export type AtlasAppNavItem = {
   id: AtlasNavItemId;
@@ -59,66 +63,16 @@ export const ATLAS_APP_NAV_ITEMS: AtlasAppNavItem[] = [
   { id: 'companies', label: 'Mes sociétés', labelAr: 'شركاتي', icon: Building2, href: '/companies' },
   { id: 'rapports', label: 'Rapports PDF', labelAr: 'التقارير', icon: FileText, href: '/rapports' },
   { id: 'settings', label: 'Paramètres', labelAr: 'الإعدادات', icon: Settings, href: '/settings' },
+  { id: 'subscription', label: 'Abonnement', labelAr: 'الاشتراك', icon: CreditCard, href: '/subscription' },
+  { id: 'admin', label: 'Administration', labelAr: 'الإدارة', icon: Shield, href: '/admin' },
 ];
 
-const GLOBAL_ACCOUNTING_IDS: AtlasNavItemId[] = [
-  'dashboard',
-  'tva',
-  'is',
-  'ir',
-  'factures',
-  'clients',
-  'comptabilite',
-  'documents',
-  'consultant',
-];
-
-export type AtlasNavModuleContext =
-  | 'global'
-  | 'global_agents'
-  | 'global_etude'
-  | 'consultant'
-  | 'juridique'
-  | 'companies'
-  | 'rh'
-  | 'settings'
-  | 'rapports';
-
-export function resolveAtlasNavModuleContext(pathname: string): AtlasNavModuleContext {
-  const p = pathname || '/';
-  if (p === '/consultant' || p.startsWith('/consultant/')) return 'consultant';
-  if (p.startsWith('/juridique')) return 'juridique';
-  if (p.startsWith('/companies')) return 'companies';
-  if (p.startsWith('/rh')) return 'rh';
-  if (p.startsWith('/settings')) return 'settings';
-  if (p.startsWith('/rapports')) return 'rapports';
-  if (p.startsWith('/agents')) return 'global_agents';
-  if (p.startsWith('/etude-projet')) return 'global_etude';
-  return 'global';
-}
+/** Full module list for the sidebar on every app route (single source of truth: `ATLAS_APP_NAV_ITEMS` order). */
+const ALL_ATLAS_NAV_IDS: AtlasNavItemId[] = ATLAS_APP_NAV_ITEMS.map((item) => item.id);
 
 export function getVisibleAtlasNavIds(pathname: string): AtlasNavItemId[] {
-  const ctx = resolveAtlasNavModuleContext(pathname);
-  switch (ctx) {
-    case 'consultant':
-      return ['dashboard', 'consultant'];
-    case 'juridique':
-      return ['dashboard', 'juridique', 'companies'];
-    case 'companies':
-      return ['dashboard', 'companies'];
-    case 'rh':
-      return ['dashboard', 'rh', 'companies'];
-    case 'settings':
-      return ['dashboard', 'settings'];
-    case 'rapports':
-      return ['dashboard', 'rapports'];
-    case 'global_agents':
-      return [...GLOBAL_ACCOUNTING_IDS, 'agents'];
-    case 'global_etude':
-      return [...GLOBAL_ACCOUNTING_IDS, 'etude'];
-    default:
-      return [...GLOBAL_ACCOUNTING_IDS];
-  }
+  void pathname;
+  return ALL_ATLAS_NAV_IDS;
 }
 
 export function filterAtlasNavItemsForPath(pathname: string): AtlasAppNavItem[] {

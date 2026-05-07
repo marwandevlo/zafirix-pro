@@ -165,6 +165,43 @@ export default function UsersAdminClient() {
         <div className="px-6 py-4 border-b border-gray-100">
           <p className="text-sm font-semibold text-gray-900">Users · المستخدمون</p>
           <p className="text-xs text-gray-500 mt-0.5">Search, filter, and moderate accounts.</p>
+          <div className="mt-4 flex flex-wrap gap-2">
+            <button
+              type="button"
+              onClick={() => setStatusFilter('pending')}
+              className="px-3 py-2 rounded-xl border border-amber-200 bg-amber-50 text-amber-900 text-xs font-semibold hover:bg-amber-100"
+            >
+              Pending
+            </button>
+            <button
+              type="button"
+              onClick={() => setStatusFilter('active')}
+              className="px-3 py-2 rounded-xl border border-emerald-200 bg-emerald-50 text-emerald-900 text-xs font-semibold hover:bg-emerald-100"
+            >
+              Active
+            </button>
+            <button
+              type="button"
+              onClick={() => setStatusFilter('suspended')}
+              className="px-3 py-2 rounded-xl border border-amber-200 bg-amber-50 text-amber-900 text-xs font-semibold hover:bg-amber-100"
+            >
+              Suspended
+            </button>
+            <button
+              type="button"
+              onClick={() => setStatusFilter('banned')}
+              className="px-3 py-2 rounded-xl border border-red-200 bg-red-50 text-red-900 text-xs font-semibold hover:bg-red-100"
+            >
+              Banned
+            </button>
+            <button
+              type="button"
+              onClick={() => setStatusFilter('all')}
+              className="px-3 py-2 rounded-xl border border-gray-200 bg-white text-gray-700 text-xs font-semibold hover:bg-gray-50"
+            >
+              All
+            </button>
+          </div>
           <div className="mt-4 grid grid-cols-1 md:grid-cols-4 gap-3">
             <input
               value={q}
@@ -188,6 +225,7 @@ export default function UsersAdminClient() {
               className="w-full px-3 py-2 rounded-xl border border-gray-200 text-sm"
             >
               <option value="all">All status</option>
+              <option value="pending">pending</option>
               <option value="active">active</option>
               <option value="suspended">suspended</option>
               <option value="banned">banned</option>
@@ -249,6 +287,15 @@ export default function UsersAdminClient() {
                             Owner protected
                           </span>
                         ) : null}
+                        {String(u.status ?? '').toLowerCase() === 'pending' ? (
+                          <button
+                            onClick={() => mutateUser(u.id, { status: 'active' }, 'Approuver cet utilisateur ?')}
+                            disabled={isOwnerEmail(u.email)}
+                            className="px-3 py-2 rounded-xl border border-emerald-200 bg-emerald-50 text-emerald-900 text-xs font-semibold hover:bg-emerald-100"
+                          >
+                            Approve
+                          </button>
+                        ) : null}
                         <button
                           onClick={() => mutateUser(u.id, { status: 'suspended' }, 'Suspendre cet utilisateur ?')}
                           disabled={isOwnerEmail(u.email)}
@@ -268,7 +315,7 @@ export default function UsersAdminClient() {
                           disabled={isOwnerEmail(u.email)}
                           className="px-3 py-2 rounded-xl border border-red-200 bg-red-50 text-red-900 text-xs font-semibold hover:bg-red-100"
                         >
-                          Ban
+                          {String(u.status ?? '').toLowerCase() === 'pending' ? 'Reject' : 'Ban'}
                         </button>
                         <button
                           onClick={() => deleteUser(u.id)}

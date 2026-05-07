@@ -9,9 +9,6 @@ import { supabase } from '@/app/lib/supabase';
 
 type SubStatus = 'pending_manual' | 'active' | 'canceled' | string;
 
-type SubscriptionRow = { id: string; user_id: string | null; plan: string | null; status: string | null; created_at: string | null };
-type ProfileEmailRow = { id: string; email: string | null };
-
 type AdminSubRow = {
   id: string;
   user_id: string;
@@ -19,6 +16,7 @@ type AdminSubRow = {
   plan: string;
   status: SubStatus;
   created_at: string;
+  updated_at?: string;
 };
 
 function statusBadge(status: string): { label: string; cls: string } {
@@ -60,34 +58,16 @@ export default function AdminSubscriptionsPage() {
             return;
           }
 
-          const subRes = await supabase
-            .from('subscriptions')
-            .select('id, user_id, plan, status, created_at')
-            .order('created_at', { ascending: false })
-            .limit(500);
-          if (subRes.error) throw new Error('db_error');
-
-          const raw = (subRes.data ?? []) as SubscriptionRow[];
-          const userIds = Array.from(new Set(raw.map((r) => String(r.user_id ?? '')).filter(Boolean)));
-
-          const profRes =
-            userIds.length === 0
-              ? { data: [] as ProfileEmailRow[], error: null as unknown }
-              : await supabase.from('profiles').select('id, email').in('id', userIds).limit(500);
-
-          const emailById = new Map<string, string>();
-          for (const p of (profRes.data ?? []) as ProfileEmailRow[]) {
-            emailById.set(String(p.id), String(p.email ?? ''));
+          const res = await fetch('/api/admin/subscriptions', {
+            method: 'GET',
+            headers: { Authorization: `Bearer ${token}` },
+          });
+          const json = (await res.json().catch(() => ({}))) as { rows?: AdminSubRow[]; error?: string; message?: string };
+          if (!res.ok) {
+            const msg = process.env.NODE_ENV === 'development' ? (json.message || json.error || 'db_error') : 'db_error';
+            throw new Error(msg);
           }
-
-          const list: AdminSubRow[] = raw.map((r) => ({
-            id: String(r.id),
-            user_id: String(r.user_id ?? ''),
-            email: emailById.get(String(r.user_id ?? '')) ?? '',
-            plan: String(r.plan ?? ''),
-            status: String(r.status ?? ''),
-            created_at: String(r.created_at ?? ''),
-          }));
+          const list = Array.isArray(json.rows) ? json.rows : [];
 
           if (!cancelled) setRows(list);
           return;
@@ -136,11 +116,22 @@ export default function AdminSubscriptionsPage() {
     setError('');
     setLoading(true);
     try {
-      const { error: upErr } = await supabase
-        .from('subscriptions')
-        .update({ status: nextStatus, updated_at: new Date().toISOString() })
-        .eq('id', id);
-      if (upErr) throw new Error('db_error');
+      const { data } = await supabase.auth.getSession();
+      const token = data.session?.access_token ?? '';
+      if (!token) {
+        router.push('/login?next=/admin/subscriptions');
+        return;
+      }
+      const res = await fetch('/api/admin/subscriptions', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ id, status: nextStatus }),
+      });
+      const json = (await res.json().catch(() => ({}))) as { error?: string; message?: string };
+      if (!res.ok) {
+        const msg = process.env.NODE_ENV === 'development' ? (json.message || json.error || 'db_error') : 'db_error';
+        throw new Error(msg);
+      }
       setRows((prev) => prev.map((r) => (r.id === id ? { ...r, status: nextStatus } : r)));
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Erreur');

@@ -1,23 +1,14 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createClient, type User } from '@supabase/supabase-js';
+import { createClient } from '@supabase/supabase-js';
 import { atlasDataBackend } from '@/app/lib/atlas-data-source';
-
-function requireBearer(request: NextRequest): string | null {
-  const auth = request.headers.get('authorization') ?? '';
-  if (!auth.toLowerCase().startsWith('bearer ')) return null;
-  const token = auth.slice(7).trim();
-  return token || null;
-}
-
-function isAdminFromUser(user: User | null | undefined): boolean {
-  const meta = user?.app_metadata as Record<string, unknown> | undefined;
-  const r = String(meta?.role ?? '');
-  return r === 'admin' || r === 'owner';
-}
+import { requireAdmin, requireBearer } from '@/app/lib/admin/require-admin';
 
 export async function GET(request: NextRequest) {
   try {
     if (atlasDataBackend() !== 'supabase') return NextResponse.json({ error: 'not_enabled' }, { status: 400 });
+
+    const guard = await requireAdmin(request);
+    if (!guard.ok) return guard.response;
 
     const token = requireBearer(request);
     if (!token) return NextResponse.json({ error: 'auth_required' }, { status: 401 });
@@ -27,10 +18,6 @@ export async function GET(request: NextRequest) {
     const supabase = createClient(supabaseUrl, supabaseAnonKey, {
       global: { headers: { Authorization: `Bearer ${token}` } },
     });
-
-    const { data: auth } = await supabase.auth.getUser();
-    if (!auth.user) return NextResponse.json({ error: 'auth_required' }, { status: 401 });
-    if (!isAdminFromUser(auth.user)) return NextResponse.json({ error: 'forbidden' }, { status: 403 });
 
     const url = new URL(request.url);
     const status = (url.searchParams.get('status') ?? '').trim();

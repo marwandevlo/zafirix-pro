@@ -3,6 +3,7 @@ import { atlasDataBackend } from '@/app/lib/atlas-data-source';
 import { getSupabaseServiceRoleClient } from '@/app/lib/supabase-admin';
 import { requireAdmin, writeAdminLog } from '@/app/lib/admin/require-admin';
 import { isOwnerEmail } from '@/app/lib/owner';
+import { roleGrantsAdminAccess } from '@/app/lib/admin/can-access-admin';
 
 function isUuid(value: string): boolean {
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value);
@@ -10,7 +11,7 @@ function isUuid(value: string): boolean {
 
 type Role = 'user' | 'admin' | 'moderator' | 'owner';
 type Plan = 'free' | 'pro' | 'vip' | 'enterprise';
-type Status = 'active' | 'suspended' | 'banned';
+type Status = 'pending' | 'active' | 'suspended' | 'banned';
 
 function isRole(v: string): v is Role {
   return v === 'user' || v === 'admin' || v === 'moderator' || v === 'owner';
@@ -19,7 +20,7 @@ function isPlan(v: string): v is Plan {
   return v === 'free' || v === 'pro' || v === 'vip' || v === 'enterprise';
 }
 function isStatus(v: string): v is Status {
-  return v === 'active' || v === 'suspended' || v === 'banned';
+  return v === 'pending' || v === 'active' || v === 'suspended' || v === 'banned';
 }
 
 export async function GET(request: NextRequest, ctx: { params: Promise<{ id: string }> }) {
@@ -125,9 +126,14 @@ export async function PATCH(request: NextRequest, ctx: { params: Promise<{ id: s
 
   const admin = getSupabaseServiceRoleClient();
 
-  const { data: targetProf } = await admin.from('profiles').select('email, role').eq('id', userId).maybeSingle();
+  const [{ data: targetProf }, { data: targetAuth }] = await Promise.all([
+    admin.from('profiles').select('email, role, status').eq('id', userId).maybeSingle(),
+    admin.auth.admin.getUserById(userId),
+  ]);
   const targetEmail = String((targetProf as { email?: string | null } | null)?.email ?? '').trim().toLowerCase();
-  const targetIsOwner = isOwnerEmail(targetEmail);
+  const targetAuthEmail = String(targetAuth?.user?.email ?? '').trim().toLowerCase();
+  const targetIsOwner = isOwnerEmail(targetEmail) || isOwnerEmail(targetAuthEmail);
+  const prevStatus = String((targetProf as { status?: string | null } | null)?.status ?? '').trim().toLowerCase();
 
   if (targetIsOwner) {
     // Owner is immutable from the admin panel.
@@ -139,7 +145,7 @@ export async function PATCH(request: NextRequest, ctx: { params: Promise<{ id: s
   if (guard.adminUserId === userId && status && status !== 'active') {
     return NextResponse.json({ error: 'cannot_disable_self' }, { status: 400 });
   }
-  if (guard.adminUserId === userId && role && role !== 'admin') {
+  if (guard.adminUserId === userId && role && !roleGrantsAdminAccess(role)) {
     return NextResponse.json({ error: 'cannot_demote_self' }, { status: 400 });
   }
 
@@ -167,11 +173,15 @@ export async function PATCH(request: NextRequest, ctx: { params: Promise<{ id: s
     await admin.auth.admin.updateUserById(userId, { app_metadata: { role } });
   }
 
+  const nextStatus = typeof status === 'string' ? status.trim().toLowerCase() : '';
+  const isApproval = prevStatus === 'pending' && nextStatus === 'active';
+  const isRejection = prevStatus === 'pending' && nextStatus === 'banned';
+
   await writeAdminLog({
     adminId: guard.adminUserId,
     targetUserId: userId,
-    action: 'USER_UPDATED',
-    details: { updates },
+    action: isApproval ? 'USER_APPROVED' : isRejection ? 'USER_REJECTED' : 'USER_UPDATED',
+    details: { updates, prevStatus: prevStatus || null },
   });
 
   return NextResponse.json({ ok: true });
@@ -192,9 +202,13 @@ export async function DELETE(request: NextRequest, ctx: { params: Promise<{ id: 
   }
 
   const admin = getSupabaseServiceRoleClient();
-  const { data: prof } = await admin.from('profiles').select('email').eq('id', userId).maybeSingle();
-  const email = String((prof as { email?: string | null } | null)?.email ?? '').trim().toLowerCase();
-  if (isOwnerEmail(email)) {
+  const [{ data: prof }, { data: authWrap }] = await Promise.all([
+    admin.from('profiles').select('email').eq('id', userId).maybeSingle(),
+    admin.auth.admin.getUserById(userId),
+  ]);
+  const profileEmail = String((prof as { email?: string | null } | null)?.email ?? '').trim().toLowerCase();
+  const authEmail = String(authWrap?.user?.email ?? '').trim().toLowerCase();
+  if (isOwnerEmail(profileEmail) || isOwnerEmail(authEmail)) {
     return NextResponse.json({ error: 'cannot_delete_owner' }, { status: 403 });
   }
   const { error } = await admin.auth.admin.deleteUser(userId);

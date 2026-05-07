@@ -2,17 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import { atlasDataBackend } from '@/app/lib/atlas-data-source';
 import { getAtlasPlanById } from '@/app/lib/atlas-pricing-plans';
-
-function requireBearer(request: NextRequest): string | null {
-  const auth = request.headers.get('authorization') ?? '';
-  if (!auth.toLowerCase().startsWith('bearer ')) return null;
-  return auth.slice(7).trim() || null;
-}
-
-function isAdminFromUser(user: { app_metadata?: Record<string, unknown> } | null): boolean {
-  const r = String((user?.app_metadata?.role as string | undefined) ?? '');
-  return r === 'admin' || r === 'owner';
-}
+import { requireAdmin } from '@/app/lib/admin/require-admin';
 
 export type RevenueOverviewResponse = {
   subscriptionsManual: { pending: number; active: number; canceled: number };
@@ -28,17 +18,10 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: 'not_enabled' }, { status: 400 });
   }
 
-  const token = requireBearer(request);
-  if (!token) return NextResponse.json({ error: 'auth_required' }, { status: 401 });
+  const guard = await requireAdmin(request);
+  if (!guard.ok) return guard.response;
 
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
-  const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
-  const userClient = createClient(supabaseUrl, supabaseAnonKey, {
-    global: { headers: { Authorization: `Bearer ${token}` } },
-  });
-  const { data: auth } = await userClient.auth.getUser();
-  if (!auth.user) return NextResponse.json({ error: 'auth_required' }, { status: 401 });
-  if (!isAdminFromUser(auth.user)) return NextResponse.json({ error: 'forbidden' }, { status: 403 });
 
   const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY ?? process.env.SUPABASE_SERVICE_ROLE ?? '';
   if (!serviceRoleKey) return NextResponse.json({ error: 'server_misconfigured' }, { status: 503 });

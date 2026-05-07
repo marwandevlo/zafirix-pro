@@ -2,9 +2,8 @@ import 'server-only';
 
 import type { NextRequest } from 'next/server';
 import { NextResponse } from 'next/server';
-import type { User } from '@supabase/supabase-js';
 import { getSupabaseServiceRoleClient, getSupabaseUserClientFromBearer } from '@/app/lib/supabase-admin';
-import { isOwnerEmail } from '@/app/lib/owner';
+import { jwtUserShowsAdmin, roleGrantsAdminAccess } from '@/app/lib/admin/can-access-admin';
 
 export function requireBearer(request: NextRequest): string | null {
   const auth = request.headers.get('authorization') ?? '';
@@ -23,8 +22,7 @@ export async function requireAdmin(request: NextRequest): Promise<
   const { data: auth } = await userClient.auth.getUser();
   if (!auth.user) return { ok: false, response: NextResponse.json({ error: 'auth_required' }, { status: 401 }) };
 
-  const metaRole = appMetaRole(auth.user);
-  if (metaRole === 'admin' || metaRole === 'owner' || isOwnerEmail(auth.user.email ?? null)) {
+  if (jwtUserShowsAdmin(auth.user)) {
     return { ok: true, adminUserId: auth.user.id, adminEmail: auth.user.email ?? '' };
   }
 
@@ -34,18 +32,13 @@ export async function requireAdmin(request: NextRequest): Promise<
     const { data: prof, error } = await admin.from('profiles').select('role').eq('id', auth.user.id).maybeSingle();
     if (error) return { ok: false, response: NextResponse.json({ error: 'forbidden' }, { status: 403 }) };
     const r = String((prof as { role?: string | null } | null)?.role ?? '');
-    if (r !== 'admin' && r !== 'owner') {
+    if (!roleGrantsAdminAccess(r)) {
       return { ok: false, response: NextResponse.json({ error: 'forbidden' }, { status: 403 }) };
     }
     return { ok: true, adminUserId: auth.user.id, adminEmail: auth.user.email ?? '' };
   } catch {
     return { ok: false, response: NextResponse.json({ error: 'forbidden' }, { status: 403 }) };
   }
-}
-
-function appMetaRole(user: User): string {
-  const meta = user.app_metadata as Record<string, unknown> | undefined;
-  return String(meta?.role ?? '');
 }
 
 export async function writeAdminLog(params: {

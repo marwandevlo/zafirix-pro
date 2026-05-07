@@ -2,7 +2,38 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createServerClient } from '@supabase/ssr';
 import type { User } from '@supabase/supabase-js';
 import { atlasDataBackend } from '@/app/lib/atlas-data-source';
-import { isOwnerEmail } from '@/app/lib/owner';
+import { jwtUserShowsAdmin, roleGrantsAdminAccess } from '@/app/lib/admin/can-access-admin';
+
+async function userHasAdminAccess(user: User, supabaseUrl: string): Promise<boolean> {
+  if (jwtUserShowsAdmin(user)) return true;
+  const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY ?? process.env.SUPABASE_SERVICE_ROLE ?? '';
+  if (!serviceRoleKey) return false;
+  try {
+    const adminClient = createServerClient(supabaseUrl, serviceRoleKey, {
+      cookies: { getAll: () => [], setAll: () => {} },
+    });
+    const { data: prof } = await adminClient.from('profiles').select('role').eq('id', user.id).maybeSingle();
+    return roleGrantsAdminAccess(String((prof as { role?: string | null } | null)?.role ?? ''));
+  } catch {
+    return false;
+  }
+}
+
+async function userIsPendingApproval(user: User, supabaseUrl: string, supabaseAnonKey: string, request: NextRequest): Promise<boolean> {
+  try {
+    const supabase = createServerClient(supabaseUrl, supabaseAnonKey, {
+      cookies: {
+        getAll: () => request.cookies.getAll(),
+        setAll: () => {},
+      },
+    });
+    const { data } = await supabase.from('profiles').select('status').eq('id', user.id).maybeSingle();
+    const status = String((data as { status?: string | null } | null)?.status ?? '').trim().toLowerCase();
+    return status === 'pending';
+  } catch {
+    return false;
+  }
+}
 
 const PUBLIC_PATHS = new Set([
   '/landing',
@@ -26,13 +57,6 @@ function isPublicPath(pathname: string): boolean {
   if (pathname.startsWith('/robots.txt')) return true;
   if (pathname.startsWith('/sitemap')) return true;
   return false;
-}
-
-function isAdminFromUser(user: User | null): boolean {
-  if (!user) return false;
-  const meta = user.app_metadata as Record<string, unknown> | undefined;
-  const r = String(meta?.role ?? '');
-  return r === 'admin' || r === 'owner';
 }
 
 export async function middleware(request: NextRequest) {
@@ -104,49 +128,45 @@ export async function middleware(request: NextRequest) {
   const { data } = await supabase.auth.getUser();
   const user = data.user;
 
+  if (pathname.startsWith('/api/admin') && request.method === 'OPTIONS') {
+    return NextResponse.next();
+  }
+
   // Require login for private pages. Public routes (e.g. /landing, /login) already returned above — no loop on `next`.
   if (!user) {
+    if (pathname.startsWith('/api/admin')) {
+      return NextResponse.json({ error: 'auth_required' }, { status: 401 });
+    }
     const url = request.nextUrl.clone();
-    // Public entry point should be the landing page in production.
-    url.pathname = '/landing';
+    // Admin UI: send anonymous users to login (not the marketing landing).
+    if (pathname.startsWith('/admin')) {
+      url.pathname = '/login';
+    } else {
+      url.pathname = '/landing';
+    }
     url.searchParams.set('next', pathname);
     return NextResponse.redirect(url);
   }
 
+  // Logged-in users without admin privileges must not call admin APIs (handlers also enforce this).
+  if (pathname.startsWith('/api/admin')) {
+    if (!(await userHasAdminAccess(user, supabaseUrl))) {
+      return NextResponse.json({ error: 'forbidden' }, { status: 403 });
+    }
+  }
+
+  // Pending accounts must not access the app until approved (except the pending page itself).
+  if (!pathname.startsWith('/api') && !pathname.startsWith('/admin') && pathname !== '/pending-approval') {
+    if (await userIsPendingApproval(user, supabaseUrl, supabaseAnonKey, request)) {
+      const url = request.nextUrl.clone();
+      url.pathname = '/pending-approval';
+      return NextResponse.redirect(url);
+    }
+  }
+
   // Protect admin routes
   if (pathname.startsWith('/admin')) {
-    // Owner must never be blocked (fast path; avoids relying on JWT metadata/DB).
-    if (isOwnerEmail(user.email ?? null)) {
-      return response;
-    }
-
-    // Prefer app_metadata.role, but allow a DB-backed admin role as fallback.
-    // This keeps admin access manageable via `profiles.role` without relying solely on JWT metadata.
-    let isAdmin = isAdminFromUser(user);
-    if (!isAdmin) {
-      const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY ?? process.env.SUPABASE_SERVICE_ROLE ?? '';
-      if (serviceRoleKey) {
-        try {
-          const adminClient = createServerClient(supabaseUrl, serviceRoleKey, {
-            cookies: {
-              getAll: () => [],
-              setAll: () => {},
-            },
-          });
-          const { data: prof } = await adminClient
-            .from('profiles')
-            .select('role')
-            .eq('id', user.id)
-            .maybeSingle();
-          const r = String((prof as { role?: string | null } | null)?.role ?? '');
-          isAdmin = r === 'admin' || r === 'owner';
-        } catch {
-          // ignore; fall back to app_metadata only
-        }
-      }
-    }
-
-    if (!isAdmin) {
+    if (!(await userHasAdminAccess(user, supabaseUrl))) {
       const url = request.nextUrl.clone();
       url.pathname = '/access-denied';
       return NextResponse.redirect(url);

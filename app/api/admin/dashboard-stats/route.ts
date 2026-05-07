@@ -1,20 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createClient, type SupabaseClient, type User } from '@supabase/supabase-js';
+import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import { atlasDataBackend } from '@/app/lib/atlas-data-source';
-
-function requireBearer(request: NextRequest): string | null {
-  const auth = request.headers.get('authorization') ?? '';
-  if (!auth.toLowerCase().startsWith('bearer ')) return null;
-  const token = auth.slice(7).trim();
-  return token || null;
-}
-
-function isAdminFromUser(user: User | null): boolean {
-  if (!user) return false;
-  const meta = user.app_metadata as Record<string, unknown> | undefined;
-  const r = String(meta?.role ?? '');
-  return r === 'admin' || r === 'owner';
-}
+import { requireAdmin, requireBearer } from '@/app/lib/admin/require-admin';
 
 async function countByStatus(supabase: SupabaseClient, table: string, statuses: string[]) {
   const out: Record<string, number> = {};
@@ -33,19 +20,18 @@ export async function GET(request: NextRequest) {
   try {
     if (atlasDataBackend() !== 'supabase') return NextResponse.json({ error: 'not_enabled' }, { status: 400 });
 
+    const guard = await requireAdmin(request);
+    if (!guard.ok) return guard.response;
+
     const token = requireBearer(request);
     if (!token) return NextResponse.json({ error: 'auth_required' }, { status: 401 });
 
     const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
     const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
 
-    // Verify requester (must be admin) using their JWT.
     const supabaseUser = createClient(supabaseUrl, supabaseAnonKey, {
       global: { headers: { Authorization: `Bearer ${token}` } },
     });
-    const { data: auth } = await supabaseUser.auth.getUser();
-    if (!auth.user) return NextResponse.json({ error: 'auth_required' }, { status: 401 });
-    if (!isAdminFromUser(auth.user)) return NextResponse.json({ error: 'forbidden' }, { status: 403 });
 
     // Prefer service-role for cross-user aggregates when available.
     const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY ?? process.env.SUPABASE_SERVICE_ROLE ?? '';

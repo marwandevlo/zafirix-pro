@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { usePathname, useRouter } from 'next/navigation';
 import {
   ArrowLeft,
@@ -17,6 +17,9 @@ import {
   resolveActiveAtlasNavId,
   type AtlasAppNavItem,
 } from '@/app/lib/atlas-app-nav';
+import type { User } from '@supabase/supabase-js';
+import { supabase } from '@/app/lib/supabase';
+import { isOwnerEmail } from '@/app/lib/owner';
 
 export type AppSidebarProps = {
   variant: 'home' | 'module';
@@ -39,6 +42,26 @@ function navLabel(item: AtlasAppNavItem, t?: (fr: string, ar: string) => string)
   return item.label;
 }
 
+/**
+ * Sidebar only: owner email, or profiles.role / JWT role strictly admin|owner.
+ * If profiles has a non-privileged role for this user id, do not trust JWT alone (stale app_metadata).
+ */
+function computeCanSeeAdminNav(params: {
+  user: User;
+  profileRow: { role?: string | null } | null;
+  jwtRole: string;
+}): boolean {
+  const email = params.user.email ?? null;
+  if (isOwnerEmail(email)) return true;
+
+  const pr = String(params.profileRow?.role ?? '').trim().toLowerCase();
+  if (pr === 'admin' || pr === 'owner') return true;
+  if (params.profileRow !== null && (pr === 'user' || pr === 'moderator')) return false;
+
+  const jr = params.jwtRole.trim().toLowerCase();
+  return jr === 'admin' || jr === 'owner';
+}
+
 export function AppSidebar({
   variant,
   t,
@@ -54,8 +77,69 @@ export function AppSidebar({
 }: AppSidebarProps) {
   const pathname = usePathname() || '/';
   const router = useRouter();
+  const [showAdminNav, setShowAdminNav] = useState(false);
 
-  const visibleItems = useMemo(() => filterAtlasNavItemsForPath(pathname), [pathname]);
+  useEffect(() => {
+    let cancelled = false;
+
+    const refreshAdminNav = async () => {
+      try {
+        const { data } = await supabase.auth.getUser();
+        if (cancelled) return;
+        const u = data.user;
+        if (!u) {
+          if (process.env.NODE_ENV === 'development') {
+            console.log('[AppSidebar admin nav]', { userEmail: null, profileRole: null, jwtRole: null, canSeeAdmin: false });
+          }
+          setShowAdminNav(false);
+          return;
+        }
+
+        const jwtRole = String(u.app_metadata?.role ?? '');
+        const { data: prof } = await supabase
+          .from('profiles')
+          .select('role')
+          .eq('id', u.id)
+          .maybeSingle();
+
+        if (cancelled) return;
+
+        const profileRow = (prof ?? null) as { role?: string | null } | null;
+        const canSee = computeCanSeeAdminNav({ user: u, profileRow, jwtRole });
+
+        if (process.env.NODE_ENV === 'development') {
+          console.log('[AppSidebar admin nav]', {
+            userEmail: u.email ?? null,
+            profileRole: profileRow?.role ?? null,
+            jwtRole: jwtRole || null,
+            canSeeAdmin: canSee,
+          });
+        }
+
+        setShowAdminNav(canSee);
+      } catch {
+        if (!cancelled) setShowAdminNav(false);
+      }
+    };
+
+    void refreshAdminNav();
+
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange(() => {
+      void refreshAdminNav();
+    });
+
+    return () => {
+      cancelled = true;
+      subscription.unsubscribe();
+    };
+  }, []);
+
+  const visibleItems = useMemo(() => {
+    const base = filterAtlasNavItemsForPath(pathname);
+    return showAdminNav ? base : base.filter((item) => item.id !== 'admin');
+  }, [pathname, showAdminNav]);
   const activeId = useMemo(() => resolveActiveAtlasNavId(pathname, visibleItems), [pathname, visibleItems]);
 
   const go = (href: string) => {
