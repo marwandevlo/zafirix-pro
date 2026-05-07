@@ -5,7 +5,6 @@ import { useRouter } from 'next/navigation';
 import { todayYmd } from '@/app/lib/atlas-dates';
 import { ArrowLeft, BadgeCheck, Ban, Clock, Filter, ShieldCheck } from 'lucide-react';
 import { isAtlasSupabaseDataEnabled } from '@/app/lib/atlas-data-source';
-import { supabase } from '@/app/lib/supabase';
 
 type SubStatus = 'pending_manual' | 'active' | 'canceled' | string;
 
@@ -51,16 +50,8 @@ export default function AdminSubscriptionsPage() {
       setLoading(true);
       try {
         if (isAtlasSupabaseDataEnabled()) {
-          const { data } = await supabase.auth.getSession();
-          const token = data.session?.access_token ?? '';
-          if (!token) {
-            router.push('/login?next=/admin/subscriptions');
-            return;
-          }
-
           const res = await fetch('/api/admin/subscriptions', {
             method: 'GET',
-            headers: { Authorization: `Bearer ${token}` },
           });
           const json = (await res.json().catch(() => ({}))) as { rows?: AdminSubRow[]; error?: string; message?: string };
           if (!res.ok) {
@@ -116,15 +107,9 @@ export default function AdminSubscriptionsPage() {
     setError('');
     setLoading(true);
     try {
-      const { data } = await supabase.auth.getSession();
-      const token = data.session?.access_token ?? '';
-      if (!token) {
-        router.push('/login?next=/admin/subscriptions');
-        return;
-      }
       const res = await fetch('/api/admin/subscriptions', {
         method: 'PATCH',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ id, status: nextStatus }),
       });
       const json = (await res.json().catch(() => ({}))) as { error?: string; message?: string };
