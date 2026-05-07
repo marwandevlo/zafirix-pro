@@ -16,7 +16,6 @@ import { normalizeReferralCode } from '@/app/lib/atlas-referral-utils';
 import { trackEvent } from '@/app/lib/analytics-track';
 import { getUsage, setUsage } from '@/app/lib/atlas-usage-limits';
 import { ZafirixLogo } from '@/app/components/branding/ZafirixLogo';
-import { isOwnerEmail } from '@/app/lib/owner';
 
 type UserProfile = {
   fullName: string;
@@ -211,24 +210,27 @@ export default function SignUpPage() {
         return;
       }
 
-      // Persist profile data (main user source). In Supabase mode, prefer writing `profiles` immediately.
+      // Profile row is created by DB trigger on auth.users (role/plan/status must never be set client-side).
+      // Optional: enrich safe columns only; failures must not block signup.
       if (isAtlasSupabaseDataEnabled() && signUpData.session?.user?.id) {
         const u = signUpData.session.user;
-        const owner = isOwnerEmail(u.email ?? trimmedEmail);
-        const { error: profileErr } = await supabase.from('profiles').upsert(
-          {
-            id: u.id,
-            email: u.email ?? trimmedEmail,
-            full_name: trimmedFullName,
-            role: owner ? 'owner' : 'user',
-            plan: owner ? 'enterprise' : 'free',
-            status: owner ? 'active' : 'pending',
-          },
-          { onConflict: 'id' },
-        );
-        if (profileErr) {
-          // Do not block signup success; user can retry after login if needed.
-          console.warn('[signup] profile upsert failed', profileErr.message);
+        const payload: Record<string, string | null> = {};
+        if (trimmedFullName) payload.full_name = trimmedFullName;
+        if (phone.trim()) payload.phone = normalizePhone(phone) || null;
+        if (companyName.trim()) payload.company = companyName.trim();
+
+        if (Object.keys(payload).length > 0) {
+          const { error: profileErr } = await supabase.from('profiles').update(payload).eq('id', u.id);
+          if (profileErr) {
+            console.warn('[signup] profile safe-fields update failed', profileErr.message);
+            if (process.env.NODE_ENV === 'development') {
+              console.warn('[signup] profile update debug', {
+                code: (profileErr as unknown as { code?: string }).code,
+                details: (profileErr as unknown as { details?: string }).details,
+                hint: (profileErr as unknown as { hint?: string }).hint,
+              });
+            }
+          }
         }
       }
 
