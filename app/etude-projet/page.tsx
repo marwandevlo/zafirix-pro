@@ -2,6 +2,8 @@
 import { useState, useEffect, useRef } from 'react';
 import { Send, Bot, User, Download, CheckCircle, BarChart2 } from 'lucide-react';
 import { AppSidebar } from '@/app/components/shell/AppSidebar';
+import { ProductionBlockedSurface } from '@/app/components/safety/ProductionBlockedSurface';
+import { isDemoFeatureBlocked } from '@/app/lib/atlas-runtime-guards';
 
 const fmt = (n: number) => Math.round(n).toString().replace(/\B(?=(\d{3})+(?!\d))/g, ' ');
 
@@ -37,6 +39,13 @@ const questions = [
 ];
 
 export default function EtudeProjetPage() {
+  if (isDemoFeatureBlocked('etude_projet_wizard')) {
+    return <ProductionBlockedSurface title="Etude de projet" featureId="etude_projet_wizard" />;
+  }
+  return <EtudeProjetPageContent />;
+}
+
+function EtudeProjetPageContent() {
   const [messages, setMessages] = useState<Message[]>([
     { role: 'assistant', content: "Bonjour! 👋 Je suis votre expert en création d'entreprise au Maroc.\n\nJe vais créer une étude de faisabilité PROFESSIONNELLE prête à soumettre à une banque, un investisseur ou un programme de soutien (Intelaka, Hassan II...).\n\nRépondez à mes questions et votre dossier sera prêt en quelques minutes!\n\n" + questions[0].q }
   ]);

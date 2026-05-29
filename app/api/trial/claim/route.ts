@@ -6,6 +6,7 @@ import { atlasDataBackend } from '@/app/lib/atlas-data-source';
 import { addDaysYmd, todayYmd } from '@/app/lib/atlas-dates';
 import { sendWelcomeLifecycleEmail } from '@/app/lib/atlas-lifecycle-email';
 import { applyPendingReferralWelcomeOnTrialGrant } from '@/app/lib/atlas-referral-server';
+import { syncProfileEntitlementFromAtlas } from '@/app/lib/atlas-subscription-sync';
 
 const FREE_TRIAL_PLAN_ID = 'free-trial';
 const TRIAL_DAYS = 7;
@@ -290,6 +291,11 @@ export async function POST(request: NextRequest) {
       { ok: false, granted: false, reason: 'service_unavailable' as const, message: 'Impossible d’activer l’essai pour le moment.' },
       { status: 500 },
     );
+  }
+
+  const sync = await syncProfileEntitlementFromAtlas(admin, user.id);
+  if (!sync.ok) {
+    console.warn('[trial/claim] profile_sync', sync.error);
   }
 
   try {

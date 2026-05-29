@@ -1,5 +1,6 @@
 import { cookies } from 'next/headers';
 import { createServerClient } from '@supabase/ssr';
+import { isAtlasOwnerEmail, isJwtAppMetadataAdmin } from '@/app/lib/admin/atlas-admin-access';
 
 export async function getSupabaseServerClient() {
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
@@ -33,9 +34,9 @@ export async function getServerUser() {
   return data.user ?? null;
 }
 
-export function isAdminFromUser(user: { app_metadata?: Record<string, unknown> } | null): boolean {
+/** Sync-only hint (JWT admin or owner email). For full checks including `profiles.role`, use `isAtlasAdminUser`. */
+export function isAdminFromUser(user: { app_metadata?: Record<string, unknown>; email?: string | null } | null): boolean {
   if (!user) return false;
-  const r = String(user.app_metadata?.role ?? '');
-  return r === 'admin' || r === 'owner';
+  return isJwtAppMetadataAdmin(user) || isAtlasOwnerEmail(user.email);
 }
 

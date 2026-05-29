@@ -1,6 +1,6 @@
 /**
- * Feature flag: keep `local` default so production behaviour is unchanged until you
- * run the Supabase migration, enable RLS, and flip this to `supabase`.
+ * Data backend: `local` uses browser localStorage for **non-production** demos only.
+ * `NODE_ENV === 'production'` always uses Supabase (canonical persistence).
  */
 export function atlasDataBackend(): 'local' | 'supabase' {
   // Production must never run in demo/local mode.

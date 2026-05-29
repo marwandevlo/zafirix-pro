@@ -1,10 +1,13 @@
 /**
- * Canonical company shape used across ZAFIRIX PRO (localStorage today, Supabase JSON tomorrow).
+ * Canonical company shape: persisted in Supabase `atlas_companies` columns + `company_json` for extended fields.
  */
 import type { AtlasPaymentTerms } from '@/app/types/atlas-payment-terms';
 
 export type AtlasCompany = {
-  id: number;
+  /** Local demo: number. Supabase: prefer `dbRowId` for row identity; `id` may mirror row UUID or legacy numeric. */
+  id: number | string;
+  /** `atlas_companies.id` when loaded from Supabase (omit for new local-only rows). */
+  dbRowId?: string;
   raisonSociale: string;
   formeJuridique: string;
   if_fiscal: string;

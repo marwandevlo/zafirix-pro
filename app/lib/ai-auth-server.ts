@@ -1,38 +1,46 @@
 import type { NextRequest } from 'next/server';
+import { requireAtlasSupabaseSession } from '@/app/lib/atlas-api-session';
 
 type AuthOk = { ok: true; status: 200; user: { id: string } };
-type AuthErrorCode = 'missing_token' | 'invalid_token' | 'server_not_configured';
-type AuthErr = { ok: false; status: 401 | 500; code: AuthErrorCode };
+type AuthErrorCode = 'missing_token' | 'invalid_token' | 'server_not_configured' | 'ocr_not_configured';
+type AuthErr = { ok: false; status: 401 | 500 | 503; code: AuthErrorCode };
 
-function requireAuth(): boolean {
-  const v = (process.env.ATLAS_AI_REQUIRE_AUTH ?? 'false').toLowerCase();
-  return v === '1' || v === 'true' || v === 'yes';
+/**
+ * Opt-in **only** for local demos. Production must leave this unset/false so `/api/ai`
+ * is not a public cost sink.
+ */
+function allowAnonymousAi(): boolean {
+  const v = (process.env.ATLAS_AI_ALLOW_ANON ?? '').toLowerCase();
+  return v === 'true' || v === '1' || v === 'yes';
+}
+
+function mapSessionError(code: 'missing_session' | 'invalid_token' | 'misconfigured'): AuthErr {
+  if (code === 'misconfigured') return { ok: false, status: 500, code: 'server_not_configured' };
+  if (code === 'invalid_token') return { ok: false, status: 401, code: 'invalid_token' };
+  return { ok: false, status: 401, code: 'missing_token' };
 }
 
 /**
- * Server-side auth gate for `/api/ai`.
+ * Server-side auth for `/api/ai`.
  *
- * Default behavior is permissive (anonymous) to avoid breaking production in projects
- * where Supabase auth isn't wired to the AI route yet.
+ * - Default: **authenticated** users only (Supabase session cookie or `Authorization: Bearer <access_token>`).
+ * - Anonymous: set `ATLAS_AI_ALLOW_ANON=true` (development / isolated demos only).
  *
- * Set `ATLAS_AI_REQUIRE_AUTH=true` to enforce presence of a bearer token.
+ * Legacy `ATLAS_AI_REQUIRE_AUTH` is ignored; auth is required unless `ATLAS_AI_ALLOW_ANON` is explicitly enabled.
  */
 export async function authenticateAiRequest(request: NextRequest): Promise<AuthOk | AuthErr> {
-  if (!process.env.ANTHROPIC_API_KEY) {
-    return { ok: false, status: 500, code: 'server_not_configured' };
+  if (!process.env.ANTHROPIC_API_KEY?.trim()) {
+    return { ok: false, status: 503, code: 'ocr_not_configured' };
   }
 
-  if (!requireAuth()) {
+  if (allowAnonymousAi()) {
     return { ok: true, status: 200, user: { id: 'anon' } };
   }
 
-  const auth = request.headers.get('authorization') ?? '';
-  const token = auth.toLowerCase().startsWith('bearer ') ? auth.slice(7).trim() : '';
-  if (!token) return { ok: false, status: 401, code: 'missing_token' };
+  const session = await requireAtlasSupabaseSession(request);
+  if (!session.ok) {
+    return mapSessionError(session.code);
+  }
 
-  // Minimal validation. If you want full validation, integrate Supabase auth verification here.
-  if (token.length < 10) return { ok: false, status: 401, code: 'invalid_token' };
-
-  return { ok: true, status: 200, user: { id: token.slice(0, 16) } };
+  return { ok: true, status: 200, user: { id: session.userId } };
 }
-

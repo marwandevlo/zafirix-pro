@@ -53,7 +53,8 @@ function currentPath(): string {
 
 /**
  * Fire-and-forget analytics into Supabase `events` (path + metadata stored server-side).
- * Never throws; failures fall back to localStorage when Supabase is off or the request fails.
+ * Never throws. In development, may fall back to a local funnel buffer when Supabase is off or the request fails.
+ * In production, failures do not write to localStorage (no silent “fake” persistence).
  */
 export function trackEvent(eventName: AnalyticsEventName, metadata: Record<string, unknown> = {}): void {
   if (typeof window === 'undefined') return;
@@ -72,6 +73,10 @@ export function trackEvent(eventName: AnalyticsEventName, metadata: Record<strin
   const payload = { event: eventName, anonymousId, path, metadata };
 
   const fallbackLocal = () => {
+    if (process.env.NODE_ENV === 'production') {
+      console.warn('[analytics] Supabase persist unavailable; local funnel buffer disabled in production');
+      return;
+    }
     appendLocalFunnelEvent({
       event_name: eventName,
       anonymous_id: anonymousId || null,

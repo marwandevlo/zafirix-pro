@@ -1,21 +1,58 @@
 'use client';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Upload, FileText, CheckCircle, Clock, Trash2, Sparkles } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { fetchAi } from '../lib/fetch-ai';
 import { addDaysYmd, todayYmd } from '@/app/lib/atlas-dates';
-import { readSupplierInvoicesFromLocalStorage, writeSupplierInvoicesToLocalStorage } from '@/app/lib/atlas-supplier-invoices-repository';
+import {
+  atlasSupplierInvoiceErrorMessage,
+  createSupplierInvoicesFromOcr,
+  listSupplierInvoicesWithMeta,
+  readSupplierInvoicesFromLocalStorage,
+  supplierInvoiceKeysFromList,
+  writeSupplierInvoicesToLocalStorage,
+} from '@/app/lib/atlas-supplier-invoices-repository';
 import type { AtlasSupplierInvoice } from '@/app/types/atlas-supplier-invoice';
 import { normalizePaymentTerms } from '@/app/types/atlas-payment-terms';
-import type { AtlasDocument } from '@/app/types/atlas-document';
-import { getDocuments, searchDocuments } from '@/app/lib/atlas-documents-repository';
+import { isAtlasSupabaseDataEnabled } from '@/app/lib/atlas-data-source';
+import type { AtlasDocument, AtlasOcrDetectedInvoice, AtlasOcrError, AtlasOcrExtraction } from '@/app/types/atlas-document';
+import {
+  creatableOcrInvoices,
+  sourcePageForDetectedInvoice,
+  supplierInvoiceDedupeKey,
+} from '@/app/lib/atlas-ocr-invoices-detect';
+import {
+  atlasDocumentErrorMessage,
+  deleteAtlasDocument,
+  getDocuments,
+  listAtlasOcrDocuments,
+  ocrExtractionFromDocument,
+  ocrInvoicesFromDocument,
+  ocrProcessedPageCountFromDocument,
+  ocrUiStatus,
+  saveAtlasDocumentOcrResult,
+  searchDocuments,
+  updateAtlasDocumentProcessingStatus,
+} from '@/app/lib/atlas-documents-repository';
 import { createAtlasLink } from '@/app/lib/atlas-links-repository';
 import { listAtlasCompanies } from '@/app/lib/atlas-companies-repository';
 import { listAtlasInvoices } from '@/app/lib/atlas-invoices-repository';
+import { getActiveCompanyDbRowId } from '@/app/lib/atlas-active-company';
+import { inferDocumentMimeType } from '@/app/lib/atlas-document-storage';
+import {
+  formatOcrDevDiagnostics,
+  formatOcrUiMessage,
+  isPdfMimeType,
+  ocrErrorFromAiBody,
+  OCR_PROVIDER,
+  parseOcrJsonResponse,
+  type OcrAiErrorBody,
+} from '@/app/lib/atlas-ocr';
 import { AppSidebar } from '@/app/components/shell/AppSidebar';
 import { EmptyStateCta } from '@/app/components/ui/EmptyStateCta';
+import { BetaSurfaceBadge } from '@/app/components/safety/BetaSurfaceBadge';
 
-type Document = {
+type LocalOcrDocument = {
   id: number;
   nom: string;
   statut: 'analysé' | 'en cours' | 'erreur';
@@ -28,10 +65,177 @@ type Document = {
   taux_tva?: number;
 };
 
+type OcrDisplayRow = {
+  key: string;
+  nom: string;
+  statut: 'analysé' | 'en cours' | 'erreur';
+  numero_facture?: string;
+  fournisseur?: string;
+  montant_ht?: number;
+  montant_tva?: number;
+  montant_ttc?: number;
+  localDoc?: LocalOcrDocument;
+  supabaseId?: string;
+  detectedInvoices?: AtlasOcrDetectedInvoice[];
+  creatableInvoiceCount?: number;
+  supplierInvoicesCreatedCount?: number;
+  hasAllSupplierInvoices?: boolean;
+};
+
+type UploadErrorBody = {
+  error?: string;
+  step?: string;
+  message?: string;
+  code?: string;
+  userIdPresent?: boolean;
+  companyId?: string;
+  mimeType?: string;
+  fileSize?: number;
+  document?: { id: string; mimeType?: string; sizeBytes?: number };
+};
+
+async function persistOcrFailure(
+  documentId: string,
+  ocrError: AtlasOcrError,
+  extraction?: AtlasOcrExtraction,
+): Promise<{ ok: boolean; error?: string }> {
+  const res = await saveAtlasDocumentOcrResult(documentId, {
+    extraction,
+    processingStatus: 'failed',
+    ocrError,
+  });
+  if (!res.ok && process.env.NODE_ENV === 'development') {
+    console.debug('[documents/ocr] db_update_failed', { documentId, dbError: res.error, ocrError });
+  }
+  return { ok: res.ok, error: res.ok ? undefined : res.error };
+}
+
+function formatDocumentsUploadError(status: number, body: UploadErrorBody): string {
+  const base = atlasDocumentErrorMessage(body.error ?? 'upload_failed');
+  if (process.env.NODE_ENV === 'development') {
+    const parts = [
+      base,
+      body.step ? `step=${body.step}` : '',
+      body.message ? `message=${body.message}` : '',
+      body.code ? `code=${body.code}` : '',
+      body.companyId ? `companyId=${body.companyId}` : '',
+      body.mimeType ? `mime=${body.mimeType}` : '',
+      body.fileSize != null ? `size=${body.fileSize}` : '',
+      body.userIdPresent != null ? `userId=${body.userIdPresent ? 'yes' : 'no'}` : '',
+      `http=${status}`,
+    ].filter(Boolean);
+    console.debug('[documents/upload]', body);
+    return parts.join(' · ');
+  }
+  return base;
+}
+
+type OcrProgressPhase = 'idle' | 'uploading' | 'rendering' | 'analyzing' | 'saving';
+
+type OcrProgressState = {
+  phase: OcrProgressPhase;
+  page?: number;
+  totalPages?: number;
+  isPdf?: boolean;
+  documentId?: string;
+};
+
+const OCR_UPLOAD_TIMEOUT_MS = 90_000;
+const OCR_PDF_TIMEOUT_MS = 190_000;
+
+async function fetchWithTimeout(url: string, init: RequestInit, timeoutMs: number): Promise<Response> {
+  const controller = new AbortController();
+  const timer = window.setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(url, { ...init, signal: controller.signal });
+  } catch (err) {
+    if (err instanceof DOMException && err.name === 'AbortError') {
+      throw new Error('ocr_timeout');
+    }
+    throw err;
+  } finally {
+    window.clearTimeout(timer);
+  }
+}
+
+function ocrProgressLabel(progress: OcrProgressState): string {
+  switch (progress.phase) {
+    case 'uploading':
+      return 'Envoi du fichier…';
+    case 'rendering':
+      return progress.page && progress.totalPages
+        ? `Rendu PDF · page ${progress.page}/${progress.totalPages}…`
+        : 'Rendu du PDF…';
+    case 'analyzing':
+      if (progress.page && progress.totalPages) {
+        return `Analyse page ${progress.page}/${progress.totalPages}…`;
+      }
+      return progress.isPdf
+        ? 'Analyse en cours, cela peut prendre quelques instants.'
+        : 'Analyse de l’image…';
+    case 'saving':
+      return 'Enregistrement des résultats…';
+    default:
+      return '';
+  }
+}
+
+const SUPPLIER_INVOICES_MIGRATION_FILES = [
+  'supabase/migrations/ensure_atlas_supplier_invoices_baseline.sql',
+  'supabase/migrations/20260528160000_atlas_supplier_invoices_sprint_e.sql',
+  'supabase/migrations/20260528170000_atlas_supplier_invoices_multi_invoice.sql',
+] as const;
+
+const OCR_PROGRESS_POLL_MS = 2000;
+
+type OcrProgressApiBody = {
+  ok?: boolean;
+  processingStatus?: string;
+  progressPhase?: 'rendering' | 'analyzing';
+  progressPage?: number;
+  progressTotal?: number;
+  code?: string;
+};
+
+function isAuthLockErrorMessage(message: string): boolean {
+  return /auth-token|stole it|lock:sb-/i.test(message);
+}
+
+async function fetchOcrProgressFromApi(
+  documentId: string,
+  signal: AbortSignal,
+): Promise<OcrProgressApiBody | null> {
+  try {
+    const res = await fetch(`/api/documents/${documentId}/ocr/progress`, {
+      credentials: 'include',
+      signal,
+    });
+    if (!res.ok) return null;
+    return (await res.json().catch(() => null)) as OcrProgressApiBody | null;
+  } catch (err) {
+    if (err instanceof DOMException && err.name === 'AbortError') return null;
+    const message = err instanceof Error ? err.message : '';
+    if (isAuthLockErrorMessage(message)) return null;
+    return null;
+  }
+}
+
 export default function DocumentsPage() {
   const router = useRouter();
   const fileRef = useRef<HTMLInputElement>(null);
-  const [documents, setDocuments] = useState<Document[]>([]);
+  const ocrPollRef = useRef<number | null>(null);
+  const ocrPollAbortRef = useRef<AbortController | null>(null);
+  const ocrPollInFlightRef = useRef(false);
+  const [localDocuments, setLocalDocuments] = useState<LocalOcrDocument[]>([]);
+  const [ocrDocuments, setOcrDocuments] = useState<AtlasDocument[]>([]);
+  const [activeCompanyId, setActiveCompanyId] = useState<string | null>(null);
+  const [ocrError, setOcrError] = useState('');
+  const [ocrPageInfo, setOcrPageInfo] = useState('');
+  const [ocrLoading, setOcrLoading] = useState(false);
+  const [supplierInvoiceKeys, setSupplierInvoiceKeys] = useState<Set<string>>(new Set());
+  const [creatingSupplierInvoiceId, setCreatingSupplierInvoiceId] = useState<string | null>(null);
+  const [supplierTableMissing, setSupplierTableMissing] = useState(false);
+  const [ocrProgress, setOcrProgress] = useState<OcrProgressState>({ phase: 'idle' });
   const [dragging, setDragging] = useState(false);
   const [analyzing, setAnalyzing] = useState(false);
   const [tab, setTab] = useState<'ocr' | 'library'>('ocr');
@@ -47,13 +251,103 @@ export default function DocumentsPage() {
   const [companies, setCompanies] = useState<{ id: string; name: string }[]>([]);
   const [invoices, setInvoices] = useState<{ id: string; title: string }[]>([]);
 
+  const supabaseMode = isAtlasSupabaseDataEnabled();
+
+  const stopOcrPoll = useCallback(() => {
+    if (ocrPollRef.current) {
+      clearInterval(ocrPollRef.current);
+      ocrPollRef.current = null;
+    }
+    ocrPollAbortRef.current?.abort();
+    ocrPollAbortRef.current = null;
+    ocrPollInFlightRef.current = false;
+  }, []);
+
+  useEffect(() => () => stopOcrPoll(), [stopOcrPoll]);
+
+  const startOcrProgressPoll = useCallback(
+    (documentId: string) => {
+      stopOcrPoll();
+
+      const tick = async () => {
+        if (ocrPollInFlightRef.current) return;
+
+        ocrPollInFlightRef.current = true;
+        ocrPollAbortRef.current?.abort();
+        const controller = new AbortController();
+        ocrPollAbortRef.current = controller;
+
+        try {
+          const live = await fetchOcrProgressFromApi(documentId, controller.signal);
+          if (!live?.ok) return;
+
+          if (live.processingStatus === 'processed' || live.processingStatus === 'failed') {
+            stopOcrPoll();
+            return;
+          }
+
+          if (live.progressPhase) {
+            setOcrProgress((prev) => ({
+              ...prev,
+              documentId,
+              phase: live.progressPhase === 'rendering' ? 'rendering' : 'analyzing',
+              page: live.progressPage,
+              totalPages: live.progressTotal,
+              isPdf: true,
+            }));
+          }
+        } finally {
+          ocrPollInFlightRef.current = false;
+        }
+      };
+
+      void tick();
+      ocrPollRef.current = window.setInterval(() => void tick(), OCR_PROGRESS_POLL_MS);
+    },
+    [stopOcrPoll],
+  );
+
+  const refreshOcr = useCallback(async () => {
+    setOcrError('');
+    if (!isAtlasSupabaseDataEnabled()) return;
+    setOcrLoading(true);
+    try {
+      const companyId = await getActiveCompanyDbRowId();
+      setActiveCompanyId(companyId);
+      if (!companyId) {
+        setOcrDocuments([]);
+        setOcrError(atlasDocumentErrorMessage('company_required'));
+        return;
+      }
+      const [list, supplierResult] = await Promise.all([
+        listAtlasOcrDocuments(companyId),
+        listSupplierInvoicesWithMeta(companyId),
+      ]);
+      setOcrDocuments(list);
+      setSupplierTableMissing(supplierResult.tableMissing);
+      setSupplierInvoiceKeys(supplierInvoiceKeysFromList(supplierResult.invoices));
+    } finally {
+      setOcrLoading(false);
+    }
+  }, []);
+
   const refreshLibrary = async () => {
-    const [docs, cs, invs] = await Promise.all([getDocuments(), listAtlasCompanies(), listAtlasInvoices()]);
+    const companyId = isAtlasSupabaseDataEnabled() ? await getActiveCompanyDbRowId() : undefined;
+    const [docs, cs, invs] = await Promise.all([
+      getDocuments(companyId ? { companyId } : undefined),
+      listAtlasCompanies(),
+      listAtlasInvoices(),
+    ]);
     setLibrary(docs);
-    setCompanies(cs.map((c) => ({ id: String(c.id), name: c.raisonSociale })));
+    setCompanies(cs.map((c) => ({ id: String(c.dbRowId ?? c.id), name: c.raisonSociale })));
     setInvoices(invs.map((i) => ({ id: String(i.id), title: `${i.number} · ${i.clientName}` })));
     if (!selectedId && docs[0]?.id) setSelectedId(String(docs[0].id));
   };
+
+  useEffect(() => {
+    if (tab !== 'ocr') return;
+    if (supabaseMode) void refreshOcr();
+  }, [tab, refreshOcr, supabaseMode]);
 
   useEffect(() => {
     if (tab !== 'library') return;
@@ -64,12 +358,16 @@ export default function DocumentsPage() {
   useEffect(() => {
     if (tab !== 'library') return;
     const t = window.setTimeout(async () => {
-      const docs = await searchDocuments(libraryQuery, { type: libraryType || undefined });
+      const companyId = supabaseMode ? await getActiveCompanyDbRowId() : undefined;
+      const docs = await searchDocuments(libraryQuery, {
+        type: libraryType || undefined,
+        companyId: companyId ?? undefined,
+      });
       setLibrary(docs);
       if (selectedId && !docs.some((d) => String(d.id) === selectedId)) setSelectedId(docs[0]?.id ?? '');
     }, 150);
     return () => window.clearTimeout(t);
-  }, [libraryQuery, libraryType, selectedId, tab]);
+  }, [libraryQuery, libraryType, selectedId, tab, supabaseMode]);
 
   const selectedDoc = useMemo(() => library.find((d) => String(d.id) === String(selectedId)) ?? null, [library, selectedId]);
   const distinctTypes = useMemo(() => {
@@ -78,7 +376,63 @@ export default function DocumentsPage() {
     return Array.from(s).sort();
   }, [library]);
 
-  const createSupplierInvoice = (doc: Document) => {
+  const ocrRows = useMemo<OcrDisplayRow[]>(() => {
+    if (supabaseMode) {
+      return ocrDocuments.map((doc) => {
+        const extraction = ocrExtractionFromDocument(doc);
+        const allInvoices = ocrInvoicesFromDocument(doc);
+        const creatable = creatableOcrInvoices(allInvoices);
+        const docId = String(doc.id);
+        const createdCount = creatable.filter((inv) =>
+          supplierInvoiceKeys.has(
+            supplierInvoiceDedupeKey(docId, sourcePageForDetectedInvoice(inv), inv.invoice_number),
+          ),
+        ).length;
+
+        return {
+          key: docId,
+          nom: doc.filename ?? doc.title,
+          statut: ocrUiStatus(doc),
+          numero_facture: extraction?.numero_facture,
+          fournisseur: extraction?.fournisseur,
+          montant_ht: extraction?.montant_ht,
+          montant_tva: extraction?.montant_tva,
+          montant_ttc: extraction?.montant_ttc,
+          supabaseId: docId,
+          detectedInvoices: allInvoices,
+          creatableInvoiceCount: creatable.length,
+          supplierInvoicesCreatedCount: createdCount,
+          hasAllSupplierInvoices: creatable.length > 0 && createdCount >= creatable.length,
+        };
+      });
+    }
+    return localDocuments.map((d) => ({
+      key: String(d.id),
+      nom: d.nom,
+      statut: d.statut,
+      numero_facture: d.numero_facture,
+      fournisseur: d.fournisseur,
+      montant_ht: d.montant_ht,
+      montant_tva: d.montant_tva,
+      montant_ttc: d.montant_ttc,
+      localDoc: d,
+    }));
+  }, [supabaseMode, ocrDocuments, localDocuments, supplierInvoiceKeys]);
+
+  const ocrPageSummary = useMemo(() => {
+    if (ocrPageInfo) return ocrPageInfo;
+    if (!supabaseMode) return '';
+    const latestProcessed = ocrDocuments.find((d) => d.processingStatus === 'processed');
+    if (!latestProcessed) return '';
+    const count = creatableOcrInvoices(ocrInvoicesFromDocument(latestProcessed)).length;
+    if (count > 1) return `${count} factures détectées`;
+    const pages = ocrProcessedPageCountFromDocument(latestProcessed);
+    if (pages && pages > 1) return `${pages} page(s) traitée(s) (PDF)`;
+    return '';
+  }, [supabaseMode, ocrPageInfo, ocrDocuments]);
+
+  const createSupplierInvoice = (doc: LocalOcrDocument) => {
+    if (supabaseMode) return;
     if (!doc.fournisseur || !doc.montant_ttc) return;
     const issueDate = doc.date || todayYmd();
     const paymentTerms = normalizePaymentTerms({ kind: 'preset', days: 60 });
@@ -102,18 +456,46 @@ export default function DocumentsPage() {
     const existing = readSupplierInvoicesFromLocalStorage();
     const updated = [...existing, next];
     writeSupplierInvoicesToLocalStorage(updated);
-    router.push('/clients');
+    router.push('/comptabilite');
   };
 
-  const analyzeImage = async (file: File) => {
+  const createSupplierInvoiceSupabase = async (documentId: string) => {
+    setCreatingSupplierInvoiceId(documentId);
+    setOcrError('');
+    try {
+      const result = await createSupplierInvoicesFromOcr(documentId);
+      if (!result.ok) {
+        setOcrError(atlasSupplierInvoiceErrorMessage(result.error));
+        return;
+      }
+      await refreshOcr();
+      if (result.created >= 1) {
+        router.push('/comptabilite');
+        return;
+      }
+      if (result.created === 0 && result.alreadyExists > 0) {
+        setOcrPageInfo(`${result.alreadyExists} facture(s) fournisseur déjà créée(s).`);
+      } else if (result.created > 1) {
+        setOcrPageInfo(`${result.created} factures fournisseur créées.`);
+      } else if (result.created === 1) {
+        setOcrPageInfo('Facture fournisseur créée.');
+      } else if (result.skipped > 0) {
+        setOcrPageInfo(`${result.skipped} facture(s) n’ont pas pu être créées.`);
+      }
+    } finally {
+      setCreatingSupplierInvoiceId(null);
+    }
+  };
+
+  const analyzeImageLocal = async (file: File) => {
     setAnalyzing(true);
-    const newDoc: Document = {
+    const newDoc: LocalOcrDocument = {
       id: Date.now(),
       nom: file.name,
       statut: 'en cours',
       date: new Date().toISOString().split('T')[0],
     };
-    setDocuments(prev => [...prev, newDoc]);
+    setLocalDocuments((prev) => [...prev, newDoc]);
 
     try {
       const base64 = await new Promise<string>((resolve) => {
@@ -126,33 +508,286 @@ export default function DocumentsPage() {
       });
 
       const response = await fetchAi({ type: 'ocr', imageBase64: base64 });
-
       const data = await response.json().catch(() => ({}));
       if (!response.ok) {
-        setDocuments(prev => prev.map(d => d.id === newDoc.id ? { ...d, statut: 'erreur' } : d));
-        setAnalyzing(false);
+        setLocalDocuments((prev) => prev.map((d) => (d.id === newDoc.id ? { ...d, statut: 'erreur' } : d)));
         return;
       }
-      
+
       try {
-        const parsed = JSON.parse(data.response);
-        setDocuments(prev => prev.map(d => d.id === newDoc.id ? {
-          ...d,
-          statut: 'analysé',
-          numero_facture: parsed.numero_facture,
-          fournisseur: parsed.fournisseur,
-          montant_ht: parsed.montant_ht,
-          montant_tva: parsed.montant_tva,
-          montant_ttc: parsed.montant_ttc,
-          taux_tva: parsed.taux_tva,
-        } : d));
+        const parsed = JSON.parse(data.response) as AtlasOcrExtraction;
+        setLocalDocuments((prev) =>
+          prev.map((d) =>
+            d.id === newDoc.id
+              ? {
+                  ...d,
+                  statut: 'analysé',
+                  numero_facture: parsed.numero_facture,
+                  fournisseur: parsed.fournisseur,
+                  montant_ht: parsed.montant_ht,
+                  montant_tva: parsed.montant_tva,
+                  montant_ttc: parsed.montant_ttc,
+                  taux_tva: parsed.taux_tva,
+                }
+              : d,
+          ),
+        );
       } catch {
-        setDocuments(prev => prev.map(d => d.id === newDoc.id ? { ...d, statut: 'erreur' } : d));
+        setLocalDocuments((prev) => prev.map((d) => (d.id === newDoc.id ? { ...d, statut: 'erreur' } : d)));
       }
     } catch {
-      setDocuments(prev => prev.map(d => d.id === newDoc.id ? { ...d, statut: 'erreur' } : d));
+      setLocalDocuments((prev) => prev.map((d) => (d.id === newDoc.id ? { ...d, statut: 'erreur' } : d)));
+    } finally {
+      setAnalyzing(false);
     }
-    setAnalyzing(false);
+  };
+
+  const analyzeImageSupabase = async (file: File) => {
+    const mimeTypeGuess = inferDocumentMimeType(file);
+    const isPdf = isPdfMimeType(mimeTypeGuess);
+    setAnalyzing(true);
+    setOcrError('');
+    setOcrPageInfo('');
+    setOcrProgress({ phase: 'uploading', isPdf });
+    stopOcrPoll();
+    try {
+      const companyId = activeCompanyId ?? (await getActiveCompanyDbRowId());
+      if (!companyId) {
+        setOcrError(atlasDocumentErrorMessage('company_required'));
+        return;
+      }
+
+      const form = new FormData();
+      form.append('file', file);
+      form.append('companyId', companyId);
+
+      const uploadRes = await fetchWithTimeout('/api/documents/upload', { method: 'POST', body: form }, OCR_UPLOAD_TIMEOUT_MS);
+      const uploadBody = (await uploadRes.json().catch(() => ({}))) as UploadErrorBody;
+
+      if (!uploadRes.ok || !uploadBody.document?.id) {
+        setOcrError(formatDocumentsUploadError(uploadRes.status, uploadBody));
+        return;
+      }
+
+      const documentId = uploadBody.document.id;
+      const mimeType = uploadBody.document.mimeType ?? mimeTypeGuess;
+      const fileSize = uploadBody.document.sizeBytes ?? file.size;
+
+      setOcrProgress({ phase: 'saving', documentId, isPdf });
+
+      const processing = await updateAtlasDocumentProcessingStatus(documentId, 'processing');
+      if (!processing.ok) {
+        const ocrError: AtlasOcrError = {
+          step: 'db_update',
+          code: processing.error,
+          message: processing.error,
+        };
+        await persistOcrFailure(documentId, ocrError);
+        setOcrError(formatOcrDevDiagnostics({
+          documentId,
+          mimeType,
+          fileSize,
+          step: 'db_update',
+          code: processing.error,
+          message: processing.error,
+          provider: OCR_PROVIDER,
+        }));
+        await refreshOcr();
+        return;
+      }
+      await refreshOcr();
+
+      if (isPdfMimeType(mimeType)) {
+        setOcrProgress({ phase: 'rendering', documentId, isPdf: true });
+        startOcrProgressPoll(documentId);
+
+        let ocrRes: Response;
+        try {
+          ocrRes = await fetchWithTimeout(
+            `/api/documents/${documentId}/ocr`,
+            { method: 'POST', credentials: 'include' },
+            OCR_PDF_TIMEOUT_MS,
+          );
+        } catch (err) {
+          const code = err instanceof Error && err.message === 'ocr_timeout' ? 'ocr_timeout' : 'ocr_failed';
+          setOcrError(formatOcrUiMessage(code));
+          await refreshOcr();
+          return;
+        } finally {
+          stopOcrPoll();
+        }
+
+        setOcrProgress({ phase: 'saving', documentId, isPdf: true });
+
+        const ocrBody = (await ocrRes.json().catch(() => ({}))) as OcrAiErrorBody & {
+          ok?: boolean;
+          processedPageCount?: number;
+          successPageCount?: number;
+          partialFailure?: boolean;
+          invoiceCount?: number;
+        };
+
+        if (!ocrRes.ok || !ocrBody.ok) {
+          if (process.env.NODE_ENV === 'development') {
+            console.debug('[documents/ocr] pdf_failed', {
+              documentId,
+              mimeType,
+              fileSize,
+              httpStatus: ocrRes.status,
+              ...ocrBody,
+              provider: OCR_PROVIDER,
+            });
+          }
+          setOcrError(formatOcrDevDiagnostics({
+            documentId,
+            mimeType,
+            fileSize,
+            step: ocrBody.step ?? 'pdf_ocr',
+            code: ocrBody.code ?? 'ocr_failed',
+            message: ocrBody.message ?? ocrBody.error,
+            provider: OCR_PROVIDER,
+            httpStatus: ocrRes.status,
+          }));
+        } else {
+          const processed = ocrBody.processedPageCount ?? ocrBody.successPageCount ?? 0;
+          const success = ocrBody.successPageCount ?? processed;
+          const invoiceCount = ocrBody.invoiceCount ?? 0;
+          if (invoiceCount > 1) {
+            setOcrPageInfo(`${invoiceCount} factures détectées`);
+          } else if (processed > 0) {
+            setOcrPageInfo(
+              ocrBody.partialFailure
+                ? `${success}/${processed} page(s) analysée(s) (partiel)`
+                : `${processed} page(s) analysée(s)`,
+            );
+          }
+        }
+
+        await refreshOcr();
+        return;
+      }
+
+      setOcrProgress({ phase: 'analyzing', documentId, isPdf: false });
+
+      const base64 = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => {
+          const result = reader.result as string;
+          resolve(result.split(',')[1]);
+        };
+        reader.onerror = () => reject(new Error('read_failed'));
+        reader.readAsDataURL(file);
+      });
+
+      const response = await fetchAi({ type: 'ocr', imageBase64: base64, mimeType });
+      const data = (await response.json().catch(() => ({}))) as OcrAiErrorBody & { response?: string };
+
+      if (!response.ok) {
+        const ocrError = ocrErrorFromAiBody(data, data.step ?? 'ai_provider');
+        await persistOcrFailure(documentId, ocrError);
+        if (process.env.NODE_ENV === 'development') {
+          console.debug('[documents/ocr] ai_failed', {
+            documentId,
+            mimeType,
+            fileSize,
+            httpStatus: response.status,
+            ...ocrError,
+            provider: OCR_PROVIDER,
+          });
+        }
+        setOcrError(formatOcrDevDiagnostics({
+          documentId,
+          mimeType,
+          fileSize,
+          step: ocrError.step,
+          code: ocrError.code,
+          message: ocrError.message,
+          provider: OCR_PROVIDER,
+          httpStatus: response.status,
+        }));
+        await refreshOcr();
+        return;
+      }
+
+      setOcrProgress({ phase: 'saving', documentId, isPdf: false });
+
+      try {
+        const parsed = parseOcrJsonResponse(String(data.response ?? ''));
+        const saveRes = await saveAtlasDocumentOcrResult(documentId, {
+          extraction: parsed,
+          processingStatus: 'processed',
+          extractedText: JSON.stringify(parsed, null, 2),
+        });
+        if (!saveRes.ok) {
+          const ocrError: AtlasOcrError = {
+            step: 'db_update',
+            code: 'db_update_failed',
+            message: saveRes.error,
+          };
+          await persistOcrFailure(documentId, ocrError, parsed);
+          setOcrError(formatOcrDevDiagnostics({
+            documentId,
+            mimeType,
+            fileSize,
+            step: ocrError.step,
+            code: ocrError.code,
+            message: ocrError.message,
+            provider: OCR_PROVIDER,
+          }));
+        }
+      } catch (parseErr) {
+        const message = parseErr instanceof Error ? parseErr.message : 'json_parse_failed';
+        const ocrError: AtlasOcrError = {
+          step: 'json_parse',
+          code: 'json_parse_failed',
+          message,
+        };
+        await persistOcrFailure(documentId, ocrError, { description: String(data.response ?? '').slice(0, 500) });
+        setOcrError(formatOcrDevDiagnostics({
+          documentId,
+          mimeType,
+          fileSize,
+          step: ocrError.step,
+          code: ocrError.code,
+          message: ocrError.message,
+          provider: OCR_PROVIDER,
+        }));
+      }
+
+      await refreshOcr();
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'ocr_failed';
+      const code = message === 'ocr_timeout' ? 'ocr_timeout' : 'ocr_failed';
+      if (process.env.NODE_ENV === 'development') {
+        console.debug('[documents/ocr] unexpected', err);
+      }
+      setOcrError(formatOcrUiMessage(code, message));
+      await refreshOcr();
+    } finally {
+      stopOcrPoll();
+      setAnalyzing(false);
+      setOcrProgress({ phase: 'idle' });
+    }
+  };
+
+  const analyzeImage = async (file: File) => {
+    if (supabaseMode) await analyzeImageSupabase(file);
+    else await analyzeImageLocal(file);
+  };
+
+  const removeOcrRow = async (row: OcrDisplayRow) => {
+    if (supabaseMode && row.supabaseId) {
+      const res = await deleteAtlasDocument(row.supabaseId);
+      if (!res.ok) {
+        setOcrError(atlasDocumentErrorMessage(res.error));
+        return;
+      }
+      await refreshOcr();
+      return;
+    }
+    if (row.localDoc) {
+      setLocalDocuments((prev) => prev.filter((d) => d.id !== row.localDoc!.id));
+    }
   };
 
   const handleFile = (file: File) => {
@@ -196,6 +831,10 @@ export default function DocumentsPage() {
             </div>
           </div>
         </header>
+
+        <div className="shrink-0 px-8 pt-3">
+          <BetaSurfaceBadge label="Bêta · OCR & extraction IA" />
+        </div>
 
         <div className="flex-1 overflow-y-auto px-8 py-6 space-y-6">
           {tab === 'library' && (
@@ -335,35 +974,76 @@ export default function DocumentsPage() {
 
           {tab === 'ocr' && (
             <>
+            {supplierTableMissing && supabaseMode && (
+              <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-950">
+                <p className="font-medium">Table factures fournisseur absente</p>
+                <p className="text-xs mt-1">
+                  Exécutez dans Supabase SQL Editor (dans l’ordre) :
+                </p>
+                <ul className="text-xs mt-2 list-disc pl-5 space-y-1 font-mono">
+                  {SUPPLIER_INVOICES_MIGRATION_FILES.map((f) => (
+                    <li key={f}>{f}</li>
+                  ))}
+                </ul>
+              </div>
+            )}
+            {ocrError && (
+              <div className="rounded-xl border border-red-100 bg-red-50 px-4 py-3 text-sm text-red-700">
+                {ocrError}
+              </div>
+            )}
+            {analyzing && ocrProgress.phase !== 'idle' && (
+              <div className="rounded-xl border border-rose-100 bg-rose-50 px-4 py-3 text-sm text-rose-900 flex items-start gap-3">
+                <div className="w-5 h-5 mt-0.5 border-2 border-rose-500 border-t-transparent rounded-full animate-spin shrink-0" />
+                <div>
+                  <p className="font-medium">{ocrProgressLabel(ocrProgress)}</p>
+                  {ocrProgress.isPdf && ocrProgress.phase === 'analyzing' && !ocrProgress.page && (
+                    <p className="text-xs text-rose-700 mt-1">
+                      Analyse en cours, cela peut prendre quelques instants.
+                    </p>
+                  )}
+                  <p className="text-xs text-rose-600 mt-1">Vous pouvez consulter la liste ci-dessous pendant l’analyse.</p>
+                </div>
+              </div>
+            )}
+            {ocrLoading && supabaseMode && (
+              <p className="text-xs text-gray-400">Chargement des documents…</p>
+            )}
             <div className="grid grid-cols-3 gap-4">
             <div className="bg-white rounded-xl p-5 shadow-sm border border-gray-100">
               <p className="text-xs text-gray-400">Documents analysés</p>
-              <p className="text-2xl font-bold text-green-600 mt-1">{documents.filter(d => d.statut === 'analysé').length}</p>
+              <p className="text-2xl font-bold text-green-600 mt-1">{ocrRows.filter(d => d.statut === 'analysé').length}</p>
             </div>
             <div className="bg-white rounded-xl p-5 shadow-sm border border-gray-100">
               <p className="text-xs text-gray-400">En cours</p>
-              <p className="text-2xl font-bold text-amber-600 mt-1">{documents.filter(d => d.statut === 'en cours').length}</p>
+              <p className="text-2xl font-bold text-amber-600 mt-1">{ocrRows.filter(d => d.statut === 'en cours').length}</p>
             </div>
             <div className="bg-white rounded-xl p-5 shadow-sm border border-gray-100">
               <p className="text-xs text-gray-400">Total</p>
-              <p className="text-2xl font-bold text-gray-800 mt-1">{documents.length}</p>
+              <p className="text-2xl font-bold text-gray-800 mt-1">{ocrRows.length}</p>
             </div>
             </div>
+            {ocrPageSummary && (
+              <p className="text-xs text-gray-500">{ocrPageSummary}</p>
+            )}
 
           <input ref={fileRef} type="file" accept="image/*,.pdf" className="hidden" onChange={e => e.target.files?.[0] && handleFile(e.target.files[0])} />
 
           <div
-            onDragOver={e => { e.preventDefault(); setDragging(true); }}
+            onDragOver={e => { e.preventDefault(); if (!analyzing) setDragging(true); }}
             onDragLeave={() => setDragging(false)}
-            onDrop={e => { e.preventDefault(); setDragging(false); const file = e.dataTransfer.files[0]; if (file) handleFile(file); }}
-            onClick={() => fileRef.current?.click()}
-            className={`border-2 border-dashed rounded-xl p-10 text-center cursor-pointer transition-all ${dragging ? 'border-rose-400 bg-rose-50' : 'border-gray-200 hover:border-rose-300 hover:bg-rose-50'}`}
+            onDrop={e => { e.preventDefault(); setDragging(false); if (analyzing) return; const file = e.dataTransfer.files[0]; if (file) handleFile(file); }}
+            onClick={() => { if (!analyzing) fileRef.current?.click(); }}
+            className={`border-2 border-dashed rounded-xl p-10 text-center transition-all ${
+              analyzing
+                ? 'border-rose-200 bg-rose-50/50 cursor-wait opacity-90'
+                : `cursor-pointer ${dragging ? 'border-rose-400 bg-rose-50' : 'border-gray-200 hover:border-rose-300 hover:bg-rose-50'}`
+            }`}
           >
             {analyzing ? (
-              <div className="flex flex-col items-center gap-3">
-                <div className="w-12 h-12 border-2 border-rose-500 border-t-transparent rounded-full animate-spin"></div>
-                <p className="text-rose-600 font-medium">Analyse de votre facture en cours…</p>
-                <p className="text-sm text-gray-400">Extraction des données en cours</p>
+              <div className="flex flex-col items-center gap-2 pointer-events-none">
+                <p className="text-rose-600 font-medium text-sm">Analyse en cours…</p>
+                <p className="text-xs text-gray-500">{ocrProgressLabel(ocrProgress) || 'Préparation…'}</p>
               </div>
             ) : (
               <div className="flex flex-col items-center gap-3">
@@ -377,7 +1057,7 @@ export default function DocumentsPage() {
             )}
           </div>
 
-          {documents.length > 0 && (
+          {ocrRows.length > 0 && (
             <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
               <table className="w-full text-sm">
                 <thead>
@@ -393,19 +1073,33 @@ export default function DocumentsPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {documents.map(d => (
-                    <tr key={d.id} className="border-b border-gray-50 hover:bg-gray-50">
+                  {ocrRows.map(d => {
+                    const creatable = d.detectedInvoices
+                      ? creatableOcrInvoices(d.detectedInvoices)
+                      : [];
+                    const showInvoiceRows = supabaseMode && creatable.length > 1;
+
+                    return (
+                    <Fragment key={d.key}>
+                    <tr className="border-b border-gray-50 hover:bg-gray-50">
                       <td className="px-4 py-3">
-                        <div className="flex items-center gap-2">
-                          <FileText size={14} className="text-gray-400" />
-                          <span className="text-gray-700 text-xs">{d.nom.substring(0, 20)}</span>
+                        <div className="flex flex-col gap-0.5">
+                          <div className="flex items-center gap-2">
+                            <FileText size={14} className="text-gray-400" />
+                            <span className="text-gray-700 text-xs">{d.nom.substring(0, 20)}</span>
+                          </div>
+                          {supabaseMode && (d.creatableInvoiceCount ?? 0) > 1 && (
+                            <span className="text-[10px] text-emerald-700 font-medium pl-5">
+                              {d.creatableInvoiceCount} factures détectées
+                            </span>
+                          )}
                         </div>
                       </td>
-                      <td className="px-4 py-3 text-gray-600 text-xs">{d.numero_facture || '-'}</td>
-                      <td className="px-4 py-3 text-gray-600 text-xs">{d.fournisseur || '-'}</td>
-                      <td className="px-4 py-3 text-right text-gray-700 text-xs">{d.montant_ht ? d.montant_ht.toLocaleString() + ' MAD' : '-'}</td>
-                      <td className="px-4 py-3 text-right text-blue-600 text-xs">{d.montant_tva ? d.montant_tva.toLocaleString() + ' MAD' : '-'}</td>
-                      <td className="px-4 py-3 text-right font-medium text-xs">{d.montant_ttc ? d.montant_ttc.toLocaleString() + ' MAD' : '-'}</td>
+                      <td className="px-4 py-3 text-gray-600 text-xs">{showInvoiceRows ? '—' : (d.numero_facture || '-')}</td>
+                      <td className="px-4 py-3 text-gray-600 text-xs">{showInvoiceRows ? '—' : (d.fournisseur || '-')}</td>
+                      <td className="px-4 py-3 text-right text-gray-700 text-xs">{showInvoiceRows ? '—' : (d.montant_ht ? d.montant_ht.toLocaleString() + ' MAD' : '-')}</td>
+                      <td className="px-4 py-3 text-right text-blue-600 text-xs">{showInvoiceRows ? '—' : (d.montant_tva ? d.montant_tva.toLocaleString() + ' MAD' : '-')}</td>
+                      <td className="px-4 py-3 text-right font-medium text-xs">{showInvoiceRows ? '—' : (d.montant_ttc ? d.montant_ttc.toLocaleString() + ' MAD' : '-')}</td>
                       <td className="px-4 py-3">
                         <span className={`flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium w-fit ${d.statut === 'analysé' ? 'bg-green-100 text-green-700' : d.statut === 'en cours' ? 'bg-amber-100 text-amber-700' : 'bg-red-100 text-red-700'}`}>
                           {d.statut === 'analysé' ? <CheckCircle size={10} /> : <Clock size={10} />}
@@ -414,21 +1108,80 @@ export default function DocumentsPage() {
                       </td>
                       <td className="px-4 py-3">
                         <div className="flex items-center justify-end gap-3">
-                          {d.statut === 'analysé' && d.fournisseur && d.montant_ttc && (
+                          {!supabaseMode && d.statut === 'analysé' && d.fournisseur && d.montant_ttc && d.localDoc && (
                             <button
-                              onClick={() => createSupplierInvoice(d)}
+                              onClick={() => createSupplierInvoice(d.localDoc!)}
                               className="text-xs font-medium text-emerald-700 hover:text-emerald-800"
                             >
-                              + Facture fournisseur
+                              Créer facture fournisseur
                             </button>
                           )}
-                          <button onClick={() => setDocuments(documents.filter(x => x.id !== d.id))} className="text-gray-300 hover:text-red-500 transition-colors">
+                          {supabaseMode && d.statut === 'analysé' && d.supabaseId && (d.creatableInvoiceCount ?? 0) > 0 && (
+                            d.hasAllSupplierInvoices ? (
+                              <span className="text-xs text-gray-400">
+                                {(d.creatableInvoiceCount ?? 0) > 1
+                                  ? `${d.creatableInvoiceCount} factures créées`
+                                  : 'Facture créée'}
+                              </span>
+                            ) : (
+                              <button
+                                onClick={() => void createSupplierInvoiceSupabase(d.supabaseId!)}
+                                disabled={creatingSupplierInvoiceId === d.supabaseId}
+                                className="text-xs font-medium text-emerald-700 hover:text-emerald-800 disabled:opacity-50"
+                              >
+                                {creatingSupplierInvoiceId === d.supabaseId
+                                  ? 'Création…'
+                                  : (d.creatableInvoiceCount ?? 0) > 1
+                                    ? `Créer ${d.creatableInvoiceCount} factures`
+                                    : 'Créer facture fournisseur'}
+                              </button>
+                            )
+                          )}
+                          <button onClick={() => void removeOcrRow(d)} className="text-gray-300 hover:text-red-500 transition-colors">
                             <Trash2 size={14} />
                           </button>
                         </div>
                       </td>
                     </tr>
-                  ))}
+                    {showInvoiceRows && creatable.map((inv) => {
+                      const created = d.supabaseId
+                        ? supplierInvoiceKeys.has(
+                            supplierInvoiceDedupeKey(
+                              d.supabaseId,
+                              sourcePageForDetectedInvoice(inv),
+                              inv.invoice_number,
+                            ),
+                          )
+                        : false;
+                      return (
+                        <tr key={`${d.key}-p${inv.page_number}`} className="border-b border-gray-50 bg-gray-50/60">
+                          <td className="px-4 py-2 pl-8 text-[11px] text-gray-500">Page {inv.page_number}</td>
+                          <td className="px-4 py-2 text-gray-600 text-[11px]">{inv.invoice_number || '—'}</td>
+                          <td className="px-4 py-2 text-gray-600 text-[11px]">{inv.supplier_name || '—'}</td>
+                          <td className="px-4 py-2 text-right text-gray-700 text-[11px]">{inv.amount_ht != null ? `${Math.round(inv.amount_ht).toLocaleString()} MAD` : '—'}</td>
+                          <td className="px-4 py-2 text-right text-blue-600 text-[11px]">{inv.vat_amount != null ? `${Math.round(inv.vat_amount).toLocaleString()} MAD` : '—'}</td>
+                          <td className="px-4 py-2 text-right font-medium text-[11px]">{inv.amount_ttc != null ? `${Math.round(inv.amount_ttc).toLocaleString()} MAD` : '—'}</td>
+                          <td className="px-4 py-2">
+                            <span className={`text-[10px] px-2 py-0.5 rounded-full ${inv.status === 'needs_review' ? 'bg-amber-100 text-amber-700' : 'bg-green-100 text-green-700'}`}>
+                              {inv.status === 'needs_review' ? 'À compléter' : 'Détectée'}
+                            </span>
+                          </td>
+                          <td className="px-4 py-2 text-right text-[11px] text-gray-400">
+                            {created ? 'Créée' : '—'}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                    {showInvoiceRows && d.detectedInvoices?.filter((i) => i.status === 'no_invoice_detected').map((inv) => (
+                      <tr key={`${d.key}-skip-${inv.page_number}`} className="border-b border-gray-50 bg-gray-50/30">
+                        <td className="px-4 py-2 pl-8 text-[11px] text-gray-400">Page {inv.page_number}</td>
+                        <td colSpan={5} className="px-4 py-2 text-[11px] text-gray-400 italic">Aucune facture détectée</td>
+                        <td className="px-4 py-2" />
+                      </tr>
+                    ))}
+                    </Fragment>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>

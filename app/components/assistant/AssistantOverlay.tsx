@@ -5,13 +5,14 @@ import { Mic, Send, X, Volume2, Bot, Loader2 } from 'lucide-react';
 import { fetchAi } from '@/app/lib/fetch-ai';
 import type { AtlasAssistantAction, AtlasAssistantResponse } from '@/app/components/assistant/assistant-types';
 import { executeAssistantAction } from '@/app/lib/assistant-executor';
+import { BetaSurfaceBadge } from '@/app/components/safety/BetaSurfaceBadge';
 
 type Msg = { role: 'user' | 'assistant'; content: string };
 
 async function whisperTranscribe(blob: Blob): Promise<string> {
   const fd = new FormData();
   fd.append('audio', blob, 'audio.webm');
-  const res = await fetch('/api/whisper', { method: 'POST', body: fd });
+  const res = await fetch('/api/whisper', { method: 'POST', credentials: 'include', body: fd });
   const data = (await res.json().catch(() => ({}))) as { text?: string; error?: string };
   if (!res.ok) throw new Error(data.error ?? 'Transcription failed');
   return data.text ?? '';
@@ -20,6 +21,7 @@ async function whisperTranscribe(blob: Blob): Promise<string> {
 async function ttsSpeak(text: string): Promise<void> {
   const res = await fetch('/api/tts', {
     method: 'POST',
+    credentials: 'include',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ text }),
   });
@@ -177,6 +179,10 @@ export function AssistantOverlay() {
               <button type="button" onClick={() => setOpen(false)} className="p-2 rounded-lg hover:bg-gray-50 text-gray-500">
                 <X size={18} />
               </button>
+            </div>
+
+            <div className="shrink-0 px-3 py-2 border-b border-gray-100 bg-white">
+              <BetaSurfaceBadge label="Bêta · Assistant, voix & actions" className="text-[11px]" />
             </div>
 
             <div className="flex-1 overflow-y-auto p-4 space-y-3">

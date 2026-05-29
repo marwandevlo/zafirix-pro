@@ -30,11 +30,7 @@ function calculerSalaire(brut: number): Omit<Employe, 'id' | 'nom' | 'cin' | 'ma
 }
 
 export default function IRPage() {
-  const [employes, setEmployes] = useState<Employe[]>([
-    { id: 1, nom: 'Ahmed Benali', cin: 'BK123456', matriculeCNSS: 'CNSS001', ...calculerSalaire(8000) },
-    { id: 2, nom: 'Fatima Zahra', cin: 'BE789012', matriculeCNSS: 'CNSS002', ...calculerSalaire(12000) },
-    { id: 3, nom: 'Youssef Kadiri', cin: 'BJ345678', matriculeCNSS: 'CNSS003', ...calculerSalaire(6000) },
-  ]);
+  const [employes, setEmployes] = useState<Employe[]>([]);
   const [form, setForm] = useState({ nom: '', cin: '', matriculeCNSS: '', salaireBrut: '' });
   const [showForm, setShowForm] = useState(false);
   const [xmlGenerated, setXmlGenerated] = useState(false);

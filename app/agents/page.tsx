@@ -3,6 +3,9 @@ import { useState } from 'react';
 import { fetchAi } from '../lib/fetch-ai';
 import { Receipt, Users, TrendingUp, Shield, Bell, Play, Pause, MessageSquare, CheckCircle, Clock } from 'lucide-react';
 import { AppSidebar } from '@/app/components/shell/AppSidebar';
+import { BetaSurfaceBadge } from '@/app/components/safety/BetaSurfaceBadge';
+import { ProductionBlockedSurface } from '@/app/components/safety/ProductionBlockedSurface';
+import { isDemoFeatureBlocked } from '@/app/lib/atlas-runtime-guards';
 
 const agents = [
   {
@@ -108,6 +111,13 @@ const agents = [
 ];
 
 export default function AgentsPage() {
+  if (isDemoFeatureBlocked('agents_mock')) {
+    return <ProductionBlockedSurface title="Agents IA" featureId="agents_mock" />;
+  }
+  return <AgentsPageContent />;
+}
+
+function AgentsPageContent() {
   const [activeAgent, setActiveAgent] = useState<string | null>(null);
   const [agentStatus, setAgentStatus] = useState<Record<string, boolean>>({
     tva: true, paie: true, is: true, audit: true, alert: true,
@@ -182,6 +192,10 @@ export default function AgentsPage() {
             <h1 className="text-xl font-bold text-gray-800">Agents IA — Equipe Virtuelle</h1>
             <p className="text-xs text-gray-400 mt-0.5">Votre équipe de comptables et fiscalistes virtuels 24/7</p>
           </header>
+
+          <div className="shrink-0 px-8 pt-3">
+            <BetaSurfaceBadge label="Bêta · Agents & démonstrations" />
+          </div>
 
           <div className="flex-1 overflow-y-auto px-8 py-6 space-y-4">
             {/* Global Stats */}

@@ -4,8 +4,10 @@ import { isAtlasSupabaseDataEnabled } from '@/app/lib/atlas-data-source';
 import { supabase } from '@/app/lib/supabase';
 import { requireSupabaseUser } from '@/app/lib/atlas-supabase-guard';
 import { asRecord } from '@/app/lib/atlas-json';
+import { blockCriticalLocalStorageInProduction } from '@/app/lib/atlas-runtime-guards';
 
 export function readLinksFromLocalStorage(): AtlasLink[] {
+  if (blockCriticalLocalStorageInProduction('atlas_links')) return [];
   if (typeof window === 'undefined') return [];
   try {
     const raw = localStorage.getItem(ATLAS_STORAGE_KEYS.links);
@@ -18,6 +20,7 @@ export function readLinksFromLocalStorage(): AtlasLink[] {
 }
 
 export function writeLinksToLocalStorage(links: AtlasLink[]): void {
+  if (blockCriticalLocalStorageInProduction('atlas_links')) return;
   if (typeof window === 'undefined') return;
   localStorage.setItem(ATLAS_STORAGE_KEYS.links, JSON.stringify(links));
 }

@@ -4,8 +4,10 @@ import { isAtlasSupabaseDataEnabled } from '@/app/lib/atlas-data-source';
 import { supabase } from '@/app/lib/supabase';
 import { requireSupabaseUser } from '@/app/lib/atlas-supabase-guard';
 import { asRecord } from '@/app/lib/atlas-json';
+import { blockCriticalLocalStorageInProduction } from '@/app/lib/atlas-runtime-guards';
 
 export function readProjectsFromLocalStorage(): AtlasProject[] {
+  if (blockCriticalLocalStorageInProduction('atlas_projects')) return [];
   if (typeof window === 'undefined') return [];
   try {
     const raw = localStorage.getItem(ATLAS_STORAGE_KEYS.projects);
@@ -18,6 +20,7 @@ export function readProjectsFromLocalStorage(): AtlasProject[] {
 }
 
 export function writeProjectsToLocalStorage(projects: AtlasProject[]): void {
+  if (blockCriticalLocalStorageInProduction('atlas_projects')) return;
   if (typeof window === 'undefined') return;
   localStorage.setItem(ATLAS_STORAGE_KEYS.projects, JSON.stringify(projects));
 }

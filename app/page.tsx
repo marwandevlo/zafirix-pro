@@ -12,6 +12,8 @@ import {
 import { listAtlasInvoices } from '@/app/lib/atlas-invoices-repository';
 import type { AtlasInvoice } from '@/app/types/atlas-invoice';
 import { isOverdue, todayYmd } from '@/app/lib/atlas-dates';
+import { refreshAtlasUsageState } from '@/app/lib/atlas-usage-limits';
+import { isAtlasSupabaseDataEnabled } from '@/app/lib/atlas-data-source';
 import { GlobalSearchButton } from '@/app/components/search/GlobalSearchButton';
 import { UsageWidget } from '@/app/components/usage/UsageWidget';
 import { TrialUpgradeBanner } from '@/app/components/trial/TrialUpgradeBanner';
@@ -19,6 +21,7 @@ import { TrialOnboardingChecklist } from '@/app/components/trial/TrialOnboarding
 import { DashboardFunnelInsights } from '@/app/components/conversion/DashboardFunnelInsights';
 import { AppSidebar, AppSidebarMobileOverlay } from '@/app/components/shell/AppSidebar';
 import { ReferralDashboardCard } from '@/app/components/referral/ReferralDashboardCard';
+import { formatMadAmountLabel } from '@/app/lib/atlas-format';
 
 const ReferralPostOnboardingModal = dynamic(
   () =>
@@ -57,6 +60,9 @@ export default function Home() {
   useEffect(() => {
     let cancelled = false;
     (async () => {
+      if (isAtlasSupabaseDataEnabled()) {
+        await refreshAtlasUsageState();
+      }
       const inv = await listAtlasInvoices();
       if (!cancelled) setInvoices(inv);
     })();
@@ -84,11 +90,11 @@ export default function Home() {
   }, [invoices]);
 
   const kpis = useMemo(() => ([
-    { label: "Chiffre d'affaires", labelAr: 'رقم الأعمال', value: `${Math.round(invoiceSummary.totalFacture).toLocaleString()} MAD`, change: "Factures émises", up: true, icon: TrendingUp, color: 'text-blue-600' },
-    { label: 'TVA à payer', labelAr: 'TVA واجبة', value: '0 MAD', change: 'Échéance : 20 mai', up: false, icon: Receipt, color: 'text-red-600' },
-    { label: 'Factures en attente', labelAr: 'فواتير معلقة', value: String(invoiceSummary.unpaidCount), change: `${invoiceSummary.overdueCount} en retard`, up: invoiceSummary.overdueCount === 0, icon: FileText, color: 'text-amber-600' },
-    { label: 'Déclarations dues', labelAr: 'تصاريح واجبة', value: '2', change: 'Ce mois', up: false, icon: Calendar, color: 'text-purple-600' },
-  ]), [invoiceSummary]);
+    { label: "Chiffre d'affaires", labelAr: 'رقم الأعمال', value: formatMadAmountLabel(invoiceSummary.totalFacture), change: t('Factures enregistrées', 'فواتير مسجلة'), up: true, icon: TrendingUp, color: 'text-blue-600' },
+    { label: 'TVA', labelAr: 'TVA', value: '—', change: t('En cours de stabilisation', 'قيد الاستقرار'), up: true, icon: Receipt, color: 'text-slate-500' },
+    { label: 'Factures en attente', labelAr: 'فواتير معلقة', value: String(invoiceSummary.unpaidCount), change: `${invoiceSummary.overdueCount} ${t('en retard', 'متأخرة')}`, up: invoiceSummary.overdueCount === 0, icon: FileText, color: 'text-amber-600' },
+    { label: 'Rappels fiscaux (indicatif)', labelAr: 'تذكير ضريبي (إشاري)', value: String(pendingFiscalCount), change: t('Calendrier indicatif', 'جدول إشاري'), up: true, icon: Calendar, color: 'text-purple-600' },
+  ]), [invoiceSummary, pendingFiscalCount, lang]);
 
   const deadlineColor = (type: string) => {
     if (type === 'danger') return 'bg-red-50 border-red-200 text-red-700';
@@ -151,6 +157,15 @@ export default function Home() {
         </header>
 
         <div className="flex-1 overflow-y-auto px-4 lg:px-8 py-4 lg:py-6 space-y-4 lg:space-y-6">
+          <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-xs sm:text-sm text-amber-950 flex gap-2 items-start">
+            <Shield size={16} className="shrink-0 mt-0.5 text-amber-700" aria-hidden />
+            <p>
+              {t(
+                'Les échéances fiscales affichées ici sont indicatives. Les modules TVA, IS et déclarations sont en cours de stabilisation — validez toute obligation avec votre expert-comptable.',
+                'المواعيد الضريبية المعروضة هنا إشارية. وحدات TVA وIS والتصاريح قيد الاستقرار — يُرجى التحقق مع خبيركم المحاسبي.',
+              )}
+            </p>
+          </div>
           <ReferralPostOnboardingModal lang={lang} />
           <TrialUpgradeBanner />
           <ReferralDashboardCard lang={lang} />
@@ -158,7 +173,7 @@ export default function Home() {
           <DashboardFunnelInsights lang={lang} pendingDeclarationsCount={pendingFiscalCount} />
           {invoiceSummary.overdueCount > 0 && (
             <div className="bg-red-50 border border-red-200 rounded-xl p-4 text-sm text-red-800">
-              <span className="font-semibold">Alertes paiements :</span> {invoiceSummary.overdueCount} facture(s) en retard — {Math.round(invoiceSummary.overdueAmount).toLocaleString()} MAD.
+              <span className="font-semibold">Alertes paiements :</span> {invoiceSummary.overdueCount} facture(s) en retard — {formatMadAmountLabel(invoiceSummary.overdueAmount)}.
             </div>
           )}
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 lg:gap-4">
@@ -187,7 +202,7 @@ export default function Home() {
                   {t('Échéances fiscales', 'المواعيد الضريبية')}
                 </h2>
                 <span className="text-xs text-red-500 font-medium bg-red-50 px-2 py-0.5 rounded-full">
-                  {t('Ce mois', 'هذا الشهر')}
+                  {t('Indicatif', 'إشاري')}
                 </span>
               </div>
               <div className="p-3 space-y-2">

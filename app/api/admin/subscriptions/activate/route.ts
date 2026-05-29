@@ -3,6 +3,8 @@ import { createClient } from '@supabase/supabase-js';
 import { atlasDataBackend } from '@/app/lib/atlas-data-source';
 import { getAtlasPlanById } from '@/app/lib/atlas-pricing-plans';
 import { requireAdmin, requireBearer } from '@/app/lib/admin/require-admin';
+import { logAtlasAdminAction } from '@/app/lib/admin/atlas-admin-audit';
+import { syncProfileEntitlementFromAtlas } from '@/app/lib/atlas-subscription-sync';
 
 function isUuidLike(value: string): boolean {
   // Accept standard UUIDs (case-insensitive).
@@ -75,6 +77,23 @@ export async function POST(request: NextRequest) {
     });
 
     if (subErr) return NextResponse.json({ error: 'db_error' }, { status: 500 });
+
+    await logAtlasAdminAction({
+      actorUserId: guard.adminUserId,
+      action: 'subscription_activate',
+      targetType: 'atlas_payment_requests',
+      targetId: paymentRequestId,
+      metadata: { user_id: reqRow.user_id, plan_id: plan.id, start, end },
+    });
+
+    const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY ?? process.env.SUPABASE_SERVICE_ROLE ?? '';
+    if (serviceRoleKey) {
+      const admin = createClient(supabaseUrl, serviceRoleKey, {
+        auth: { autoRefreshToken: false, persistSession: false },
+      });
+      const sync = await syncProfileEntitlementFromAtlas(admin, String(reqRow.user_id));
+      if (!sync.ok) console.warn('[admin/subscriptions/activate] profile_sync', sync.error);
+    }
 
     return NextResponse.json({ ok: true, startDate: start, endDate: end });
   } catch (e) {

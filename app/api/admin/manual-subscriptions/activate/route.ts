@@ -7,6 +7,7 @@ import { sendEmailViaResend } from '@/app/lib/atlas-email-resend';
 import { buildPaidSubscriptionActivatedEmailHtml } from '@/app/lib/atlas-email-templates';
 import { getWhatsAppOpsPhoneDigits, sendWhatsAppMessage } from '@/app/lib/whatsapp-service';
 import { requireAdmin } from '@/app/lib/admin/require-admin';
+import { syncProfileEntitlementFromAtlas } from '@/app/lib/atlas-subscription-sync';
 
 function isUuid(value: string): boolean {
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value);
@@ -110,6 +111,9 @@ export async function POST(request: NextRequest) {
 
   const waText = `ZAFIRIX PRO — votre abonnement est activé 🚀\nForfait: ${plan.name}\nValable jusqu’au ${end}.`;
   void sendWhatsAppMessage(getWhatsAppOpsPhoneDigits(), `${waText}\nCompte: ${uemail ?? userId}`);
+
+  const sync = await syncProfileEntitlementFromAtlas(admin, userId);
+  if (!sync.ok) console.warn('[manual-subscriptions/activate] profile_sync', sync.error);
 
   return NextResponse.json({ ok: true, startDate: start, endDate: end });
 }
