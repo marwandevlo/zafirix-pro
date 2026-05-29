@@ -1,47 +1,66 @@
 'use client';
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Plus, BookOpen } from 'lucide-react';
 import { listAtlasInvoices } from '@/app/lib/atlas-invoices-repository';
 import type { AtlasInvoice } from '@/app/types/atlas-invoice';
+import { listSupplierInvoices } from '@/app/lib/atlas-supplier-invoices-repository';
+import type { AtlasSupplierInvoice } from '@/app/types/atlas-supplier-invoice';
+import { getActiveCompanyDbRowId } from '@/app/lib/atlas-active-company';
 import { isOverdue, todayYmd } from '@/app/lib/atlas-dates';
 import { listAtlasPayments } from '@/app/lib/atlas-payments-repository';
 import type { AtlasPayment } from '@/app/types/atlas-payment';
 import { fetchAi } from '@/app/lib/fetch-ai';
 import { AppSidebar } from '@/app/components/shell/AppSidebar';
+import { formatMadAmountLabel } from '@/app/lib/atlas-format';
+import {
+  listAtlasAccountingEntries,
+  upsertAtlasAccountingEntry,
+} from '@/app/lib/atlas-accounting-repository';
+import { refreshAtlasUsageState } from '@/app/lib/atlas-usage-limits';
+import { isAtlasSupabaseDataEnabled } from '@/app/lib/atlas-data-source';
+import type { AtlasAccountingEntry } from '@/app/types/atlas-accounting';
 
-type Ecriture = {
-  id: number;
-  date: string;
-  libelle: string;
-  compte: string;
-  debit: number;
-  credit: number;
-};
+type Ecriture = AtlasAccountingEntry;
 
 export default function ComptabilitePage() {
   const [activeTab, setActiveTab] = useState<'journal' | 'grandlivre' | 'bilan'>('journal');
   const [invoices, setInvoices] = useState<AtlasInvoice[]>([]);
+  const [supplierInvoices, setSupplierInvoices] = useState<AtlasSupplierInvoice[]>([]);
   const [payments, setPayments] = useState<AtlasPayment[]>([]);
-  const [ecritures, setEcritures] = useState<Ecriture[]>([
-    { id: 1, date: '2026-04-01', libelle: 'Vente Client Alpha', compte: '3421', debit: 18000, credit: 0 },
-    { id: 2, date: '2026-04-01', libelle: 'TVA collectee', compte: '4455', debit: 0, credit: 3000 },
-    { id: 3, date: '2026-04-01', libelle: 'Produits ventes', compte: '7111', debit: 0, credit: 15000 },
-    { id: 4, date: '2026-04-05', libelle: 'Achat fournitures', compte: '6123', debit: 3000, credit: 0 },
-    { id: 5, date: '2026-04-05', libelle: 'TVA deductible', compte: '3455', debit: 600, credit: 0 },
-    { id: 6, date: '2026-04-05', libelle: 'Fournisseur X', compte: '4411', debit: 0, credit: 3600 },
-  ]);
+  const [ecritures, setEcritures] = useState<Ecriture[]>([]);
+  const [activeCompanyId, setActiveCompanyId] = useState<string | null>(null);
 
   const [form, setForm] = useState({ date: '', libelle: '', compte: '', debit: '', credit: '' });
   const [showForm, setShowForm] = useState(false);
   const [insight, setInsight] = useState<{ loading: boolean; text: string }>({ loading: false, text: '' });
 
-  useEffect(() => {
-    const load = async () => {
-      setInvoices(await listAtlasInvoices());
-      setPayments(await listAtlasPayments());
-    };
-    void load();
+  const reloadAccountingData = useCallback(async () => {
+    if (isAtlasSupabaseDataEnabled()) {
+      await refreshAtlasUsageState();
+    }
+    setInvoices(await listAtlasInvoices());
+    setPayments(await listAtlasPayments());
+    setEcritures(await listAtlasAccountingEntries());
+    const companyId = await getActiveCompanyDbRowId();
+    setActiveCompanyId(companyId);
+    if (companyId) {
+      setSupplierInvoices(await listSupplierInvoices(companyId));
+    } else {
+      setSupplierInvoices([]);
+    }
   }, []);
+
+  useEffect(() => {
+    void reloadAccountingData();
+  }, [reloadAccountingData]);
+
+  useEffect(() => {
+    const onVis = () => {
+      if (document.visibilityState === 'visible') void reloadAccountingData();
+    };
+    document.addEventListener('visibilitychange', onVis);
+    return () => document.removeEventListener('visibilitychange', onVis);
+  }, [reloadAccountingData]);
 
   const totalDebit = ecritures.reduce((s, e) => s + e.debit, 0);
   const totalCredit = ecritures.reduce((s, e) => s + e.credit, 0);
@@ -65,7 +84,9 @@ export default function ComptabilitePage() {
     const resteAPayer = invoices.reduce((sum, inv) => sum + Math.max(0, (inv.totalTTC || 0) - paidForInvoice(inv)), 0);
 
     const balanceClient = resteAPayer;
-    const balanceFournisseur = 0; // reserved for supplier invoices (atlas_supplier_invoices)
+    const balanceFournisseur = supplierInvoices
+      .filter((inv) => inv.status === 'unpaid' || inv.status === 'needs_review')
+      .reduce((sum, inv) => sum + (inv.totalTTC ?? 0), 0);
     const soldeGlobal = balanceClient - balanceFournisseur;
 
     const now = todayYmd();
@@ -85,7 +106,7 @@ export default function ComptabilitePage() {
       soldeGlobal,
       overdue,
     };
-  }, [invoices, payments]);
+  }, [invoices, payments, supplierInvoices]);
 
   useEffect(() => {
     if (accountingKpis.overdue.length === 0) {
@@ -95,7 +116,7 @@ export default function ComptabilitePage() {
     let cancelled = false;
     const run = async () => {
       setInsight({ loading: true, text: '' });
-      const top = accountingKpis.overdue.slice(0, 5).map((inv) => `- ${inv.number} (${inv.clientName}) · échéance ${inv.dueDate} · TTC ${Math.round(inv.totalTTC || 0).toLocaleString()} MAD`).join('\n');
+      const top = accountingKpis.overdue.slice(0, 5).map((inv) => `- ${inv.number} (${inv.clientName}) · échéance ${inv.dueDate} · TTC ${formatMadAmountLabel(inv.totalTTC || 0)}`).join('\n');
       const fallback =
         `Factures en retard: ${accountingKpis.overdue.length}.\n` +
         `Recommandation: relance rapide (mail + appel), puis proposition d’échéancier, et suivi hebdomadaire.\n\n` +
@@ -128,16 +149,20 @@ export default function ComptabilitePage() {
     return () => { cancelled = true; };
   }, [accountingKpis.overdue]);
 
-  const addEcriture = () => {
+  const addEcriture = async () => {
     if (!form.libelle || !form.compte) return;
-    setEcritures([...ecritures, {
+    const entry: Ecriture = {
       id: Date.now(),
       date: form.date || new Date().toISOString().split('T')[0],
       libelle: form.libelle,
       compte: form.compte,
       debit: parseFloat(form.debit) || 0,
       credit: parseFloat(form.credit) || 0,
-    }]);
+    };
+    const result = await upsertAtlasAccountingEntry(entry, { companyId: activeCompanyId });
+    if (result.ok) {
+      await reloadAccountingData();
+    }
     setForm({ date: '', libelle: '', compte: '', debit: '', credit: '' });
     setShowForm(false);
   };
@@ -162,7 +187,7 @@ export default function ComptabilitePage() {
         <header className="bg-white border-b border-gray-200 px-8 py-4 flex items-center justify-between">
           <div>
             <h1 className="text-xl font-bold text-gray-800">Comptabilite</h1>
-            <p className="text-xs text-gray-400 mt-0.5">Journal - Grand-livre - Bilan</p>
+            <p className="text-xs text-gray-400 mt-0.5">KPIs factures · journal enregistré</p>
           </div>
           <button onClick={() => setShowForm(!showForm)} className="flex items-center gap-2 px-4 py-2 bg-[#1B2A4A] text-white rounded-lg text-sm hover:bg-[#243660] transition-colors">
             <Plus size={16} /> Nouvelle ecriture
@@ -173,31 +198,74 @@ export default function ComptabilitePage() {
           <div className="grid grid-cols-3 gap-4">
             <div className="bg-white rounded-xl p-5 shadow-sm border border-gray-100">
               <p className="text-xs text-gray-400">Balance client</p>
-              <p className="text-2xl font-bold text-amber-700 mt-1">{Math.round(accountingKpis.balanceClient).toLocaleString()} MAD</p>
+              <p className="text-2xl font-bold text-amber-700 mt-1">{formatMadAmountLabel(accountingKpis.balanceClient)}</p>
             </div>
             <div className="bg-white rounded-xl p-5 shadow-sm border border-gray-100">
               <p className="text-xs text-gray-400">Balance fournisseur</p>
-              <p className="text-2xl font-bold text-blue-700 mt-1">{Math.round(accountingKpis.balanceFournisseur).toLocaleString()} MAD</p>
+              <p className="text-2xl font-bold text-blue-700 mt-1">{formatMadAmountLabel(accountingKpis.balanceFournisseur)}</p>
             </div>
             <div className="bg-white rounded-xl p-5 shadow-sm border border-gray-100">
               <p className="text-xs text-gray-400">Solde global</p>
               <p className={`text-2xl font-bold mt-1 ${accountingKpis.soldeGlobal >= 0 ? 'text-green-600' : 'text-red-600'}`}>
-                {Math.round(accountingKpis.soldeGlobal).toLocaleString()} MAD
+                {formatMadAmountLabel(accountingKpis.soldeGlobal)}
               </p>
             </div>
             <div className="bg-white rounded-xl p-5 shadow-sm border border-gray-100">
               <p className="text-xs text-gray-400">Total facturé</p>
-              <p className="text-2xl font-bold text-gray-800 mt-1">{Math.round(accountingKpis.totalFacture).toLocaleString()} MAD</p>
+              <p className="text-2xl font-bold text-gray-800 mt-1">{formatMadAmountLabel(accountingKpis.totalFacture)}</p>
             </div>
             <div className="bg-white rounded-xl p-5 shadow-sm border border-gray-100">
               <p className="text-xs text-gray-400">Total payé</p>
-              <p className="text-2xl font-bold text-green-600 mt-1">{Math.round(accountingKpis.totalPaye).toLocaleString()} MAD</p>
+              <p className="text-2xl font-bold text-green-600 mt-1">{formatMadAmountLabel(accountingKpis.totalPaye)}</p>
             </div>
             <div className="bg-white rounded-xl p-5 shadow-sm border border-gray-100">
               <p className="text-xs text-gray-400">Reste à payer</p>
-              <p className="text-2xl font-bold text-red-600 mt-1">{Math.round(accountingKpis.resteAPayer).toLocaleString()} MAD</p>
+              <p className="text-2xl font-bold text-red-600 mt-1">{formatMadAmountLabel(accountingKpis.resteAPayer)}</p>
             </div>
           </div>
+
+          {supplierInvoices.length > 0 && (
+            <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
+              <div className="px-6 py-4 border-b border-gray-100">
+                <h2 className="font-semibold text-gray-800 text-sm">Factures fournisseur (OCR)</h2>
+                <p className="text-xs text-gray-400 mt-0.5">Données enregistrées depuis Documents IA</p>
+              </div>
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="text-left text-xs text-gray-400 border-b border-gray-100 bg-gray-50">
+                    <th className="px-6 py-3">N°</th>
+                    <th className="px-6 py-3">Fournisseur</th>
+                    <th className="px-6 py-3">Date</th>
+                    <th className="px-6 py-3">Statut</th>
+                    <th className="px-6 py-3 text-right">TTC</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {supplierInvoices.slice(0, 10).map((inv) => (
+                    <tr key={String(inv.id)} className="border-b border-gray-50 hover:bg-gray-50">
+                      <td className="px-6 py-3 font-medium text-gray-700">{inv.invoiceNumber || '—'}</td>
+                      <td className="px-6 py-3 text-gray-600">{inv.supplierName}</td>
+                      <td className="px-6 py-3 text-gray-500">{inv.issueDate}</td>
+                      <td className="px-6 py-3">
+                        <span className={`text-xs px-2 py-0.5 rounded-full ${
+                          inv.status === 'paid'
+                            ? 'bg-green-100 text-green-700'
+                            : inv.status === 'needs_review'
+                              ? 'bg-amber-100 text-amber-700'
+                              : 'bg-blue-100 text-blue-700'
+                        }`}>
+                          {inv.status === 'needs_review' ? 'À compléter' : inv.status === 'paid' ? 'Payée' : 'À payer'}
+                        </span>
+                      </td>
+                      <td className="px-6 py-3 text-right font-medium text-gray-800">
+                        {inv.totalTTC != null ? formatMadAmountLabel(inv.totalTTC) : '—'}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
 
           {accountingKpis.overdue.length > 0 && (
             <div className="bg-white rounded-xl shadow-sm border border-red-200 overflow-hidden">
@@ -238,7 +306,7 @@ export default function ComptabilitePage() {
                       <td className="px-6 py-3 text-gray-600">{inv.clientName}</td>
                       <td className="px-6 py-3 text-gray-500">{inv.issueDate}</td>
                       <td className="px-6 py-3 text-red-700 font-medium">{inv.dueDate}</td>
-                      <td className="px-6 py-3 text-right font-medium text-gray-800">{Math.round(inv.totalTTC || 0).toLocaleString()} MAD</td>
+                      <td className="px-6 py-3 text-right font-medium text-gray-800">{formatMadAmountLabel(inv.totalTTC || 0)}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -249,11 +317,11 @@ export default function ComptabilitePage() {
           <div className="grid grid-cols-3 gap-4">
             <div className="bg-white rounded-xl p-5 shadow-sm border border-gray-100">
               <p className="text-xs text-gray-400">Total Debit</p>
-              <p className="text-2xl font-bold text-blue-600 mt-1">{totalDebit.toLocaleString()} MAD</p>
+              <p className="text-2xl font-bold text-blue-600 mt-1">{formatMadAmountLabel(totalDebit)}</p>
             </div>
             <div className="bg-white rounded-xl p-5 shadow-sm border border-gray-100">
               <p className="text-xs text-gray-400">Total Credit</p>
-              <p className="text-2xl font-bold text-green-600 mt-1">{totalCredit.toLocaleString()} MAD</p>
+              <p className="text-2xl font-bold text-green-600 mt-1">{formatMadAmountLabel(totalCredit)}</p>
             </div>
             <div className={`rounded-xl p-5 shadow-sm border ${totalDebit === totalCredit ? 'bg-green-50 border-green-200' : 'bg-red-50 border-red-200'}`}>
               <p className="text-xs text-gray-400">Equilibre</p>
@@ -300,19 +368,27 @@ export default function ComptabilitePage() {
                 </tr>
               </thead>
               <tbody>
-                {ecritures.map(e => (
-                  <tr key={e.id} className="border-b border-gray-50 hover:bg-gray-50">
-                    <td className="px-4 py-3 text-gray-500">{e.date}</td>
-                    <td className="px-4 py-3 text-gray-700">{e.libelle}</td>
-                    <td className="px-4 py-3 font-mono text-gray-600">{e.compte}</td>
-                    <td className="px-4 py-3 text-right text-blue-600">{e.debit > 0 ? e.debit.toLocaleString() + ' MAD' : '-'}</td>
-                    <td className="px-4 py-3 text-right text-green-600">{e.credit > 0 ? e.credit.toLocaleString() + ' MAD' : '-'}</td>
+                {ecritures.length === 0 ? (
+                  <tr>
+                    <td colSpan={5} className="px-4 py-8 text-center text-sm text-gray-400">
+                      Aucune écriture enregistrée. Ajoutez une ligne pour démarrer le journal.
+                    </td>
                   </tr>
-                ))}
+                ) : (
+                  ecritures.map(e => (
+                    <tr key={e.id} className="border-b border-gray-50 hover:bg-gray-50">
+                      <td className="px-4 py-3 text-gray-500">{e.date}</td>
+                      <td className="px-4 py-3 text-gray-700">{e.libelle}</td>
+                      <td className="px-4 py-3 font-mono text-gray-600">{e.compte}</td>
+                      <td className="px-4 py-3 text-right text-blue-600">{e.debit > 0 ? formatMadAmountLabel(e.debit) : '-'}</td>
+                      <td className="px-4 py-3 text-right text-green-600">{e.credit > 0 ? formatMadAmountLabel(e.credit) : '-'}</td>
+                    </tr>
+                  ))
+                )}
                 <tr className="bg-gray-50 font-bold text-sm">
                   <td colSpan={3} className="px-4 py-3 text-gray-600">TOTAL</td>
-                  <td className="px-4 py-3 text-right text-blue-700">{totalDebit.toLocaleString()} MAD</td>
-                  <td className="px-4 py-3 text-right text-green-700">{totalCredit.toLocaleString()} MAD</td>
+                  <td className="px-4 py-3 text-right text-blue-700">{formatMadAmountLabel(totalDebit)}</td>
+                  <td className="px-4 py-3 text-right text-green-700">{formatMadAmountLabel(totalCredit)}</td>
                 </tr>
               </tbody>
             </table>

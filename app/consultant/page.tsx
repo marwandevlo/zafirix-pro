@@ -4,6 +4,8 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { Brain, Loader2, Send, Sparkles, User } from 'lucide-react';
 import { fetchAi } from '../lib/fetch-ai';
 import { AppSidebar } from '@/app/components/shell/AppSidebar';
+import { BetaSurfaceBadge } from '@/app/components/safety/BetaSurfaceBadge';
+import type { AtlasCompany } from '@/app/types/atlas-company';
 
 type Message = { role: 'user' | 'assistant'; content: string };
 
@@ -15,21 +17,31 @@ const SUGGESTIONS = [
   'Obligations comptables minimales pour une petite SARL',
 ];
 
-function loadCompanyContext(): string {
-  if (typeof window === 'undefined') return '';
+function formatCompanyContext(c: Partial<AtlasCompany>): string {
+  const parts = [
+    c.raisonSociale && `Raison sociale: ${c.raisonSociale}`,
+    c.formeJuridique && `Forme: ${c.formeJuridique}`,
+    c.if_fiscal && `IF: ${c.if_fiscal}`,
+    c.ice && `ICE: ${c.ice}`,
+    c.regimeTVA && `Régime TVA: ${c.regimeTVA}`,
+    c.ville && `Ville: ${c.ville}`,
+  ].filter(Boolean);
+  return parts.length ? `\n\n[Contexte société enregistrée]\n${parts.join('\n')}` : '';
+}
+
+async function loadCompanyContext(): Promise<string> {
+  const { getActiveAtlasCompany } = await import('@/app/lib/atlas-active-company');
+  const { isAtlasSupabaseDataEnabled } = await import('@/app/lib/atlas-data-source');
+  const { readActiveCompanyFromLocalStorage } = await import('@/app/lib/atlas-companies-repository');
   try {
-    const raw = localStorage.getItem('atlas_company');
-    if (!raw) return '';
-    const c = JSON.parse(raw) as Record<string, string>;
-    const parts = [
-      c.raisonSociale && `Raison sociale: ${c.raisonSociale}`,
-      c.formeJuridique && `Forme: ${c.formeJuridique}`,
-      c.if_fiscal && `IF: ${c.if_fiscal}`,
-      c.ice && `ICE: ${c.ice}`,
-      c.regimeTVA && `Régime TVA: ${c.regimeTVA}`,
-      c.ville && `Ville: ${c.ville}`,
-    ].filter(Boolean);
-    return parts.length ? `\n\n[Contexte société enregistrée]\n${parts.join('\n')}` : '';
+    if (isAtlasSupabaseDataEnabled()) {
+      const active = await getActiveAtlasCompany();
+      if (!active) return '';
+      return formatCompanyContext(active);
+    }
+    const partial = readActiveCompanyFromLocalStorage();
+    if (!partial) return '';
+    return formatCompanyContext(partial);
   } catch {
     return '';
   }
@@ -58,7 +70,7 @@ export default function ConsultantPage() {
     const trimmed = text.trim();
     if (!trimmed || loading) return;
 
-    const context = loadCompanyContext();
+    const context = await loadCompanyContext();
     const userMessage = trimmed + (context && !trimmed.includes('Contexte société') ? context : '');
 
     setMessages((m) => [...m, { role: 'user', content: trimmed }]);
@@ -136,7 +148,7 @@ export default function ConsultantPage() {
             </div>
             <div>
               <h1 className="text-lg font-bold text-gray-800">Consultant IA</h1>
-              <p className="text-xs text-gray-400">Fiscalité, TVA, IS, CNSS — contexte société depuis Réglages</p>
+              <BetaSurfaceBadge label="Bêta · Fiscalité, TVA, IS, CNSS" className="mt-2 border-amber-100" />
             </div>
           </div>
         </header>

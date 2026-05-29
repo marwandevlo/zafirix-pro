@@ -3,7 +3,8 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { Sparkles } from 'lucide-react';
-import { getActivePlan, getTrialCountdown } from '@/app/lib/atlas-usage-limits';
+import { getActivePlan, getTrialCountdown, refreshAtlasUsageState } from '@/app/lib/atlas-usage-limits';
+import { isAtlasSupabaseDataEnabled } from '@/app/lib/atlas-data-source';
 import { trackEvent } from '@/app/lib/analytics-track';
 import { isOwnerSessionFlagSet } from '@/app/lib/owner';
 
@@ -12,7 +13,12 @@ export function TrialUpgradeBanner() {
   const [tick, setTick] = useState(0);
 
   useEffect(() => {
-    const onFocus = () => setTick((x) => x + 1);
+    const refresh = async () => {
+      if (isAtlasSupabaseDataEnabled()) await refreshAtlasUsageState();
+      setTick((x) => x + 1);
+    };
+    void refresh();
+    const onFocus = () => { void refresh(); };
     window.addEventListener('focus', onFocus);
     return () => window.removeEventListener('focus', onFocus);
   }, []);

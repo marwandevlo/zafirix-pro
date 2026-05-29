@@ -1,6 +1,12 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Building2, FileText, Users, Zap } from 'lucide-react';
-import { getActivePlan, getEffectivePlanLimits, getUsage } from '@/app/lib/atlas-usage-limits';
+import {
+  getActivePlan,
+  getEffectivePlanLimits,
+  getUsage,
+  refreshAtlasUsageState,
+} from '@/app/lib/atlas-usage-limits';
+import { isAtlasSupabaseDataEnabled } from '@/app/lib/atlas-data-source';
 import { formatLimit } from '@/app/lib/atlas-pricing-plans';
 
 type Row = {
@@ -24,13 +30,18 @@ function pct(used: number, limit: number | null): number | null {
 
 export function UsageWidget() {
   const [tick, setTick] = useState(0);
+  const supabaseMode = isAtlasSupabaseDataEnabled();
 
-  // keep it simple: update when tab regains focus
   useEffect(() => {
-    const onFocus = () => setTick((t) => t + 1);
+    const refresh = async () => {
+      if (supabaseMode) await refreshAtlasUsageState();
+      setTick((t) => t + 1);
+    };
+    void refresh();
+    const onFocus = () => { void refresh(); };
     window.addEventListener('focus', onFocus);
     return () => window.removeEventListener('focus', onFocus);
-  }, []);
+  }, [supabaseMode]);
 
   const plan = useMemo(() => {
     void tick;
@@ -55,7 +66,7 @@ export function UsageWidget() {
           </p>
         </div>
         <span className="text-[11px] font-semibold px-2 py-1 rounded-full border bg-gray-50 text-gray-600 border-gray-200">
-          LocalStorage
+          {supabaseMode ? 'Supabase' : 'LocalStorage'}
         </span>
       </div>
 
@@ -97,4 +108,3 @@ export function UsageWidget() {
     </div>
   );
 }
-

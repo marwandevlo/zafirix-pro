@@ -1,10 +1,24 @@
 'use client';
 import { useState, useEffect } from 'react';
-import { Building2, Save, CheckCircle } from 'lucide-react';
+import { Building2, Save, CheckCircle, User } from 'lucide-react';
 import { AppSidebar } from '@/app/components/shell/AppSidebar';
+import { isAtlasSupabaseDataEnabled } from '@/app/lib/atlas-data-source';
+import { getActiveAtlasCompany, saveActiveCompanyFields } from '@/app/lib/atlas-active-company';
+import {
+  getAtlasProfile,
+  patchAtlasProfile,
+  profileGuardErrorMessage,
+} from '@/app/lib/atlas-profiles-repository';
+import { atlasCompanyErrorMessage } from '@/app/lib/atlas-companies-repository';
+import { ATLAS_STORAGE_KEYS } from '@/app/lib/atlas-storage-keys';
+import type { AtlasCompany } from '@/app/types/atlas-company';
 
 export default function SettingsPage() {
   const [saved, setSaved] = useState(false);
+  const [saveError, setSaveError] = useState('');
+  const [loading, setLoading] = useState(true);
+  const [fullName, setFullName] = useState('');
+  const [accountEmail, setAccountEmail] = useState('');
   const [company, setCompany] = useState({
     raisonSociale: '',
     formeJuridique: 'SARL',
@@ -25,12 +39,87 @@ export default function SettingsPage() {
   });
 
   useEffect(() => {
-    const saved = localStorage.getItem('atlas_company');
-    if (saved) queueMicrotask(() => setCompany(JSON.parse(saved)));
+    void (async () => {
+      setLoading(true);
+      setSaveError('');
+      try {
+        if (isAtlasSupabaseDataEnabled()) {
+          const [profile, active] = await Promise.all([getAtlasProfile(), getActiveAtlasCompany()]);
+          if (profile) {
+            setFullName(profile.full_name);
+            setAccountEmail(profile.email);
+          }
+          if (!active) {
+            setLoading(false);
+            return;
+          }
+          const extra = active as AtlasCompany & Record<string, string | undefined>;
+          setCompany((prev) => ({
+            ...prev,
+            raisonSociale: active.raisonSociale ?? '',
+            formeJuridique: active.formeJuridique ?? 'SARL',
+            if_fiscal: active.if_fiscal ?? '',
+            ice: active.ice ?? '',
+            rc: active.rc ?? '',
+            cnss: active.cnss ?? '',
+            adresse: active.adresse ?? '',
+            ville: active.ville ?? '',
+            telephone: active.telephone ?? '',
+            email: active.email ?? '',
+            activite: active.activite ?? '',
+            regimeTVA: active.regimeTVA ?? 'mensuel',
+            taxeProfessionnelle: String(extra.taxeProfessionnelle ?? ''),
+            exerciceFiscal: String(extra.exerciceFiscal ?? '2025'),
+            ribBancaire: String(extra.ribBancaire ?? ''),
+            banque: String(extra.banque ?? ''),
+          }));
+          setLoading(false);
+          return;
+        }
+        const raw = localStorage.getItem(ATLAS_STORAGE_KEYS.activeCompany);
+        if (raw) setCompany(JSON.parse(raw));
+      } finally {
+        setLoading(false);
+      }
+    })();
   }, []);
 
-  const handleSave = () => {
-    localStorage.setItem('atlas_company', JSON.stringify(company));
+  const handleSave = async () => {
+    setSaveError('');
+    if (isAtlasSupabaseDataEnabled()) {
+      const profileRes = await patchAtlasProfile({ full_name: fullName, company_name: company.raisonSociale });
+      if (!profileRes.ok) {
+        setSaveError(profileGuardErrorMessage(profileRes.error));
+        return;
+      }
+      const res = await saveActiveCompanyFields({
+        raisonSociale: company.raisonSociale,
+        formeJuridique: company.formeJuridique,
+        if_fiscal: company.if_fiscal,
+        ice: company.ice,
+        rc: company.rc,
+        cnss: company.cnss,
+        adresse: company.adresse,
+        ville: company.ville,
+        telephone: company.telephone,
+        email: company.email,
+        activite: company.activite,
+        regimeTVA: company.regimeTVA,
+        actif: true,
+        ...( {
+          taxeProfessionnelle: company.taxeProfessionnelle,
+          exerciceFiscal: company.exerciceFiscal,
+          ribBancaire: company.ribBancaire,
+          banque: company.banque,
+        } as Record<string, string> ),
+      });
+      if (!res.ok) {
+        setSaveError(atlasCompanyErrorMessage(res.error));
+        return;
+      }
+    } else {
+      localStorage.setItem(ATLAS_STORAGE_KEYS.activeCompany, JSON.stringify(company));
+    }
     setSaved(true);
     setTimeout(() => setSaved(false), 3000);
   };
@@ -49,13 +138,49 @@ export default function SettingsPage() {
             <h1 className="text-xl font-bold text-gray-800">Paramètres de la société</h1>
             <p className="text-xs text-gray-400 mt-0.5">IF · ICE · RC · CNSS · Coordonnées fiscales</p>
           </div>
-          <button onClick={handleSave} className={`flex items-center gap-2 px-6 py-2 rounded-lg text-sm font-medium transition-colors ${saved ? 'bg-green-500 text-white' : 'bg-[#1B2A4A] text-white hover:bg-[#243660]'}`}>
+          <button type="button" onClick={() => void handleSave()} className={`flex items-center gap-2 px-6 py-2 rounded-lg text-sm font-medium transition-colors ${saved ? 'bg-green-500 text-white' : 'bg-[#1B2A4A] text-white hover:bg-[#243660]'}`}>
             {saved ? <><CheckCircle size={16} /> Sauvegardé</> : <><Save size={16} /> Enregistrer</>}
           </button>
         </header>
 
         <div className="flex-1 overflow-y-auto px-8 py-6 space-y-6">
+          {loading ? (
+            <p className="text-sm text-gray-500 text-center py-10">Chargement des paramètres…</p>
+          ) : null}
+          {saveError ? (
+            <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">{saveError}</div>
+          ) : null}
 
+          {isAtlasSupabaseDataEnabled() ? (
+            <div className="bg-white rounded-xl p-6 shadow-sm border border-gray-100">
+              <h2 className="font-semibold text-gray-700 mb-4 flex items-center gap-2">
+                <User size={16} className="text-indigo-500" />
+                Profil utilisateur
+              </h2>
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="text-xs text-gray-400 mb-1 block">Nom complet</label>
+                  <input
+                    value={fullName}
+                    onChange={(e) => setFullName(e.target.value)}
+                    placeholder="Votre nom"
+                    className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:border-blue-400"
+                  />
+                </div>
+                <div>
+                  <label className="text-xs text-gray-400 mb-1 block">Email du compte</label>
+                  <input
+                    value={accountEmail}
+                    readOnly
+                    className="w-full px-3 py-2 text-sm border border-gray-100 rounded-lg bg-gray-50 text-gray-500"
+                  />
+                </div>
+              </div>
+            </div>
+          ) : null}
+
+          {!loading && (
+          <>
           <div className="bg-white rounded-xl p-6 shadow-sm border border-gray-100">
             <h2 className="font-semibold text-gray-700 mb-4 flex items-center gap-2">
               <Building2 size={16} className="text-blue-500" />
@@ -154,6 +279,9 @@ export default function SettingsPage() {
               </div>
             </div>
           </div>
+
+          </>
+          )}
 
         </div>
       </main>

@@ -1,45 +1,32 @@
 'use client';
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Plus, Trash2, Pencil, Search, CheckCircle } from 'lucide-react';
 import type { AtlasClient } from '@/app/types/atlas-client';
 import type { AtlasPaymentTerms, AtlasPaymentTermsPreset } from '@/app/types/atlas-payment-terms';
 import { normalizePaymentTerms, paymentTermsLabel } from '@/app/types/atlas-payment-terms';
-import { readClientsFromLocalStorage, writeClientsToLocalStorage } from '@/app/lib/atlas-clients-repository';
+import {
+  atlasClientErrorMessage,
+  deleteAtlasClient,
+  listAtlasClients,
+  readClientsFromLocalStorage,
+  upsertAtlasClient,
+  writeClientsToLocalStorage,
+} from '@/app/lib/atlas-clients-repository';
 import { AppSidebar } from '@/app/components/shell/AppSidebar';
 import { isAtlasSupabaseDataEnabled } from '@/app/lib/atlas-data-source';
 import { EmptyStateCta } from '@/app/components/ui/EmptyStateCta';
 import { trackOnboardingMilestoneOnce } from '@/app/lib/atlas-onboarding-milestones';
-
-const seedClients: AtlasClient[] = [
-  {
-    id: 1,
-    name: 'Société Alpha',
-    email: 'contact@alpha.ma',
-    phone: '0522000000',
-    city: 'Casablanca',
-    paymentTerms: { kind: 'preset', days: 30 },
-    balance: 0,
-    createdAt: new Date().toISOString(),
-    updatedAt: new Date().toISOString(),
-  },
-  {
-    id: 2,
-    name: 'Entreprise Beta',
-    email: 'finance@beta.ma',
-    phone: '0537000000',
-    city: 'Rabat',
-    paymentTerms: { kind: 'preset', days: 60 },
-    balance: 10200,
-    createdAt: new Date().toISOString(),
-    updatedAt: new Date().toISOString(),
-  },
-];
+import { getActiveCompanyDbRowId } from '@/app/lib/atlas-active-company';
 
 export default function ClientsPage() {
   const [clients, setClients] = useState<AtlasClient[]>([]);
   const [search, setSearch] = useState('');
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState<AtlasClient['id'] | null>(null);
+  const [loadError, setLoadError] = useState('');
+  const [saveError, setSaveError] = useState('');
+  const [loading, setLoading] = useState(true);
+  const [activeCompanyId, setActiveCompanyId] = useState<string | null>(null);
 
   const [termsKind, setTermsKind] = useState<'30' | '60' | '90' | 'custom'>('30');
   const [termsCustomDays, setTermsCustomDays] = useState('45');
@@ -52,21 +39,33 @@ export default function ClientsPage() {
     balance: '0',
   });
 
-  useEffect(() => {
+  const reloadClients = useCallback(async () => {
+    setLoadError('');
+    if (isAtlasSupabaseDataEnabled()) {
+      setLoading(true);
+      try {
+        const companyId = await getActiveCompanyDbRowId();
+        setActiveCompanyId(companyId);
+        if (!companyId) {
+          setClients([]);
+          setLoadError('Sélectionnez une société active dans Mes sociétés pour gérer vos clients.');
+          return;
+        }
+        const list = await listAtlasClients({ companyId });
+        setClients(list);
+      } finally {
+        setLoading(false);
+      }
+      return;
+    }
+    setLoading(false);
     const existing = readClientsFromLocalStorage();
-    queueMicrotask(() => {
-      if (existing.length) {
-        setClients(existing);
-        return;
-      }
-      if (!isAtlasSupabaseDataEnabled()) {
-        setClients(seedClients);
-        writeClientsToLocalStorage(seedClients);
-        return;
-      }
-      setClients([]);
-    });
+    setClients(existing);
   }, []);
+
+  useEffect(() => {
+    void reloadClients();
+  }, [reloadClients]);
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -78,7 +77,7 @@ export default function ClientsPage() {
     );
   }, [clients, search]);
 
-  const saveClients = (next: AtlasClient[]) => {
+  const persistLocal = (next: AtlasClient[]) => {
     setClients(next);
     writeClientsToLocalStorage(next);
   };
@@ -88,9 +87,14 @@ export default function ClientsPage() {
     setTermsKind('30');
     setTermsCustomDays('45');
     setEditingId(null);
+    setSaveError('');
   };
 
   const startCreate = () => {
+    if (isAtlasSupabaseDataEnabled() && !activeCompanyId) {
+      setSaveError(atlasClientErrorMessage('company_required'));
+      return;
+    }
     resetForm();
     setShowForm(true);
   };
@@ -121,17 +125,20 @@ export default function ClientsPage() {
     setShowForm(true);
   };
 
-  const upsertClient = () => {
+  const upsertClient = async () => {
     if (!form.name.trim()) return;
+    setSaveError('');
     const paymentTerms: AtlasPaymentTerms =
       termsKind === 'custom'
         ? { kind: 'custom', days: Number.parseInt(termsCustomDays || '0', 10) || 0 }
         : { kind: 'preset', days: Number.parseInt(termsKind, 10) as AtlasPaymentTermsPreset };
     const normalized = normalizePaymentTerms(paymentTerms);
     const now = new Date().toISOString();
+    const isUpdate = editingId != null;
 
     const payload: AtlasClient = {
-      id: editingId ?? Date.now(),
+      id: isUpdate ? editingId! : Date.now(),
+      companyId: activeCompanyId ?? undefined,
       name: form.name.trim(),
       email: form.email.trim() || undefined,
       phone: form.phone.trim() || undefined,
@@ -139,26 +146,61 @@ export default function ClientsPage() {
       city: form.city.trim() || undefined,
       paymentTerms: normalized,
       balance: Number.parseFloat(form.balance || '0') || 0,
-      createdAt: editingId ? (clients.find((c) => c.id === editingId)?.createdAt ?? now) : now,
+      createdAt: isUpdate ? (clients.find((c) => c.id === editingId)?.createdAt ?? now) : now,
       updatedAt: now,
     };
 
-    const wasFirst = !editingId && clients.length === 0;
-    const next = editingId
-      ? clients.map((c) => (c.id === editingId ? payload : c))
-      : [...clients, payload];
+    const wasFirst = !isUpdate && clients.length === 0;
 
-    saveClients(next);
-    if (wasFirst) trackOnboardingMilestoneOnce('atlas_ms_first_client', 'onboarding_first_client_created');
+    if (isAtlasSupabaseDataEnabled()) {
+      const companyId = activeCompanyId ?? (await getActiveCompanyDbRowId());
+      if (!companyId) {
+        setSaveError(atlasClientErrorMessage('company_required'));
+        return;
+      }
+      if (isUpdate && typeof payload.id !== 'string') {
+        setSaveError(atlasClientErrorMessage('invalid_id'));
+        return;
+      }
+      const supabasePayload: AtlasClient = isUpdate
+        ? { ...payload, id: String(payload.id) }
+        : { ...payload, id: '' };
+      const res = await upsertAtlasClient(supabasePayload, { companyId, isUpdate });
+      if (!res.ok) {
+        setSaveError(atlasClientErrorMessage(res.error));
+        return;
+      }
+      await reloadClients();
+      if (wasFirst) trackOnboardingMilestoneOnce('atlas_ms_first_client', 'onboarding_first_client_created');
+    } else {
+      const next = isUpdate
+        ? clients.map((c) => (c.id === editingId ? payload : c))
+        : [...clients, payload];
+      persistLocal(next);
+      if (wasFirst) trackOnboardingMilestoneOnce('atlas_ms_first_client', 'onboarding_first_client_created');
+    }
+
     resetForm();
     setShowForm(false);
   };
 
-  const removeClient = (id: AtlasClient['id']) => {
-    saveClients(clients.filter((c) => c.id !== id));
+  const removeClient = async (id: AtlasClient['id']) => {
+    setSaveError('');
+    if (isAtlasSupabaseDataEnabled()) {
+      const res = await deleteAtlasClient(id);
+      if (!res.ok) {
+        setSaveError(atlasClientErrorMessage(res.error));
+        return;
+      }
+      await reloadClients();
+      return;
+    }
+    persistLocal(clients.filter((c) => c.id !== id));
   };
 
   const totalBalance = useMemo(() => clients.reduce((sum, c) => sum + (c.balance || 0), 0), [clients]);
+
+  const showEmpty = !loading && clients.length === 0 && !loadError;
 
   return (
     <div className="flex h-screen bg-gray-50">
@@ -179,7 +221,16 @@ export default function ClientsPage() {
         </header>
 
         <div className="flex-1 overflow-y-auto px-8 py-6 space-y-4">
-          {clients.length === 0 ? (
+          {loading ? (
+            <p className="text-sm text-gray-500 text-center py-10">Chargement des clients…</p>
+          ) : null}
+          {loadError ? (
+            <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">{loadError}</div>
+          ) : null}
+          {saveError ? (
+            <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">{saveError}</div>
+          ) : null}
+          {showEmpty ? (
             <EmptyStateCta
               lang="fr"
               title="Aucun client"
@@ -189,7 +240,7 @@ export default function ClientsPage() {
               onPrimary={() => startCreate()}
             />
           ) : null}
-          {clients.length > 0 ? (
+          {!loading && clients.length > 0 ? (
           <>
           <div className="grid grid-cols-3 gap-4">
             <div className="bg-white rounded-xl p-5 shadow-sm border border-gray-100">
@@ -317,12 +368,14 @@ export default function ClientsPage() {
 
                 <div className="col-span-3 flex gap-3">
                   <button
-                    onClick={upsertClient}
+                    type="button"
+                    onClick={() => void upsertClient()}
                     className="px-6 py-2 bg-[#1B2A4A] text-white rounded-lg text-sm hover:bg-[#243660]"
                   >
                     {editingId ? 'Enregistrer' : 'Ajouter'}
                   </button>
                   <button
+                    type="button"
                     onClick={() => {
                       resetForm();
                       setShowForm(false);
@@ -356,7 +409,7 @@ export default function ClientsPage() {
                   </tr>
                 ) : (
                 filtered.map((c) => (
-                  <tr key={c.id} className="border-b border-gray-50 hover:bg-gray-50">
+                  <tr key={String(c.id)} className="border-b border-gray-50 hover:bg-gray-50">
                     <td className="px-4 py-3">
                       <p className="font-medium text-gray-700">{c.name}</p>
                       <p className="text-xs text-gray-400">{c.city ?? '-'}</p>
@@ -372,6 +425,7 @@ export default function ClientsPage() {
                     <td className="px-4 py-3">
                       <div className="flex items-center gap-2 justify-end">
                         <button
+                          type="button"
                           onClick={() => startEdit(c)}
                           className="text-gray-300 hover:text-blue-500 transition-colors"
                           aria-label="Modifier"
@@ -379,7 +433,8 @@ export default function ClientsPage() {
                           <Pencil size={14} />
                         </button>
                         <button
-                          onClick={() => removeClient(c.id)}
+                          type="button"
+                          onClick={() => void removeClient(c.id)}
                           className="text-gray-300 hover:text-red-500 transition-colors"
                           aria-label="Supprimer"
                         >
@@ -400,4 +455,3 @@ export default function ClientsPage() {
     </div>
   );
 }
-

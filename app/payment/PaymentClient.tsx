@@ -6,6 +6,7 @@ import { ArrowLeft, CreditCard, BadgeCheck, Landmark, Wallet, ShieldCheck, Recei
 import { formatLimit, formatPriceMadYear, getAtlasPlanById } from '@/app/lib/atlas-pricing-plans';
 import { getCompanyAddonById } from '@/app/lib/atlas-company-addons';
 import { isAtlasSupabaseDataEnabled } from '@/app/lib/atlas-data-source';
+import { blockCriticalLocalStorageInProduction } from '@/app/lib/atlas-runtime-guards';
 import { supabase } from '@/app/lib/supabase';
 
 type PaymentMethod = 'card' | 'cmi' | 'manual';
@@ -89,6 +90,11 @@ export default function PaymentClient() {
           return;
         }
 
+        if (process.env.NODE_ENV === 'production') {
+          setError('Paiement indisponible : configuration serveur requise (Supabase).');
+          return;
+        }
+
         const id = createReferenceId();
         const pending: PendingSubscription = {
           id,
@@ -142,6 +148,11 @@ export default function PaymentClient() {
           return;
         }
         router.push(`/payment/success?ref=${encodeURIComponent(id)}`);
+        return;
+      }
+
+      if (process.env.NODE_ENV === 'production') {
+        setError('Paiement indisponible : configuration serveur requise (Supabase).');
         return;
       }
 

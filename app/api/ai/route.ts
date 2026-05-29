@@ -2,6 +2,34 @@ import Anthropic from '@anthropic-ai/sdk';
 import { NextRequest, NextResponse } from 'next/server';
 import { authenticateAiRequest } from '@/app/lib/ai-auth-server';
 import { checkAiRateLimit } from '@/app/lib/ai-rate-limit';
+import { ATLAS_AI_SAFETY_NOTICE } from '@/app/lib/atlas-ai-safety';
+import {
+  anthropicImageMediaType,
+  isPdfMimeType,
+  OCR_PROVIDER,
+} from '@/app/lib/atlas-ocr';
+import { captureAtlasServerException } from '@/app/lib/atlas-server-log';
+
+const IS_DEV = process.env.NODE_ENV === 'development';
+
+function aiError(
+  status: number,
+  step: string,
+  code: string,
+  message: string,
+  extra?: Record<string, unknown>,
+) {
+  const payload = {
+    error: message,
+    code,
+    step,
+    message,
+    provider: OCR_PROVIDER,
+    ...extra,
+  };
+  if (IS_DEV) console.error('[api/ai]', payload);
+  return NextResponse.json(IS_DEV ? payload : { error: message, code }, { status });
+}
 
 const client = new Anthropic({
   apiKey: process.env.ANTHROPIC_API_KEY,
@@ -15,7 +43,8 @@ const CONSULTANT_SYSTEM = `Tu es un expert-comptable et conseiller fiscal maroca
 - La CNSS (part salariale 4.48%, patronale 21.26%) et AMO
 - Les obligations déclaratives DGI
 Réponds en français ou en darija selon la langue de l'utilisateur. Sois précis et pratique.
-Rappelle que tes réponses sont informatives et ne remplacent pas un conseil juridique ou une mission d'expert-comptable agréé.`;
+Rappelle que tes réponses sont informatives et ne remplacent pas un conseil juridique ou une mission d'expert-comptable agréé.
+Ne prétends jamais qu'une télé-déclaration ou un dépôt officiel a été effectué via cette application.`;
 
 const JURIDIQUE_SYSTEM = `Tu es un expert juridique marocain spécialisé en droit des sociétés, formalités RC et textes d'actes.
 Tu rédiges des documents professionnels en français, conformes aux usages marocains.
@@ -74,12 +103,14 @@ export async function POST(request: NextRequest) {
   const auth = await authenticateAiRequest(request);
   if (!auth.ok) {
     const msg =
-      auth.code === 'missing_token'
-        ? 'Authentification requise. Connectez-vous et réessayez.'
-        : auth.code === 'invalid_token'
-          ? 'Session invalide ou expirée. Reconnectez-vous.'
-          : 'Configuration serveur incomplète.';
-    return NextResponse.json({ error: msg }, { status: auth.status });
+      auth.code === 'ocr_not_configured' || auth.code === 'server_not_configured'
+        ? 'OCR provider not configured (ANTHROPIC_API_KEY missing).'
+        : auth.code === 'missing_token'
+          ? 'Authentification requise. Connectez-vous puis réessayez (session expirée ou absente).'
+          : auth.code === 'invalid_token'
+            ? 'Session invalide ou expirée. Reconnectez-vous.'
+            : 'Configuration serveur incomplète.';
+    return aiError(auth.status, 'auth', auth.code, msg);
   }
 
   const rate = checkAiRateLimit(`ai:${auth.user.id}`);
@@ -95,10 +126,11 @@ export async function POST(request: NextRequest) {
       message?: string;
       type?: string;
       imageBase64?: string;
+      mimeType?: string;
       systemPrompt?: string;
     };
 
-    const { message, type, imageBase64, systemPrompt: systemOverride } = body;
+    const { message, type, imageBase64, mimeType, systemPrompt: systemOverride } = body;
 
     let systemPrompt = '';
 
@@ -121,6 +153,29 @@ export async function POST(request: NextRequest) {
     let messages: Anthropic.MessageParam[];
 
     if (type === 'ocr' && imageBase64) {
+      const mime = (mimeType ?? 'image/jpeg').toLowerCase();
+
+      if (isPdfMimeType(mime)) {
+        return aiError(
+          422,
+          'pdf_validate',
+          'pdf_not_supported',
+          'PDF OCR is not supported yet; use JPG or PNG.',
+          { mimeType: mime },
+        );
+      }
+
+      const mediaType = anthropicImageMediaType(mime);
+      if (!mediaType) {
+        return aiError(
+          422,
+          'mime_validate',
+          'mime_not_supported',
+          `Unsupported OCR mime type: ${mime || '(empty)'}`,
+          { mimeType: mime },
+        );
+      }
+
       messages = [{
         role: 'user',
         content: [
@@ -128,7 +183,7 @@ export async function POST(request: NextRequest) {
             type: 'image',
             source: {
               type: 'base64',
-              media_type: 'image/jpeg',
+              media_type: mediaType,
               data: imageBase64,
             },
           },
@@ -144,7 +199,7 @@ export async function POST(request: NextRequest) {
 
     const response = await client.messages.create({
       model: 'claude-sonnet-4-5',
-      max_tokens: 8000,
+      max_tokens: 4096,
       system: systemPrompt,
       messages,
     });
@@ -153,13 +208,20 @@ export async function POST(request: NextRequest) {
 
     if (type === 'assistant') {
       const parsed = tryParseAssistantJson(text);
-      if (parsed) return NextResponse.json(parsed);
-      return NextResponse.json({ response: text, actions: [] });
+      if (parsed) {
+        return NextResponse.json({ ...parsed, safetyNotice: ATLAS_AI_SAFETY_NOTICE });
+      }
+      return NextResponse.json({ response: text, actions: [], safetyNotice: ATLAS_AI_SAFETY_NOTICE });
     }
 
-    return NextResponse.json({ response: text });
+    return NextResponse.json({
+      response: text,
+      safetyNotice: ATLAS_AI_SAFETY_NOTICE,
+      ...(IS_DEV && type === 'ocr' ? { provider: OCR_PROVIDER, step: 'complete' } : {}),
+    });
   } catch (error) {
-    console.error('Claude API error:', error);
-    return NextResponse.json({ error: 'Erreur API' }, { status: 500 });
+    await captureAtlasServerException(error, { route: '/api/ai' });
+    const message = error instanceof Error ? error.message : 'Erreur API';
+    return aiError(500, 'ai_provider', 'ai_provider_error', message);
   }
 }

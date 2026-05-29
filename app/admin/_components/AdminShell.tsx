@@ -8,12 +8,9 @@ import { Building2, CreditCard, LayoutDashboard, ShieldCheck, Users, Boxes, BarC
 import { atlasDataBackend, isAtlasSupabaseDataEnabled } from '@/app/lib/atlas-data-source';
 import { supabase } from '@/app/lib/supabase';
 import { AdminTableSkeleton } from '@/app/admin/_components/AdminUi';
+import { isLocalDevAdminEnabled } from '@/app/lib/atlas-sprint0-flags';
 
 const LOCAL_ADMIN_ROLE_KEY = 'atlas_user_role';
-
-function isLocalDevAdminEnabled(): boolean {
-  return process.env.NODE_ENV === 'development' && process.env.NEXT_PUBLIC_ATLAS_ENABLE_LOCAL_ADMIN === 'true';
-}
 
 function hasLocalAdminRole(): boolean {
   if (typeof window === 'undefined') return false;

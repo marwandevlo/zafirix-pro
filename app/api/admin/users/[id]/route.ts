@@ -4,6 +4,7 @@ import { getSupabaseServiceRoleClient } from '@/app/lib/supabase-admin';
 import { requireAdmin, writeAdminLog } from '@/app/lib/admin/require-admin';
 import { isOwnerEmail } from '@/app/lib/owner';
 import { roleGrantsAdminAccess } from '@/app/lib/admin/can-access-admin';
+import { applyAdminProfilePlanToEntitlements } from '@/app/lib/atlas-subscription-sync';
 
 function isUuid(value: string): boolean {
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value);
@@ -164,6 +165,14 @@ export async function PATCH(request: NextRequest, ctx: { params: Promise<{ id: s
 
   const { error: upErr } = await admin.from('profiles').update(updates).eq('id', userId);
   if (upErr) return NextResponse.json({ error: 'db_error' }, { status: 500 });
+
+  // Real SaaS billing integrity: when an admin changes the plan, rewrite the
+  // user's atlas_subscriptions entitlements so usage limits actually follow the
+  // profile plan (prevents "profile says pro but atlas says free" drift).
+  if (plan) {
+    const ent = await applyAdminProfilePlanToEntitlements(admin, userId, plan);
+    if (!ent.ok) return NextResponse.json({ error: ent.error }, { status: 400 });
+  }
 
   // Keep JWT metadata role in sync for middleware protection.
   if (role) {

@@ -2,8 +2,17 @@
 import { useState } from 'react';
 import { Download, TrendingUp, Calculator, Users, Receipt } from 'lucide-react';
 import { AppSidebar } from '@/app/components/shell/AppSidebar';
+import { ProductionBlockedSurface } from '@/app/components/safety/ProductionBlockedSurface';
+import { isDemoFeatureBlocked } from '@/app/lib/atlas-runtime-guards';
 
 export default function RapportsPage() {
+  if (isDemoFeatureBlocked('reports_static_pdf')) {
+    return <ProductionBlockedSurface title="Rapports & Declarations PDF" featureId="reports_static_pdf" />;
+  }
+  return <RapportsPageContent />;
+}
+
+function RapportsPageContent() {
   const [generating, setGenerating] = useState<string | null>(null);
 
   const generatePDF = async (type: string) => {

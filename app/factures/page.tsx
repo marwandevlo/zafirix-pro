@@ -3,7 +3,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { Plus, Trash2, Download, Send, ReceiptText, CheckCircle2, Wallet, AlertTriangle } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { addDaysYmd, isOverdue, todayYmd } from '@/app/lib/atlas-dates';
-import { deleteAtlasInvoice, listAtlasInvoices, upsertAtlasInvoice, writeInvoicesToLocalStorage } from '@/app/lib/atlas-invoices-repository';
+import { deleteAtlasInvoice, atlasInvoiceErrorMessage, listAtlasInvoices, upsertAtlasInvoice } from '@/app/lib/atlas-invoices-repository';
 import type { AtlasInvoice } from '@/app/types/atlas-invoice';
 import type { AtlasPaymentTerms, AtlasPaymentTermsPreset } from '@/app/types/atlas-payment-terms';
 import { normalizePaymentTerms, paymentTermsLabel } from '@/app/types/atlas-payment-terms';
@@ -11,12 +11,14 @@ import { isAtlasSupabaseDataEnabled } from '@/app/lib/atlas-data-source';
 import type { AtlasPayment } from '@/app/types/atlas-payment';
 import { listAtlasPayments, upsertAtlasPayment } from '@/app/lib/atlas-payments-repository';
 import { fetchAi } from '@/app/lib/fetch-ai';
-import { readActiveCompanyFromLocalStorage } from '@/app/lib/atlas-companies-repository';
+import { getActiveAtlasCompany, getActiveCompanyDbRowId, resolveClientIdByName } from '@/app/lib/atlas-active-company';
+import type { AtlasCompany } from '@/app/types/atlas-company';
 import { createInvoicePdfDoc, downloadInvoicePdf, invoicePdfFilename } from '@/app/lib/atlas-invoice-pdf';
 import {
   canCreateInvoice,
   canPerformOperation,
   incrementUsage,
+  refreshAtlasUsageState,
   syncInvoiceUsageCount,
 } from '@/app/lib/atlas-usage-limits';
 import { TrialLimitNudgeModal } from '@/app/components/trial/TrialLimitNudgeModal';
@@ -65,66 +67,12 @@ export default function FacturesPage() {
 
   useEffect(() => {
     const load = async () => {
-      const inv = await listAtlasInvoices();
-      let invoiceCount = inv.length;
-      if (!inv.length && !isAtlasSupabaseDataEnabled()) {
-        const seed: AtlasInvoice[] = [
-          {
-            id: 1,
-            number: 'F-2026-001',
-            clientName: 'Société Alpha',
-            issueDate: '2026-04-01',
-            amountHT: 15000,
-            vatRate: 0.2,
-            vatAmount: 3000,
-            totalTTC: 18000,
-            paymentTerms: { kind: 'preset', days: 30 },
-            dueDate: addDaysYmd('2026-04-01', 30),
-            status: 'paid',
-            paidAt: '2026-04-15',
-            paidAmount: 18000,
-            createdAt: new Date().toISOString(),
-            updatedAt: new Date().toISOString(),
-          },
-          {
-            id: 2,
-            number: 'F-2026-002',
-            clientName: 'Entreprise Beta',
-            issueDate: '2026-04-05',
-            amountHT: 8500,
-            vatRate: 0.2,
-            vatAmount: 1700,
-            totalTTC: 10200,
-            paymentTerms: { kind: 'preset', days: 60 },
-            dueDate: addDaysYmd('2026-04-05', 60),
-            status: 'sent',
-            createdAt: new Date().toISOString(),
-            updatedAt: new Date().toISOString(),
-          },
-          {
-            id: 3,
-            number: 'F-2026-003',
-            clientName: 'Client Gamma',
-            issueDate: '2026-03-20',
-            amountHT: 5000,
-            vatRate: 0.2,
-            vatAmount: 1000,
-            totalTTC: 6000,
-            paymentTerms: { kind: 'preset', days: 30 },
-            dueDate: addDaysYmd('2026-03-20', 30),
-            status: 'sent',
-            createdAt: new Date().toISOString(),
-            updatedAt: new Date().toISOString(),
-          },
-        ];
-        setInvoices(seed);
-        writeInvoicesToLocalStorage(seed);
-        invoiceCount = seed.length;
-      } else {
-        setInvoices(inv);
-        invoiceCount = inv.length;
+      if (isAtlasSupabaseDataEnabled()) {
+        await refreshAtlasUsageState();
       }
-      syncInvoiceUsageCount(invoiceCount);
+      const inv = await listAtlasInvoices();
+      setInvoices(inv);
+      syncInvoiceUsageCount(inv.length);
 
       const pay = await listAtlasPayments();
       setPayments(pay);
@@ -132,8 +80,16 @@ export default function FacturesPage() {
     void load();
   }, []);
 
-  const addFacture = () => {
+  const addFacture = async () => {
     if (!form.numero || !form.client || !form.montantHT) return;
+    if (isAtlasSupabaseDataEnabled()) {
+      await refreshAtlasUsageState();
+      const companyId = await getActiveCompanyDbRowId();
+      if (!companyId) {
+        setLimitNotice('Sélectionnez une société active dans Mes sociétés pour créer une facture.');
+        return;
+      }
+    }
     const wasEmpty = invoices.length === 0;
     const invDecision = canCreateInvoice();
     if (!invDecision.allowed) {
@@ -165,7 +121,7 @@ export default function FacturesPage() {
 
     const now = new Date().toISOString();
     const next: AtlasInvoice = {
-      id: Date.now(),
+      id: isAtlasSupabaseDataEnabled() ? crypto.randomUUID() : Date.now(),
       number: form.numero,
       clientName: form.client,
       issueDate,
@@ -181,10 +137,24 @@ export default function FacturesPage() {
     };
 
     const updated = [...invoices, next];
-    setInvoices(updated);
-    void upsertAtlasInvoice(next);
+
+    if (isAtlasSupabaseDataEnabled()) {
+      const companyId = await getActiveCompanyDbRowId();
+      const clientId = await resolveClientIdByName(form.client, companyId);
+      const res = await upsertAtlasInvoice(next, { companyId, clientId });
+      if (!res.ok) {
+        setLimitNotice(atlasInvoiceErrorMessage(res.error));
+        return;
+      }
+      const inv = await listAtlasInvoices();
+      setInvoices(inv);
+      syncInvoiceUsageCount(inv.length);
+    } else {
+      setInvoices(updated);
+      void upsertAtlasInvoice(next);
+      syncInvoiceUsageCount(updated.length);
+    }
     incrementUsage('operations', 1);
-    syncInvoiceUsageCount(updated.length);
     if (wasEmpty) trackOnboardingMilestoneOnce('atlas_ms_first_invoice', 'onboarding_first_invoice_created');
 
     setForm({ numero: '', client: '', date: '', montantHT: '', taux: '20' });
@@ -287,8 +257,8 @@ export default function FacturesPage() {
     incrementUsage('operations', 1);
   };
 
-  const downloadPdf = (r: FactureRow) => {
-    const company = readActiveCompanyFromLocalStorage();
+  const downloadPdf = async (r: FactureRow) => {
+    const company = (await getActiveAtlasCompany()) as AtlasCompany | null;
     downloadInvoicePdf({
       company,
       invoice: {
@@ -316,7 +286,7 @@ export default function FacturesPage() {
       `— ZAFIRIX PRO\\n\\n` +
       `Note: si la pièce jointe ne s'ajoute pas automatiquement, merci de télécharger le PDF depuis ZAFIRIX PRO et l'ajouter à cet email.`;
 
-    const company = readActiveCompanyFromLocalStorage();
+    const company = (await getActiveAtlasCompany()) as AtlasCompany | null;
     const pdfData = {
       numero: r.numero,
       client: r.client,
@@ -673,7 +643,7 @@ export default function FacturesPage() {
                   <option value="0">Exonéré</option>
                 </select>
                 <div className="flex gap-2">
-                  <button onClick={addFacture} className="flex-1 px-4 py-2 bg-[#1B2A4A] text-white rounded-lg text-sm hover:bg-[#243660] transition-colors">Créer</button>
+                  <button type="button" onClick={() => void addFacture()} className="flex-1 px-4 py-2 bg-[#1B2A4A] text-white rounded-lg text-sm hover:bg-[#243660] transition-colors">Créer</button>
                   <button onClick={() => setShowForm(false)} className="px-4 py-2 border border-gray-200 rounded-lg text-sm text-gray-600 hover:bg-gray-50">Annuler</button>
                 </div>
               </div>

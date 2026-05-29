@@ -3,9 +3,13 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { Building2, CheckCircle2, Circle, FileText, Users } from 'lucide-react';
-import { readCompaniesFromLocalStorage } from '@/app/lib/atlas-companies-repository';
+import {
+  readCompaniesFromLocalStorage,
+  listAtlasCompanies,
+} from '@/app/lib/atlas-companies-repository';
 import { listAtlasInvoices } from '@/app/lib/atlas-invoices-repository';
-import { readClientsFromLocalStorage } from '@/app/lib/atlas-clients-repository';
+import { readClientsFromLocalStorage, listAtlasClients } from '@/app/lib/atlas-clients-repository';
+import { getActiveCompanyDbRowId } from '@/app/lib/atlas-active-company';
 import { ATLAS_INCIDENT_HOTFIX_GROWTH } from '@/app/lib/atlas-hotfix';
 import { isAtlasSupabaseDataEnabled } from '@/app/lib/atlas-data-source';
 
@@ -35,6 +39,20 @@ export function TrialOnboardingChecklist({ lang }: Props) {
   useEffect(() => {
     let cancelled = false;
     (async () => {
+      if (isAtlasSupabaseDataEnabled()) {
+        const companyId = await getActiveCompanyDbRowId();
+        const [companies, inv, clients] = await Promise.all([
+          listAtlasCompanies(),
+          listAtlasInvoices(),
+          listAtlasClients(companyId ? { companyId } : undefined),
+        ]);
+        if (cancelled) return;
+        setCompanyOk(companies.length > 0);
+        setClientOk(clients.length > 0);
+        setInvoiceOk(inv.length > 0);
+        return;
+      }
+
       const companies = readCompaniesFromLocalStorage();
       const inv = await listAtlasInvoices();
       const clients = readClientsFromLocalStorage();

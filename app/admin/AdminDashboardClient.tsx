@@ -21,6 +21,7 @@ import {
 import { atlasDataBackend, isAtlasSupabaseDataEnabled } from '@/app/lib/atlas-data-source';
 import { supabase } from '@/app/lib/supabase';
 import { ATLAS_PRICING_PLANS, formatLimit } from '@/app/lib/atlas-pricing-plans';
+import { isLocalDevAdminEnabled } from '@/app/lib/atlas-sprint0-flags';
 
 type DashboardStats = {
   paymentRequests: { pending: number; paid: number; rejected: number; total: number };
@@ -32,11 +33,17 @@ type DashboardStats = {
   warnings?: string[];
 };
 
-const LOCAL_ADMIN_ROLE_KEY = 'atlas_user_role';
+const EMPTY_DASHBOARD_STATS: DashboardStats = {
+  paymentRequests: { pending: 0, paid: 0, rejected: 0, total: 0 },
+  subscriptions: { active: 0, trial: 0, cancelled: 0, total: 0 },
+  users: { total: 0, active: 0, trial: 0, paid: 0 },
+  companies: { total: 0 },
+  recentPaymentRequests: [],
+  system: { backend: 'supabase', localAdminMode: false },
+  warnings: [],
+};
 
-function isLocalDevAdminEnabled(): boolean {
-  return process.env.NODE_ENV === 'development' && process.env.NEXT_PUBLIC_ATLAS_ENABLE_LOCAL_ADMIN === 'true';
-}
+const LOCAL_ADMIN_ROLE_KEY = 'atlas_user_role';
 
 function hasLocalAdminRole(): boolean {
   if (typeof window === 'undefined') return false;
@@ -104,9 +111,25 @@ export default function AdminDashboardClient() {
             headers: { Authorization: `Bearer ${token}` },
           });
 
-          const json: unknown = await res.json().catch(() => ({}));
-          if (!res.ok) {
+          const json = (await res.json().catch(() => ({}))) as DashboardStats & { error?: string };
+
+          if (res.status === 401) {
+            router.push('/login?next=/admin');
+            return;
+          }
+          if (res.status === 403) {
             router.push('/access-denied');
+            return;
+          }
+          if (!res.ok) {
+            if (!cancelled) {
+              setStats(EMPTY_DASHBOARD_STATS);
+              setError(
+                typeof json.error === 'string'
+                  ? json.error
+                  : 'Impossible de charger les statistiques admin. Réessayez plus tard.',
+              );
+            }
             return;
           }
 

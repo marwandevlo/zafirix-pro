@@ -4,6 +4,14 @@ import { getProCompanyAddonExtraSlots } from '@/app/lib/atlas-company-addons';
 import { getReferralExtraCompanySlots } from '@/app/lib/atlas-referral-bonus-state';
 import { getAtlasPlanById, type AtlasLimit, type AtlasPricingPlan, type AtlasPricingPlan as Plan } from '@/app/lib/atlas-pricing-plans';
 import { isOwnerSessionFlagSet } from '@/app/lib/owner';
+import { isAtlasSupabaseDataEnabled } from '@/app/lib/atlas-data-source';
+import { supabase } from '@/app/lib/supabase';
+import { requireSupabaseUser } from '@/app/lib/atlas-supabase-guard';
+import {
+  resolveEffectiveEntitlement,
+  type AtlasEntitlementRow,
+} from '@/app/lib/atlas-subscription-sync';
+import { blockCriticalLocalStorageInProduction } from '@/app/lib/atlas-runtime-guards';
 
 export type AtlasUsage = {
   companies: number;
@@ -51,7 +59,14 @@ function normalizeNumber(n: unknown): number {
   return Math.max(0, Math.floor(v));
 }
 
+/** In-memory snapshot when Supabase is the data backend (never localStorage). */
+let usageSnapshot: AtlasUsage = { ...DEFAULT_USAGE };
+let activePlanSnapshot: AtlasPricingPlan | null = null;
+let activeSubscriptionsSnapshot: AtlasActiveSubscriptionLike[] = [];
+let usageRefreshPromise: Promise<void> | null = null;
+
 function readJson<T>(key: string): T | null {
+  if (blockCriticalLocalStorageInProduction(key)) return null;
   if (typeof window === 'undefined') return null;
   try {
     const raw = localStorage.getItem(key);
@@ -63,11 +78,81 @@ function readJson<T>(key: string): T | null {
 }
 
 function writeJson<T>(key: string, value: T): void {
+  if (blockCriticalLocalStorageInProduction(key)) return;
   if (typeof window === 'undefined') return;
   localStorage.setItem(key, JSON.stringify(value));
 }
 
+/** Refresh plan + usage counts from Supabase (authoritative in supabase/production mode). */
+export async function refreshAtlasUsageState(): Promise<void> {
+  if (!isAtlasSupabaseDataEnabled()) return;
+
+  if (usageRefreshPromise) {
+    await usageRefreshPromise;
+    return;
+  }
+
+  usageRefreshPromise = (async () => {
+    const auth = await requireSupabaseUser();
+    if (!auth.ok) {
+      usageSnapshot = { ...DEFAULT_USAGE };
+      activePlanSnapshot = null;
+      activeSubscriptionsSnapshot = [];
+      return;
+    }
+
+    const [subsRes, companiesRes, invoicesRes, paymentsRes] = await Promise.all([
+      supabase
+        .from('atlas_subscriptions')
+        .select('plan_id, status, start_date, end_date, created_at')
+        .order('created_at', { ascending: false }),
+      supabase
+        .from('atlas_companies')
+        .select('*', { count: 'exact', head: true })
+        .eq('user_id', auth.userId),
+      supabase
+        .from('atlas_invoices')
+        .select('*', { count: 'exact', head: true })
+        .eq('user_id', auth.userId),
+      supabase
+        .from('atlas_payments')
+        .select('*', { count: 'exact', head: true })
+        .eq('user_id', auth.userId),
+    ]);
+
+    activeSubscriptionsSnapshot = (subsRes.data ?? []).map((row) => ({
+      planId: String(row.plan_id ?? ''),
+      status: String(row.status ?? ''),
+      startDate: String(row.start_date ?? ''),
+      endDate: String(row.end_date ?? ''),
+      createdAt: String(row.created_at ?? ''),
+    }));
+
+    const ent = resolveEffectiveEntitlement(activeSubscriptionsSnapshot as AtlasEntitlementRow[]);
+    activePlanSnapshot = ent.planId ? getAtlasPlanById(ent.planId) ?? null : null;
+
+    const invoiceCount = invoicesRes.count ?? 0;
+    const paymentCount = paymentsRes.error ? 0 : (paymentsRes.count ?? 0);
+
+    usageSnapshot = {
+      companies: companiesRes.count ?? 0,
+      users: 1,
+      operations: invoiceCount + paymentCount,
+      invoices: invoiceCount,
+    };
+  })();
+
+  try {
+    await usageRefreshPromise;
+  } finally {
+    usageRefreshPromise = null;
+  }
+}
+
 export function getUsage(): AtlasUsage {
+  if (isAtlasSupabaseDataEnabled()) {
+    return { ...usageSnapshot };
+  }
   const raw = readJson<Partial<AtlasUsage>>(ATLAS_USAGE_STORAGE_KEY);
   if (!raw) {
     writeJson(ATLAS_USAGE_STORAGE_KEY, DEFAULT_USAGE);
@@ -84,6 +169,15 @@ export function getUsage(): AtlasUsage {
 }
 
 export function setUsage(next: AtlasUsage): void {
+  if (isAtlasSupabaseDataEnabled()) {
+    usageSnapshot = {
+      companies: normalizeNumber(next.companies),
+      users: normalizeNumber(next.users),
+      operations: normalizeNumber(next.operations),
+      invoices: normalizeNumber(next.invoices),
+    };
+    return;
+  }
   writeJson(ATLAS_USAGE_STORAGE_KEY, {
     companies: normalizeNumber(next.companies),
     users: normalizeNumber(next.users),
@@ -93,6 +187,14 @@ export function setUsage(next: AtlasUsage): void {
 }
 
 export function incrementUsage(type: AtlasUsageType, delta: number = 1): AtlasUsage {
+  if (isAtlasSupabaseDataEnabled()) {
+    usageSnapshot = {
+      ...usageSnapshot,
+      [type]: normalizeNumber((usageSnapshot[type] ?? 0) + delta),
+    } as AtlasUsage;
+    void refreshAtlasUsageState();
+    return { ...usageSnapshot };
+  }
   const current = getUsage();
   const next: AtlasUsage = { ...current, [type]: normalizeNumber((current[type] ?? 0) + delta) } as AtlasUsage;
   setUsage(next);
@@ -100,6 +202,9 @@ export function incrementUsage(type: AtlasUsageType, delta: number = 1): AtlasUs
 }
 
 function readActiveSubscriptions(): AtlasActiveSubscriptionLike[] {
+  if (isAtlasSupabaseDataEnabled()) {
+    return [...activeSubscriptionsSnapshot];
+  }
   const raw = readJson<unknown>(ATLAS_ACTIVE_SUBSCRIPTIONS_STORAGE_KEY);
   if (!raw) return [];
   return Array.isArray(raw) ? (raw as AtlasActiveSubscriptionLike[]) : [];
@@ -109,6 +214,9 @@ export function getActivePlan(): AtlasPricingPlan | null {
   if (isOwnerSessionFlagSet()) {
     // Owner bypass: always treat as enterprise (unlimited caps) client-side.
     return getAtlasPlanById('enterprise') ?? null;
+  }
+  if (isAtlasSupabaseDataEnabled()) {
+    return activePlanSnapshot;
   }
   const subs = readActiveSubscriptions();
   const candidate =
@@ -274,6 +382,10 @@ function decideHard(used: number, limit: number | null, kind: 'company' | 'invoi
 }
 
 export function syncInvoiceUsageCount(invoiceCount: number): void {
+  if (isAtlasSupabaseDataEnabled()) {
+    void refreshAtlasUsageState();
+    return;
+  }
   const plan = getActivePlan();
   if (!plan?.invoicesLimit || plan.invoicesLimit.kind !== 'fixed') return;
   const u = getUsage();
@@ -281,6 +393,10 @@ export function syncInvoiceUsageCount(invoiceCount: number): void {
 }
 
 export function syncCompanyUsageCount(companyCount: number): void {
+  if (isAtlasSupabaseDataEnabled()) {
+    void refreshAtlasUsageState();
+    return;
+  }
   const plan = getActivePlan();
   if (!plan) return;
   if (plan.companiesLimit.kind !== 'fixed') return;
@@ -291,7 +407,11 @@ export function syncCompanyUsageCount(companyCount: number): void {
 export function canCreateCompany(): LimitDecision {
   const plan = getActivePlan();
   const limits = getEffectivePlanLimits(plan);
-  const count = typeof window !== 'undefined' ? readCompaniesFromLocalStorage().length : getUsage().companies;
+  const count = isAtlasSupabaseDataEnabled()
+    ? usageSnapshot.companies
+    : typeof window !== 'undefined'
+      ? readCompaniesFromLocalStorage().length
+      : getUsage().companies;
   const decision = decideHard(count, limits.companies, 'company');
   if (!decision.allowed && plan?.id === 'pro' && limits.companies !== null) {
     return {
@@ -338,7 +458,9 @@ export type TrialCountdown = {
 };
 
 export function getTrialCountdown(): TrialCountdown {
-  const sub = readActiveSubscriptions().find((s) => s?.status === 'trial' && typeof s?.endDate === 'string');
+  const sub = readActiveSubscriptions().find(
+    (s) => (s?.status === 'trial' || s?.planId === 'free-trial') && typeof s?.endDate === 'string',
+  );
   if (!sub?.endDate) return { isTrial: false, daysLeft: 0, endDateYmd: null };
   const today = todayYmd();
   const end = sub.endDate;

@@ -7,6 +7,7 @@ import type { AtlasPayment } from '@/app/types/atlas-payment';
 import { upsertAtlasPayment } from '@/app/lib/atlas-payments-repository';
 import type { AtlasClient } from '@/app/types/atlas-client';
 import { upsertAtlasClient } from '@/app/lib/atlas-clients-repository';
+import { getActiveCompanyDbRowId } from '@/app/lib/atlas-active-company';
 import { createAtlasLink } from '@/app/lib/atlas-links-repository';
 
 type ExecOk = { ok: true; message: string };
@@ -107,7 +108,10 @@ export async function executeAssistantAction(action: AtlasAssistantAction): Prom
       updatedAt: nowIso,
     };
 
-    const res = await upsertAtlasClient(client);
+    const companyId = await getActiveCompanyDbRowId();
+    if (!companyId) return { ok: false, error: 'company_required' };
+
+    const res = await upsertAtlasClient(client, { companyId });
     if (!res.ok) return { ok: false, error: res.error };
     return { ok: true, message: `Client créé: ${client.name}` };
   }

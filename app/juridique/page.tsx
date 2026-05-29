@@ -6,6 +6,9 @@ import { fetchAi } from '../lib/fetch-ai';
 import { createAtlasLink } from '@/app/lib/atlas-links-repository';
 import { createDocument } from '@/app/lib/atlas-documents-repository';
 import { AppSidebar } from '@/app/components/shell/AppSidebar';
+import { isAtlasSupabaseDataEnabled } from '@/app/lib/atlas-data-source';
+import { listAtlasCompanies } from '@/app/lib/atlas-companies-repository';
+import { BetaSurfaceBadge } from '@/app/components/safety/BetaSurfaceBadge';
 
 type Company = {
   id: number; raisonSociale: string; formeJuridique: string; if_fiscal: string;
@@ -1200,8 +1203,15 @@ export default function JuridiquePage() {
   const [companies, setCompanies] = useState<Company[]>([]);
 
   useEffect(() => {
-    const saved = localStorage.getItem('atlas_companies');
-    if (saved) queueMicrotask(() => setCompanies(JSON.parse(saved) as Company[]));
+    void (async () => {
+      if (isAtlasSupabaseDataEnabled()) {
+        const list = await listAtlasCompanies();
+        setCompanies(list as Company[]);
+        return;
+      }
+      const saved = localStorage.getItem('atlas_companies');
+      if (saved) setCompanies(JSON.parse(saved));
+    })();
   }, []);
 
   return (
@@ -1234,8 +1244,13 @@ export default function JuridiquePage() {
           </button>
         </div>
       </AppSidebar>
-      <main className="flex-1 flex overflow-hidden">
+      <main className="flex-1 flex flex-col overflow-hidden min-w-0">
+        <div className="shrink-0 px-6 pt-4 pb-2 border-b border-gray-200 bg-white">
+          <BetaSurfaceBadge label="Bêta · Juridique & IA" />
+        </div>
+        <div className="flex-1 flex overflow-hidden min-h-0">
         {activeTab === 'creation' ? <CreationForm companies={companies} /> : <ModificationsForm companies={companies} />}
+        </div>
       </main>
     </div>
   );

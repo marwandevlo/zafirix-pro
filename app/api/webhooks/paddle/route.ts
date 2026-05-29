@@ -2,6 +2,12 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import { atlasDataBackend } from '@/app/lib/atlas-data-source';
 import { verifyPaddleBillingSignature } from '@/app/lib/paddle-webhook';
+import { addDaysYmd, todayYmd } from '@/app/lib/atlas-dates';
+import {
+  cancelPaddleAtlasSubscription,
+  paddleSubscriptionWindowFromPayload,
+  upsertPaddleAtlasSubscription,
+} from '@/app/lib/atlas-subscription-sync';
 
 export const dynamic = 'force-dynamic';
 
@@ -18,7 +24,14 @@ export async function POST(request: NextRequest) {
   const secret = process.env.PADDLE_WEBHOOK_SECRET?.trim() ?? '';
   const sig = request.headers.get('paddle-signature') ?? request.headers.get('Paddle-Signature');
 
-  if (secret && !verifyPaddleBillingSignature(rawBody, sig, secret)) {
+  if (process.env.NODE_ENV === 'production' && !secret) {
+    console.error('[paddle:webhook] PADDLE_WEBHOOK_SECRET is required in production');
+    return NextResponse.json({ ok: false, error: 'webhook_secret_required' }, { status: 503 });
+  }
+
+  if (!secret) {
+    console.warn('[paddle:webhook] PADDLE_WEBHOOK_SECRET unset — signature verification skipped (non-production only)');
+  } else if (!verifyPaddleBillingSignature(rawBody, sig, secret)) {
     return NextResponse.json({ ok: false, error: 'invalid_signature' }, { status: 400 });
   }
 
@@ -53,6 +66,8 @@ export async function POST(request: NextRequest) {
       .from('subscriptions')
       .update({ status: 'canceled', updated_at: new Date().toISOString() })
       .eq('paddle_subscription_id', subscriptionId);
+    const c = await cancelPaddleAtlasSubscription({ admin, paddleSubscriptionId: subscriptionId });
+    if (!c.ok) console.warn('[paddle:webhook] atlas_cancel', c.error);
   }
 
   if (
@@ -75,6 +90,19 @@ export async function POST(request: NextRequest) {
       { onConflict: 'paddle_subscription_id' },
     );
     if (error) console.warn('[paddle:webhook] upsert', error.message);
+
+    const win = paddleSubscriptionWindowFromPayload(data);
+    const startYmd = win?.startYmd ?? todayYmd();
+    const endYmd = win?.endYmd ?? addDaysYmd(startYmd, 365);
+    const atlas = await upsertPaddleAtlasSubscription({
+      admin,
+      userId,
+      planId,
+      paddleSubscriptionId: subscriptionId,
+      startYmd,
+      endYmd,
+    });
+    if (!atlas.ok) console.warn('[paddle:webhook] atlas_entitlement', atlas.error);
   }
 
   return NextResponse.json({ ok: true });

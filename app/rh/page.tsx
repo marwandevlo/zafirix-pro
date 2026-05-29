@@ -156,8 +156,17 @@ export default function RHPage() {
   const [linkStatus, setLinkStatus] = useState<string>('');
 
   useEffect(() => {
-    const saved = localStorage.getItem('atlas_companies');
-    if (saved) setCompanies(JSON.parse(saved));
+    void (async () => {
+      const { isAtlasSupabaseDataEnabled } = await import('@/app/lib/atlas-data-source');
+      if (isAtlasSupabaseDataEnabled()) {
+        const { listAtlasCompanies } = await import('@/app/lib/atlas-companies-repository');
+        const list = await listAtlasCompanies();
+        setCompanies(list as typeof companies);
+        return;
+      }
+      const saved = localStorage.getItem('atlas_companies');
+      if (saved) setCompanies(JSON.parse(saved));
+    })();
   }, []);
 
   const filteredCompanies = companies.filter(c =>

@@ -1,5 +1,7 @@
 /** Browser-only buffer when Supabase is off or track API cannot persist. */
 
+import { blockCriticalLocalStorageInProduction } from '@/app/lib/atlas-runtime-guards';
+
 export const ATLAS_FUNNEL_LOCAL_STORAGE_KEY = 'atlas_funnel_events_local';
 const MAX_EVENTS = 3000;
 
@@ -29,6 +31,7 @@ function writeAll(rows: LocalFunnelEventRow[]): void {
 }
 
 export function appendLocalFunnelEvent(row: LocalFunnelEventRow): void {
+  if (blockCriticalLocalStorageInProduction('atlas_funnel_events_local')) return;
   const next = [...readAll(), row];
   writeAll(next);
 }

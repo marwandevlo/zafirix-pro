@@ -1,5 +1,5 @@
 'use client';
-import { useState, useEffect, useMemo } from 'react';
+import { useCallback, useState, useEffect, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
 import { Plus, ChevronRight, Trash2, CheckCircle, Search } from 'lucide-react';
 import type { AtlasCompany } from '@/app/types/atlas-company';
@@ -11,72 +11,25 @@ import {
   getEffectivePlanLimits,
   getPlanLimits,
   syncCompanyUsageCount,
+  refreshAtlasUsageState,
 } from '@/app/lib/atlas-usage-limits';
 import { getProCompanyAddonExtraSlots } from '@/app/lib/atlas-company-addons';
 import { getReferralExtraCompanySlots } from '@/app/lib/atlas-referral-bonus-state';
 import { isAtlasSupabaseDataEnabled } from '@/app/lib/atlas-data-source';
+import {
+  atlasCompanyErrorMessage,
+  deleteAtlasCompany,
+  ensureValidActiveCompany,
+  listAtlasCompanies,
+  setActiveAtlasCompany,
+  upsertAtlasCompany,
+} from '@/app/lib/atlas-companies-repository';
+import { ATLAS_STORAGE_KEYS } from '@/app/lib/atlas-storage-keys';
 import { EmptyStateCta } from '@/app/components/ui/EmptyStateCta';
 import { trackOnboardingMilestoneOnce } from '@/app/lib/atlas-onboarding-milestones';
 import { CompanyLimitProUpsell } from '@/app/components/conversion/CompanyLimitProUpsell';
 import { AppSidebar } from '@/app/components/shell/AppSidebar';
 import { useManualSubscription } from '@/app/components/subscription/manual-subscription-context';
-
-const defaultCompanies: AtlasCompany[] = [
-  {
-    id: 1,
-    raisonSociale: 'ZAFIRIX COMMERCE SARL',
-    formeJuridique: 'SARL',
-    if_fiscal: '12345678',
-    ice: '001234567000012',
-    rc: '123456',
-    cnss: '1234567',
-    adresse: '123 Rue Mohammed V',
-    ville: 'Casablanca',
-    telephone: '0522123456',
-    email: 'contact@zafirix.group',
-    activite: 'Commerce de detail',
-    regimeTVA: 'mensuel',
-    actif: true,
-    paymentTerms: { kind: 'preset', days: 30 },
-    balance: 0,
-  },
-  {
-    id: 2,
-    raisonSociale: 'TECH SOLUTIONS SA',
-    formeJuridique: 'SA',
-    if_fiscal: '87654321',
-    ice: '001234567000034',
-    rc: '654321',
-    cnss: '7654321',
-    adresse: '45 Avenue Hassan II',
-    ville: 'Rabat',
-    telephone: '0537123456',
-    email: 'contact@tech.ma',
-    activite: 'Services informatiques',
-    regimeTVA: 'mensuel',
-    actif: false,
-    paymentTerms: { kind: 'preset', days: 60 },
-    balance: 0,
-  },
-  {
-    id: 3,
-    raisonSociale: 'BATI MAROC SARL',
-    formeJuridique: 'SARL',
-    if_fiscal: '11223344',
-    ice: '001234567000056',
-    rc: '112233',
-    cnss: '2233441',
-    adresse: '78 Rue de la Menara',
-    ville: 'Marrakech',
-    telephone: '0524123456',
-    email: 'contact@bati.ma',
-    activite: 'Construction',
-    regimeTVA: 'trimestriel',
-    actif: false,
-    paymentTerms: { kind: 'preset', days: 30 },
-    balance: 0,
-  },
-];
 
 export default function CompaniesPage() {
   const router = useRouter();
@@ -89,6 +42,8 @@ export default function CompaniesPage() {
   const [termsCustomDays, setTermsCustomDays] = useState('45');
   /** Bumps when returning to the tab so Pro add-on limits refresh from localStorage. */
   const [limitRefreshTick, setLimitRefreshTick] = useState(0);
+  const [persistError, setPersistError] = useState('');
+  const [loading, setLoading] = useState(true);
   const [form, setForm] = useState({
     raisonSociale: '', formeJuridique: 'SARL', if_fiscal: '', ice: '',
     rc: '', cnss: '', adresse: '', ville: 'Casablanca', telephone: '',
@@ -96,24 +51,36 @@ export default function CompaniesPage() {
     balance: '0',
   });
 
-  useEffect(() => {
-    const saved = localStorage.getItem('atlas_companies');
-    queueMicrotask(() => {
-      if (saved) {
-        const parsed = JSON.parse(saved) as AtlasCompany[];
-        setCompanies(parsed);
-        syncCompanyUsageCount(parsed.length);
-      } else if (!isAtlasSupabaseDataEnabled()) {
-        setCompanies(defaultCompanies);
-        localStorage.setItem('atlas_companies', JSON.stringify(defaultCompanies));
-        localStorage.setItem('atlas_company', JSON.stringify(defaultCompanies[0]));
-        syncCompanyUsageCount(defaultCompanies.length);
-      } else {
-        setCompanies([]);
-        syncCompanyUsageCount(0);
+  const reloadCompanies = useCallback(async () => {
+    setPersistError('');
+    if (isAtlasSupabaseDataEnabled()) {
+      setLoading(true);
+      try {
+        await ensureValidActiveCompany();
+        const list = await listAtlasCompanies();
+        setCompanies(list);
+        syncCompanyUsageCount(list.length);
+        await refreshAtlasUsageState();
+      } finally {
+        setLoading(false);
       }
-    });
+      return;
+    }
+    const saved = typeof window !== 'undefined' ? localStorage.getItem(ATLAS_STORAGE_KEYS.companies) : null;
+    if (saved) {
+      const parsed = JSON.parse(saved) as AtlasCompany[];
+      setCompanies(parsed);
+      syncCompanyUsageCount(parsed.length);
+    } else {
+      setCompanies([]);
+      syncCompanyUsageCount(0);
+    }
+    setLoading(false);
   }, []);
+
+  useEffect(() => {
+    void reloadCompanies();
+  }, [reloadCompanies]);
 
   useEffect(() => {
     const onVis = () => {
@@ -123,14 +90,36 @@ export default function CompaniesPage() {
     return () => document.removeEventListener('visibilitychange', onVis);
   }, []);
 
-  const saveCompanies = (newCompanies: AtlasCompany[]) => {
+  const persistLocalCompanies = (newCompanies: AtlasCompany[]) => {
     setCompanies(newCompanies);
-    localStorage.setItem('atlas_companies', JSON.stringify(newCompanies));
-    const active = newCompanies.find(c => c.actif);
-    if (active) localStorage.setItem('atlas_company', JSON.stringify(active));
+    localStorage.setItem(ATLAS_STORAGE_KEYS.companies, JSON.stringify(newCompanies));
+    const active = newCompanies.find((c) => c.actif);
+    if (active) localStorage.setItem(ATLAS_STORAGE_KEYS.activeCompany, JSON.stringify(active));
   };
 
-  const addCompany = () => {
+  const canAddCompany = (): boolean => {
+    if (isAtlasSupabaseDataEnabled()) {
+      const plan = getActivePlan();
+      const limits = getEffectivePlanLimits(plan);
+      if (limits.companies === null) return true;
+      return companies.length < limits.companies;
+    }
+    return canCreateCompany().allowed;
+  };
+
+  const companyLimitMessage = (): string => {
+    if (isAtlasSupabaseDataEnabled()) {
+      const plan = getActivePlan();
+      const limits = getEffectivePlanLimits(plan);
+      if (limits.companies === null || companies.length < limits.companies) return '';
+      if (plan?.id === 'pro') return '';
+      return 'Limite du nombre de sociétés atteinte pour votre forfait.';
+    }
+    const decision = canCreateCompany();
+    return decision.messageFr ?? decision.messageAr ?? 'Limite atteinte.';
+  };
+
+  const addCompany = async () => {
     if (!form.raisonSociale) return;
     if (blockPremiumActions) {
       setLimitNotice(
@@ -139,10 +128,10 @@ export default function CompaniesPage() {
       return;
     }
     const decision = canCreateCompany();
-    if (!decision.allowed) {
+    if (!canAddCompany()) {
       const p = getActivePlan();
       if (p?.id === 'pro') setLimitNotice('');
-      else setLimitNotice(decision.messageFr ?? decision.messageAr ?? 'Limite atteinte.');
+      else setLimitNotice(companyLimitMessage() || (decision.messageFr ?? decision.messageAr ?? 'Limite atteinte.'));
       return;
     }
     if (decision.level === 'warning') setLimitNotice(decision.messageFr ?? decision.messageAr ?? '');
@@ -155,16 +144,27 @@ export default function CompaniesPage() {
         : { kind: 'preset', days: Number.parseInt(termsKind, 10) as AtlasPaymentTermsPreset };
     const normalized = normalizePaymentTerms(paymentTerms);
     const newCompany: AtlasCompany = {
-      id: Date.now(),
+      id: isAtlasSupabaseDataEnabled() ? crypto.randomUUID() : Date.now(),
       ...payload,
       actif: false,
       paymentTerms: normalized,
       balance: Number.parseFloat(form.balance || '0') || 0,
     };
     const wasEmpty = companies.length === 0;
-    const merged = [...companies, newCompany];
-    saveCompanies(merged);
-    syncCompanyUsageCount(merged.length);
+
+    if (isAtlasSupabaseDataEnabled()) {
+      setPersistError('');
+      const res = await upsertAtlasCompany(newCompany);
+      if (!res.ok) {
+        setPersistError(atlasCompanyErrorMessage(res.error));
+        return;
+      }
+      await reloadCompanies();
+    } else {
+      const merged = [...companies, newCompany];
+      persistLocalCompanies(merged);
+      syncCompanyUsageCount(merged.length);
+    }
     if (wasEmpty) trackOnboardingMilestoneOnce('atlas_ms_first_company', 'onboarding_first_company_created');
     setForm({ raisonSociale: '', formeJuridique: 'SARL', if_fiscal: '', ice: '', rc: '', cnss: '', adresse: '', ville: 'Casablanca', telephone: '', email: '', activite: '', regimeTVA: 'mensuel', balance: '0' });
     setTermsKind('30');
@@ -172,15 +172,38 @@ export default function CompaniesPage() {
     setShowForm(false);
   };
 
-  const selectCompany = (id: number) => {
-    const updated = companies.map(c => ({ ...c, actif: c.id === id }));
-    saveCompanies(updated);
+  const selectCompany = async (c: AtlasCompany) => {
+    if (isAtlasSupabaseDataEnabled()) {
+      if (!c.dbRowId) return;
+      setPersistError('');
+      const res = await setActiveAtlasCompany(c.dbRowId);
+      if (!res.ok) {
+        setPersistError(atlasCompanyErrorMessage(res.error));
+        return;
+      }
+      await reloadCompanies();
+      router.push('/');
+      return;
+    }
+    const updated = companies.map((row) => ({ ...row, actif: row.id === c.id }));
+    persistLocalCompanies(updated);
     router.push('/');
   };
 
-  const deleteCompany = (id: number) => {
-    const updated = companies.filter((c) => c.id !== id);
-    saveCompanies(updated);
+  const deleteCompany = async (c: AtlasCompany) => {
+    if (isAtlasSupabaseDataEnabled()) {
+      if (!c.dbRowId) return;
+      setPersistError('');
+      const res = await deleteAtlasCompany(c.dbRowId);
+      if (!res.ok) {
+        setPersistError(atlasCompanyErrorMessage(res.error));
+        return;
+      }
+      await reloadCompanies();
+      return;
+    }
+    const updated = companies.filter((row) => row.id !== c.id);
+    persistLocalCompanies(updated);
     syncCompanyUsageCount(updated.length);
   };
 
@@ -247,13 +270,13 @@ export default function CompaniesPage() {
           </div>
           <button
             onClick={() => {
-              const decision = canCreateCompany();
-              if (!decision.allowed) {
+              if (!canAddCompany()) {
                 const p = getActivePlan();
                 if (p?.id === 'pro') setLimitNotice('');
-                else setLimitNotice(decision.messageFr ?? decision.messageAr ?? '');
+                else setLimitNotice(companyLimitMessage() || 'Limite atteinte.');
                 return;
               }
+              const decision = canCreateCompany();
               if (decision.level === 'warning') setLimitNotice(decision.messageFr ?? decision.messageAr ?? '');
               setShowForm(!showForm);
             }}
@@ -273,6 +296,9 @@ export default function CompaniesPage() {
             <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 text-sm text-amber-900">
               {limitNotice}
             </div>
+          )}
+          {persistError && (
+            <div className="bg-red-50 border border-red-200 rounded-xl p-4 text-sm text-red-800">{persistError}</div>
           )}
           <div className="grid grid-cols-3 gap-4">
             <div className="bg-white rounded-xl p-5 shadow-sm border border-gray-100">
@@ -376,14 +402,16 @@ export default function CompaniesPage() {
                   <input value={form.balance} onChange={e => setForm({...form, balance: e.target.value})} type="number" className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:border-blue-400" />
                 </div>
                 <div className="col-span-3 flex gap-3">
-                  <button onClick={addCompany} className="px-6 py-2 bg-[#1B2A4A] text-white rounded-lg text-sm hover:bg-[#243660]">Ajouter</button>
+                  <button onClick={() => void addCompany()} className="px-6 py-2 bg-[#1B2A4A] text-white rounded-lg text-sm hover:bg-[#243660]">Ajouter</button>
                   <button onClick={() => setShowForm(false)} className="px-4 py-2 border border-gray-200 rounded-lg text-sm text-gray-600">Annuler</button>
                 </div>
               </div>
             </div>
           )}
 
-          {companies.length === 0 ? (
+          {loading ? (
+            <p className="text-sm text-gray-500 text-center py-10">Chargement des sociétés…</p>
+          ) : companies.length === 0 ? (
             <EmptyStateCta
               lang="fr"
               title="Aucune société"
@@ -397,7 +425,7 @@ export default function CompaniesPage() {
           ) : (
           <div className="space-y-3">
             {filtered.map(c => (
-              <div key={c.id} className={`bg-white rounded-xl p-5 shadow-sm border transition-all ${c.actif ? 'border-green-300 bg-green-50' : 'border-gray-100 hover:border-blue-200'}`}>
+              <div key={`${String(c.id)}-${c.dbRowId ?? ''}`} className={`bg-white rounded-xl p-5 shadow-sm border transition-all ${c.actif ? 'border-green-300 bg-green-50' : 'border-gray-100 hover:border-blue-200'}`}>
                 <div className="flex items-center gap-4">
                   <div className={`w-12 h-12 rounded-xl flex items-center justify-center text-white font-bold text-lg shrink-0 ${c.actif ? 'bg-green-500' : 'bg-[#1B2A4A]'}`}>
                     {c.raisonSociale.charAt(0)}
@@ -434,11 +462,11 @@ export default function CompaniesPage() {
                   </div>
                   <div className="flex items-center gap-2 shrink-0">
                     {!c.actif && (
-                      <button onClick={() => selectCompany(c.id)} className="flex items-center gap-1 px-3 py-2 bg-[#1B2A4A] text-white rounded-lg text-xs hover:bg-[#243660]">
+                      <button onClick={() => void selectCompany(c)} className="flex items-center gap-1 px-3 py-2 bg-[#1B2A4A] text-white rounded-lg text-xs hover:bg-[#243660]">
                         Sélectionner <ChevronRight size={12} />
                       </button>
                     )}
-                    <button onClick={() => deleteCompany(c.id)} className="p-2 text-gray-400 hover:text-red-500 transition-colors">
+                    <button onClick={() => void deleteCompany(c)} className="p-2 text-gray-400 hover:text-red-500 transition-colors">
                       <Trash2 size={16} />
                     </button>
                   </div>

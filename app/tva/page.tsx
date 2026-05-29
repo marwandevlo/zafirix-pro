@@ -1,7 +1,9 @@
 'use client';
 import { useState } from 'react';
-import { Upload, Plus, Trash2, CheckCircle, FileCode, Globe } from 'lucide-react';
+import { Upload, Plus, Trash2, CheckCircle, FileCode, Globe, AlertCircle } from 'lucide-react';
 import { AppSidebar } from '@/app/components/shell/AppSidebar';
+import { ProductionBlockedSurface } from '@/app/components/safety/ProductionBlockedSurface';
+import { isDemoFeatureBlocked } from '@/app/lib/atlas-runtime-guards';
 
 type Facture = {
   id: number;
@@ -13,12 +15,15 @@ type Facture = {
 };
 
 export default function TVAPage() {
+  if (isDemoFeatureBlocked('tva_simulation')) {
+    return <ProductionBlockedSurface title="Declaration TVA" featureId="tva_simulation" />;
+  }
+  return <TVAPageContent />;
+}
+
+function TVAPageContent() {
   const [activeTab, setActiveTab] = useState<'ventes' | 'achats' | 'declaration'>('ventes');
-  const [factures, setFactures] = useState<Facture[]>([
-    { id: 1, ref: 'F-001', fournisseur: 'Client A', montantHT: 10000, tva: 2000, type: 'vente' },
-    { id: 2, ref: 'F-002', fournisseur: 'Client B', montantHT: 5000, tva: 1000, type: 'vente' },
-    { id: 3, ref: 'A-001', fournisseur: 'Fournisseur X', montantHT: 3000, tva: 600, type: 'achat' },
-  ]);
+  const [factures, setFactures] = useState<Facture[]>([]);
 
   const [newFacture, setNewFacture] = useState({ ref: '', fournisseur: '', montantHT: '', taux: '20' });
   const [uploading, setUploading] = useState(false);
@@ -117,10 +122,16 @@ export default function TVAPage() {
       </AppSidebar>
 
       <main className="flex-1 flex flex-col overflow-hidden">
+        <div className="shrink-0 mx-4 mt-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-xs text-amber-950 flex gap-2 items-start">
+          <AlertCircle size={16} className="shrink-0 mt-0.5 text-amber-700" aria-hidden />
+          <p>
+            <strong>Fonctionnalité en cours de stabilisation</strong> — Saisie locale uniquement (non reliée à la DGI). Ne pas utiliser pour une déclaration réelle sans validation expert.
+          </p>
+        </div>
         <header className="bg-white border-b border-gray-200 px-8 py-4 flex items-center justify-between">
           <div>
             <h1 className="text-xl font-bold text-gray-800">Declaration TVA</h1>
-            <p className="text-xs text-gray-400 mt-0.5">Periode: Avril 2026 · Conforme DGI Maroc</p>
+            <p className="text-xs text-gray-400 mt-0.5">Fonctionnalité en cours de stabilisation · non reliée à la DGI</p>
           </div>
           <div className="flex items-center gap-2">
             <button

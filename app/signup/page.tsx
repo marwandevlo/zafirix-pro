@@ -7,7 +7,13 @@ import { supabase } from '@/app/lib/supabase';
 import { addDaysYmd, todayYmd } from '@/app/lib/atlas-dates';
 import { ATLAS_STORAGE_KEYS } from '@/app/lib/atlas-storage-keys';
 import type { AtlasCompany } from '@/app/types/atlas-company';
-import { readCompaniesFromLocalStorage, writeCompaniesToLocalStorage } from '@/app/lib/atlas-companies-repository';
+import {
+  atlasCompanyErrorMessage,
+  readCompaniesFromLocalStorage,
+  setActiveAtlasCompany,
+  upsertAtlasCompany,
+  writeCompaniesToLocalStorage,
+} from '@/app/lib/atlas-companies-repository';
 import { PublicFooter } from '@/app/components/public/PublicFooter';
 import { isAtlasSupabaseDataEnabled } from '@/app/lib/atlas-data-source';
 import { claimAtlasFreeTrialAfterAuth, shouldPersistAtlasTrialNotice } from '@/app/lib/atlas-trial-claim-client';
@@ -250,6 +256,38 @@ export default function SignUpPage() {
       }
 
       if (isAtlasSupabaseDataEnabled() && signUpData.session) {
+        const displayName = companyName.trim() || `Société de ${fullName.trim() || 'Mon entreprise'}`;
+        const nextCompany: AtlasCompany = {
+          id: crypto.randomUUID(),
+          raisonSociale: displayName,
+          formeJuridique: companyType,
+          if_fiscal: '',
+          ice: ice.trim(),
+          rc: '',
+          cnss: '',
+          adresse: '',
+          ville: city,
+          telephone: normalizePhone(phone) || '',
+          email: email.trim(),
+          activite: '',
+          regimeTVA: 'mensuel',
+          actif: true,
+          balance: 0,
+          paymentTerms: { kind: 'preset', days: 30 },
+        };
+        const companyRes = await upsertAtlasCompany(nextCompany);
+        if (!companyRes.ok) {
+          setError(atlasCompanyErrorMessage(companyRes.error));
+          return;
+        }
+        await setActiveAtlasCompany(companyRes.dbRowId);
+
+        const { patchAtlasProfile } = await import('@/app/lib/atlas-profiles-repository');
+        await patchAtlasProfile({
+          full_name: fullName.trim(),
+          company_name: displayName,
+        });
+
         const claim = await claimAtlasFreeTrialAfterAuth();
         await awaitCompleteReferralSignupWithSession();
         if (typeof window !== 'undefined' && shouldPersistAtlasTrialNotice(claim)) {

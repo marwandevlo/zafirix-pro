@@ -15,26 +15,28 @@ import {
   Settings,
   CreditCard,
   Shield,
+  Tags,
 } from 'lucide-react';
 
 export type AtlasNavItemId =
   | 'dashboard'
+  | 'companies'
+  | 'clients'
+  | 'consultant'
+  | 'agents'
+  | 'documents'
+  | 'comptabilite'
+  | 'factures'
+  | 'juridique'
+  | 'rh'
+  | 'etude'
+  | 'rapports'
   | 'tva'
   | 'is'
   | 'ir'
-  | 'factures'
-  | 'clients'
-  | 'comptabilite'
-  | 'documents'
-  | 'consultant'
-  | 'agents'
-  | 'etude'
-  | 'juridique'
-  | 'rh'
-  | 'companies'
-  | 'rapports'
-  | 'settings'
   | 'subscription'
+  | 'pricing'
+  | 'settings'
   | 'admin';
 
 export type AtlasAppNavItem = {
@@ -45,25 +47,28 @@ export type AtlasAppNavItem = {
   href: string;
 };
 
-/** Master order — filter by context, never reorder ad hoc. */
+/**
+ * Full SaaS sidebar: same entries for every active user (plans affect quotas only).
+ */
 export const ATLAS_APP_NAV_ITEMS: AtlasAppNavItem[] = [
   { id: 'dashboard', label: 'Dashboard', labelAr: 'الرئيسية', icon: LayoutDashboard, href: '/' },
+  { id: 'companies', label: 'Mes sociétés', labelAr: 'شركاتي', icon: Building2, href: '/companies' },
+  { id: 'clients', label: 'Clients', labelAr: 'العملاء', icon: Users, href: '/clients' },
+  { id: 'consultant', label: 'Assistant IA', labelAr: 'المساعد الذكي', icon: Brain, href: '/consultant' },
+  { id: 'agents', label: 'Agents IA', labelAr: 'الوكلاء الذكيون', icon: Zap, href: '/agents' },
+  { id: 'documents', label: 'Documents IA', labelAr: 'وثائق ذكية', icon: Upload, href: '/documents' },
+  { id: 'comptabilite', label: 'Comptabilité', labelAr: 'المحاسبة', icon: LayoutDashboard, href: '/comptabilite' },
+  { id: 'factures', label: 'Factures', labelAr: 'الفواتير', icon: FileText, href: '/factures' },
+  { id: 'juridique', label: 'Juridique', labelAr: 'القانونية', icon: Scale, href: '/juridique' },
+  { id: 'rh', label: 'Ressources humaines', labelAr: 'الموارد البشرية', icon: Users, href: '/rh' },
+  { id: 'etude', label: 'Étude de projet', labelAr: 'دراسة الجدوى', icon: BarChart2, href: '/etude-projet' },
+  { id: 'rapports', label: 'Rapports', labelAr: 'التقارير', icon: FileText, href: '/rapports' },
   { id: 'tva', label: 'TVA', labelAr: 'الضريبة TVA', icon: Receipt, href: '/tva' },
   { id: 'is', label: 'IS Fiscal', labelAr: 'ضريبة الشركات', icon: Calculator, href: '/is' },
   { id: 'ir', label: 'IR / Salaires', labelAr: 'الرواتب والضرائب', icon: TrendingUp, href: '/ir' },
-  { id: 'factures', label: 'Factures', labelAr: 'الفواتير', icon: FileText, href: '/factures' },
-  { id: 'clients', label: 'Clients', labelAr: 'العملاء', icon: Users, href: '/clients' },
-  { id: 'comptabilite', label: 'Comptabilité', labelAr: 'المحاسبة', icon: LayoutDashboard, href: '/comptabilite' },
-  { id: 'documents', label: 'Documents IA', labelAr: 'وثائق ذكية', icon: Upload, href: '/documents' },
-  { id: 'consultant', label: 'Consultant IA', labelAr: 'المستشار', icon: Brain, href: '/consultant' },
-  { id: 'agents', label: 'Agents IA', labelAr: 'الوكلاء الذكيون', icon: Zap, href: '/agents' },
-  { id: 'etude', label: 'Étude de projet', labelAr: 'دراسة الجدوى', icon: BarChart2, href: '/etude-projet' },
-  { id: 'juridique', label: 'Juridique', labelAr: 'القانونية', icon: Scale, href: '/juridique' },
-  { id: 'rh', label: 'Ressources humaines', labelAr: 'الموارد البشرية', icon: Users, href: '/rh' },
-  { id: 'companies', label: 'Mes sociétés', labelAr: 'شركاتي', icon: Building2, href: '/companies' },
-  { id: 'rapports', label: 'Rapports PDF', labelAr: 'التقارير', icon: FileText, href: '/rapports' },
-  { id: 'settings', label: 'Paramètres', labelAr: 'الإعدادات', icon: Settings, href: '/settings' },
   { id: 'subscription', label: 'Abonnement', labelAr: 'الاشتراك', icon: CreditCard, href: '/subscription' },
+  { id: 'pricing', label: 'Tarifs', labelAr: 'الأسعار', icon: Tags, href: '/pricing' },
+  { id: 'settings', label: 'Paramètres', labelAr: 'الإعدادات', icon: Settings, href: '/settings' },
   { id: 'admin', label: 'Administration', labelAr: 'الإدارة', icon: Shield, href: '/admin' },
 ];
 
