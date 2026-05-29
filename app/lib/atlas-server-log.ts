@@ -29,7 +29,10 @@ export async function captureAtlasServerException(
   const dsn = process.env.SENTRY_DSN;
   if (!dsn) return;
   try {
-    const Sentry = await import('@sentry/nextjs');
+    // Optional dependency: specifier kept non-literal so the build does not
+    // require @sentry/nextjs to be installed (peer range lags Next 16).
+    const sentryPkg: string = '@sentry/nextjs';
+    const Sentry = await import(sentryPkg);
     Sentry.captureException(err instanceof Error ? err : new Error(msg), {
       extra: context,
     });

@@ -7,7 +7,10 @@ export async function register() {
   if (!process.env.SENTRY_DSN) return;
   if (process.env.NEXT_RUNTIME !== 'nodejs') return;
   try {
-    const Sentry = await import('@sentry/nextjs');
+    // Optional dependency: specifier kept non-literal so the build does not
+    // require @sentry/nextjs to be installed (peer range lags Next 16).
+    const sentryPkg: string = '@sentry/nextjs';
+    const Sentry = await import(sentryPkg);
     Sentry.init({
       dsn: process.env.SENTRY_DSN,
       tracesSampleRate: Number(process.env.SENTRY_TRACES_SAMPLE_RATE ?? 0.05),
