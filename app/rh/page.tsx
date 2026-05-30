@@ -7,6 +7,7 @@ import { ArrowLeft, FileText, Download, Bot, User, Send, Users, Briefcase, Award
 import { createAtlasLink } from '@/app/lib/atlas-links-repository';
 import { createDocument } from '@/app/lib/atlas-documents-repository';
 import { AppSidebar } from '@/app/components/shell/AppSidebar';
+import { RhEmployeesPanel } from '@/app/rh/RhEmployeesPanel';
 
 type Company = {
   id: number;
@@ -154,6 +155,7 @@ export default function RHPage() {
   const [linking, setLinking] = useState(false);
   const [linkCompanyId, setLinkCompanyId] = useState<number | ''>('');
   const [linkStatus, setLinkStatus] = useState<string>('');
+  const [rhView, setRhView] = useState<'documents' | 'employees'>('documents');
 
   useEffect(() => {
     void (async () => {
@@ -432,7 +434,21 @@ Genere UNIQUEMENT le document en texte propre, sans commentaires.`,
         }
       >
         <div className="mt-3 space-y-0.5">
-          {categories.map((cat) => {
+          <button
+            type="button"
+            onClick={() => setRhView('employees')}
+            className={`w-full flex items-center gap-2 px-3 py-2 rounded-lg text-xs transition-all mb-2 ${rhView === 'employees' ? 'bg-white/10 text-white' : 'text-white/30 hover:text-white/60'}`}
+          >
+            <Users size={12} /> Employés
+          </button>
+          <button
+            type="button"
+            onClick={() => setRhView('documents')}
+            className={`w-full flex items-center gap-2 px-3 py-2 rounded-lg text-xs transition-all mb-2 ${rhView === 'documents' ? 'bg-white/10 text-white' : 'text-white/30 hover:text-white/60'}`}
+          >
+            <FileText size={12} /> Documents RH
+          </button>
+          {rhView === 'documents' && categories.map((cat) => {
             const Icon = categoryIcons[cat];
             return (
               <button
@@ -450,6 +466,9 @@ Genere UNIQUEMENT le document en texte propre, sans commentaires.`,
         </div>
       </AppSidebar>
 
+      {rhView === 'employees' ? (
+        <RhEmployeesPanel />
+      ) : (
       <main className="flex-1 flex overflow-hidden">
         <div className={`${selectedDoc ? 'hidden lg:flex' : 'flex'} flex-col w-full lg:w-80 border-r border-gray-200 bg-white overflow-hidden shrink-0`}>
           <div className="px-4 py-3 border-b border-gray-100 bg-gray-50">
@@ -744,6 +763,7 @@ Genere UNIQUEMENT le document en texte propre, sans commentaires.`,
           </div>
         )}
       </main>
+      )}
     </div>
   );
 }

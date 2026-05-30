@@ -37,6 +37,10 @@ const REQUIRED_TABLES = [
   'atlas_agent_messages',
   'atlas_agent_tasks',
   'atlas_tva_periods',
+  'atlas_payroll_runs',
+  'atlas_salaries',
+  'atlas_ir_snapshots',
+  'atlas_is_drafts',
 ];
 
 const PAYMENT_REQUEST_COLUMNS = ['plan_id', 'amount_mad', 'status', 'payment_method', 'manual_provider', 'metadata'];
