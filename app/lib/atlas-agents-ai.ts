@@ -7,6 +7,8 @@ export async function runAgentAssistantReply(params: {
   agentType: AtlasAgentType;
   history: Pick<AtlasAgentMessage, 'role' | 'content'>[];
   userMessage: string;
+  /** Extra context appended to the system prompt (e.g. live TVA balances). */
+  contextBlock?: string | null;
 }): Promise<{ ok: true; text: string } | { ok: false; error: string }> {
   const apiKey = getAnthropicApiKey();
   if (!apiKey) {
@@ -14,7 +16,10 @@ export async function runAgentAssistantReply(params: {
   }
 
   const client = new Anthropic({ apiKey });
-  const system = ATLAS_AGENT_SYSTEM_PROMPTS[params.agentType];
+  const base = ATLAS_AGENT_SYSTEM_PROMPTS[params.agentType];
+  const system = params.contextBlock?.trim()
+    ? `${base}\n\n${params.contextBlock.trim()}`
+    : base;
 
   const messages: Anthropic.MessageParam[] = [
     ...params.history

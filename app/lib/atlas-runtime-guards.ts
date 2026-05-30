@@ -14,8 +14,6 @@ const warnedStores = new Set<string>();
 
 export const ATLAS_DEMO_FEATURE_IDS = [
 
-  'tva_simulation',
-
   'reports_static_pdf',
 
   'etude_projet_wizard',

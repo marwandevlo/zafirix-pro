@@ -11,6 +11,7 @@ import { ATLAS_AGENT_TYPES } from '@/app/types/atlas-agent';
 import { asRecord } from '@/app/lib/atlas-json';
 import { isAtlasAgentType } from '@/app/lib/atlas-agents-config';
 import { runAgentAssistantReply } from '@/app/lib/atlas-agents-ai';
+import { buildFiscalTvaContext } from '@/app/lib/atlas-tva-server';
 
 function rowToConversation(row: Record<string, unknown>): AtlasAgentConversation {
   return {
@@ -253,10 +254,15 @@ export async function sendAgentMessage(
   }
 
   const history = await listAgentMessages(db, userId, conversationId);
+  let contextBlock: string | null = null;
+  if (conv.agentType === 'fiscal' && conv.companyId) {
+    contextBlock = await buildFiscalTvaContext(db, userId, conv.companyId);
+  }
   const ai = await runAgentAssistantReply({
     agentType: conv.agentType,
     history: history.filter((m) => m.id !== String((userRow as Record<string, unknown>).id)),
     userMessage: trimmed,
+    contextBlock,
   });
 
   if (!ai.ok) {
