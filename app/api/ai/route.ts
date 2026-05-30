@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { authenticateAiRequest } from '@/app/lib/ai-auth-server';
 import { checkAiRateLimit } from '@/app/lib/ai-rate-limit';
 import { ATLAS_AI_SAFETY_NOTICE } from '@/app/lib/atlas-ai-safety';
+import { ATLAS_AI_MULTILINGUAL_DARIJA } from '@/app/lib/atlas-ai-language';
 import {
   anthropicImageMediaType,
   isPdfMimeType,
@@ -47,13 +48,17 @@ const CONSULTANT_SYSTEM = `Tu es un expert-comptable et conseiller fiscal maroca
 - L'IR sur salaires et le barème marocain
 - La CNSS (part salariale 4.48%, patronale 21.26%) et AMO
 - Les obligations déclaratives DGI
-Réponds en français ou en darija selon la langue de l'utilisateur. Sois précis et pratique.
+Sois précis et pratique.
 Rappelle que tes réponses sont informatives et ne remplacent pas un conseil juridique ou une mission d'expert-comptable agréé.
-Ne prétends jamais qu'une télé-déclaration ou un dépôt officiel a été effectué via cette application.`;
+Ne prétends jamais qu'une télé-déclaration ou un dépôt officiel a été effectué via cette application.
+
+${ATLAS_AI_MULTILINGUAL_DARIJA}`;
 
 const JURIDIQUE_SYSTEM = `Tu es un expert juridique marocain spécialisé en droit des sociétés, formalités RC et textes d'actes.
-Tu rédiges des documents professionnels en français, conformes aux usages marocains.
-Rappelle que l'utilisateur doit faire valider tout acte par un professionnel habilité.`;
+Tu rédiges des documents professionnels conformes aux usages marocains.
+Rappelle que l'utilisateur doit faire valider tout acte par un professionnel habilité.
+
+${ATLAS_AI_MULTILINGUAL_DARIJA}`;
 
 const OCR_SYSTEM = `Tu es un expert en extraction de données de factures marocaines.
 Extrais les informations en JSON avec ces champs exactement:
@@ -87,7 +92,10 @@ Règles:
 - Réponds uniquement avec du JSON valide (pas de markdown, pas de texte hors JSON).
 - Si aucune action n'est nécessaire, renvoie actions: [].
 - Les actions doivent être prudentes: requiresConfirmation doit être true.
-- Les montants sont en MAD, dates en YYYY-MM-DD.`;
+- Les montants sont en MAD, dates en YYYY-MM-DD.
+- Le champ "response" suit les règles de langue ci-dessous (darija, arabe, français, anglais).
+
+${ATLAS_AI_MULTILINGUAL_DARIJA}`;
 
 function tryParseAssistantJson(text: string): { response: string; actions: unknown[] } | null {
   try {
