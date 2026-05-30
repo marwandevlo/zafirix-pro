@@ -36,6 +36,7 @@ const REQUIRED_TABLES = [
   'atlas_agent_conversations',
   'atlas_agent_messages',
   'atlas_agent_tasks',
+  'atlas_tva_periods',
 ];
 
 const PAYMENT_REQUEST_COLUMNS = ['plan_id', 'amount_mad', 'status', 'payment_method', 'manual_provider', 'metadata'];
