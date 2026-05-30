@@ -92,7 +92,7 @@ export default function ClientsPage() {
 
   const startCreate = () => {
     if (isAtlasSupabaseDataEnabled() && !activeCompanyId) {
-      setSaveError(atlasClientErrorMessage('company_required'));
+      setSaveError('Sélectionnez d’abord une société active dans Mes sociétés.');
       return;
     }
     resetForm();
@@ -225,12 +225,20 @@ export default function ClientsPage() {
             <p className="text-sm text-gray-500 text-center py-10">Chargement des clients…</p>
           ) : null}
           {loadError ? (
-            <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">{loadError}</div>
+            <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900 flex flex-wrap items-center justify-between gap-3">
+              <span>{loadError}</span>
+              <a
+                href="/companies"
+                className="shrink-0 px-3 py-1.5 bg-amber-600 text-white rounded-lg text-xs font-medium hover:bg-amber-700 transition-colors"
+              >
+                Aller à Mes sociétés
+              </a>
+            </div>
           ) : null}
           {saveError ? (
             <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">{saveError}</div>
           ) : null}
-          {showEmpty ? (
+          {showEmpty && !showForm ? (
             <EmptyStateCta
               lang="fr"
               title="Aucun client"
@@ -240,34 +248,6 @@ export default function ClientsPage() {
               onPrimary={() => startCreate()}
             />
           ) : null}
-          {!loading && clients.length > 0 ? (
-          <>
-          <div className="grid grid-cols-3 gap-4">
-            <div className="bg-white rounded-xl p-5 shadow-sm border border-gray-100">
-              <p className="text-xs text-gray-400">Total clients</p>
-              <p className="text-2xl font-bold text-gray-800 mt-1">{clients.length}</p>
-            </div>
-            <div className="bg-white rounded-xl p-5 shadow-sm border border-gray-100">
-              <p className="text-xs text-gray-400">Balance totale</p>
-              <p className={`text-2xl font-bold mt-1 ${totalBalance >= 0 ? 'text-amber-600' : 'text-blue-700'}`}>
-                {Math.round(totalBalance).toLocaleString()} MAD
-              </p>
-            </div>
-            <div className="bg-white rounded-xl p-5 shadow-sm border border-gray-100">
-              <p className="text-xs text-gray-400">Clients en crédit</p>
-              <p className="text-2xl font-bold text-gray-800 mt-1">{clients.filter((c) => (c.balance || 0) > 0).length}</p>
-            </div>
-          </div>
-
-          <div className="relative">
-            <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
-            <input
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              placeholder="Rechercher un client…"
-              className="w-full pl-10 pr-4 py-3 text-sm border border-gray-200 rounded-xl focus:outline-none focus:border-blue-400 bg-white"
-            />
-          </div>
 
           {showForm && (
             <div className="bg-white rounded-xl p-6 shadow-sm border border-blue-200">
@@ -388,6 +368,35 @@ export default function ClientsPage() {
               </div>
             </div>
           )}
+
+          {!loading && clients.length > 0 ? (
+          <>
+          <div className="grid grid-cols-3 gap-4">
+            <div className="bg-white rounded-xl p-5 shadow-sm border border-gray-100">
+              <p className="text-xs text-gray-400">Total clients</p>
+              <p className="text-2xl font-bold text-gray-800 mt-1">{clients.length}</p>
+            </div>
+            <div className="bg-white rounded-xl p-5 shadow-sm border border-gray-100">
+              <p className="text-xs text-gray-400">Balance totale</p>
+              <p className={`text-2xl font-bold mt-1 ${totalBalance >= 0 ? 'text-amber-600' : 'text-blue-700'}`}>
+                {Math.round(totalBalance).toLocaleString()} MAD
+              </p>
+            </div>
+            <div className="bg-white rounded-xl p-5 shadow-sm border border-gray-100">
+              <p className="text-xs text-gray-400">Clients en crédit</p>
+              <p className="text-2xl font-bold text-gray-800 mt-1">{clients.filter((c) => (c.balance || 0) > 0).length}</p>
+            </div>
+          </div>
+
+          <div className="relative">
+            <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+            <input
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Rechercher un client…"
+              className="w-full pl-10 pr-4 py-3 text-sm border border-gray-200 rounded-xl focus:outline-none focus:border-blue-400 bg-white"
+            />
+          </div>
 
           <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
             <table className="w-full text-sm">
