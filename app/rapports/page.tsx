@@ -1,252 +1,322 @@
 'use client';
-import { useState } from 'react';
-import { Download, TrendingUp, Calculator, Users, Receipt } from 'lucide-react';
-import { AppSidebar } from '@/app/components/shell/AppSidebar';
-import { ProductionBlockedSurface } from '@/app/components/safety/ProductionBlockedSurface';
-import { isDemoFeatureBlocked } from '@/app/lib/atlas-runtime-guards';
 
-export default function RapportsPage() {
-  if (isDemoFeatureBlocked('reports_static_pdf')) {
-    return <ProductionBlockedSurface title="Rapports & Declarations PDF" featureId="reports_static_pdf" />;
-  }
-  return <RapportsPageContent />;
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import {
+  AlertCircle,
+  BarChart3,
+  Calculator,
+  Download,
+  FileSpreadsheet,
+  FileText,
+  Loader2,
+  Receipt,
+  TrendingUp,
+  Users,
+} from 'lucide-react';
+import { AppSidebar } from '@/app/components/shell/AppSidebar';
+import { BetaSurfaceBadge } from '@/app/components/safety/BetaSurfaceBadge';
+import { getActiveCompanyDbRowId } from '@/app/lib/atlas-active-company';
+import { isAtlasSupabaseDataEnabled } from '@/app/lib/atlas-data-source';
+import { downloadCsvReport, downloadPdfReport } from '@/app/lib/atlas-reports-export';
+import type {
+  AtlasReportPeriodPreset,
+  AtlasReportPayload,
+  AtlasReportType,
+  AtlasReportsDashboard,
+} from '@/app/types/atlas-reports';
+
+const REPORT_META: {
+  type: AtlasReportType;
+  label: string;
+  desc: string;
+  icon: typeof Receipt;
+  color: string;
+}[] = [
+  { type: 'commercial', label: 'Commercial', desc: "CA, factures, encaissements, évolution", icon: TrendingUp, color: 'bg-blue-500' },
+  { type: 'comptable', label: 'Comptable', desc: 'Écritures par compte', icon: Calculator, color: 'bg-cyan-600' },
+  { type: 'fiscal', label: 'Fiscal', desc: 'Synthèse fiscale et TVA', icon: Receipt, color: 'bg-purple-500' },
+  { type: 'fournisseurs', label: 'Fournisseurs', desc: 'Dépenses et factures achats', icon: FileText, color: 'bg-amber-500' },
+  { type: 'clients', label: 'Clients', desc: 'Activité et répertoire clients', icon: Users, color: 'bg-green-500' },
+  { type: 'tva', label: 'TVA', desc: 'Périodes TVA et net à payer', icon: BarChart3, color: 'bg-indigo-500' },
+];
+
+async function reportsFetch<T>(path: string): Promise<{ ok: boolean; data: T }> {
+  const res = await fetch(path, { credentials: 'include' });
+  const data = (await res.json().catch(() => ({}))) as T;
+  return { ok: res.ok, data };
 }
 
-function RapportsPageContent() {
-  const [generating, setGenerating] = useState<string | null>(null);
+function formatMad(n: number): string {
+  return `${n.toLocaleString('fr-MA', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} MAD`;
+}
 
-  const generatePDF = async (type: string) => {
-    setGenerating(type);
-    
-    const { jsPDF } = await import('jspdf');
-    const autoTable = (await import('jspdf-autotable')).default;
+function periodQuery(
+  companyId: string,
+  preset: AtlasReportPeriodPreset,
+  customFrom: string,
+  customTo: string,
+): string {
+  const base = `companyId=${encodeURIComponent(companyId)}&preset=${preset}`;
+  if (preset === 'custom' && customFrom && customTo) {
+    return `${base}&from=${encodeURIComponent(customFrom)}&to=${encodeURIComponent(customTo)}`;
+  }
+  return base;
+}
 
-    type DocWithAutoTable = InstanceType<typeof jsPDF> & { lastAutoTable?: { finalY: number } };
+export default function RapportsPage() {
+  const supabaseEnabled = isAtlasSupabaseDataEnabled();
+  const [companyId, setCompanyId] = useState<string | null>(null);
+  const [dashboard, setDashboard] = useState<AtlasReportsDashboard | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+  const [preset, setPreset] = useState<AtlasReportPeriodPreset>('month');
+  const [customFrom, setCustomFrom] = useState('');
+  const [customTo, setCustomTo] = useState('');
+  const [exporting, setExporting] = useState<string | null>(null);
 
-    const doc = new jsPDF();
-    const now = new Date();
-    const dateStr = now.toLocaleDateString('fr-MA');
-    
-    // Header
-    doc.setFillColor(15, 31, 61);
-    doc.rect(0, 0, 210, 35, 'F');
-    doc.setTextColor(255, 255, 255);
-    doc.setFontSize(20);
-    doc.setFont('helvetica', 'bold');
-    doc.text('ZAFIRIX PRO', 15, 15);
-    doc.setFontSize(10);
-    doc.setFont('helvetica', 'normal');
-    doc.text('Plateforme SaaS - Maroc', 15, 22);
-    doc.text(`Date: ${dateStr}`, 15, 29);
-
-    if (type === 'tva') {
-      doc.setTextColor(0, 0, 0);
-      doc.setFontSize(16);
-      doc.setFont('helvetica', 'bold');
-      doc.text('DECLARATION TVA - Avril 2026', 15, 50);
-      
-      doc.setFontSize(10);
-      doc.setFont('helvetica', 'normal');
-      doc.text('Periode: Avril 2026', 15, 60);
-      doc.text('Regime: Mensuel', 15, 67);
-
-      autoTable(doc, {
-        startY: 75,
-        head: [['Description', 'Montant (MAD)']],
-        body: [
-          ['Chiffre d\'affaires HT', '15 000.00'],
-          ['TVA collectee (20%)', '3 000.00'],
-          ['Achats HT deductibles', '3 000.00'],
-          ['TVA deductible', '600.00'],
-          ['TVA nette a payer', '2 400.00'],
-        ],
-        headStyles: { fillColor: [15, 31, 61] },
-        alternateRowStyles: { fillColor: [245, 247, 250] },
-      });
-
-      const finalY = ((doc as DocWithAutoTable).lastAutoTable?.finalY ?? 75) + 10;
-      doc.setFillColor(254, 242, 242);
-      doc.rect(15, finalY, 180, 20, 'F');
-      doc.setTextColor(185, 28, 28);
-      doc.setFontSize(12);
-      doc.setFont('helvetica', 'bold');
-      doc.text('TVA A PAYER: 2 400.00 MAD', 20, finalY + 13);
-      
-      doc.setTextColor(100, 100, 100);
-      doc.setFontSize(8);
-      doc.setFont('helvetica', 'normal');
-      doc.text('Echeance: 20 Mai 2026 - Portail: www.tax.gov.ma', 15, finalY + 35);
+  const reload = useCallback(async () => {
+    setError('');
+    setLoading(true);
+    try {
+      const cid = await getActiveCompanyDbRowId();
+      setCompanyId(cid);
+      if (!supabaseEnabled || !cid) {
+        setDashboard(null);
+        return;
+      }
+      const q = periodQuery(cid, preset, customFrom, customTo);
+      const { ok, data } = await reportsFetch<{ dashboard?: AtlasReportsDashboard; error?: string }>(
+        `/api/reports/dashboard?${q}`,
+      );
+      if (!ok) {
+        setError(data.error ?? 'Impossible de charger les rapports.');
+        setDashboard(null);
+      } else {
+        setDashboard(data.dashboard ?? null);
+      }
+    } catch {
+      setError('Erreur réseau.');
+    } finally {
+      setLoading(false);
     }
+  }, [supabaseEnabled, preset, customFrom, customTo]);
 
-    if (type === 'is') {
-      doc.setTextColor(0, 0, 0);
-      doc.setFontSize(16);
-      doc.setFont('helvetica', 'bold');
-      doc.text('DECLARATION IS - Exercice 2025', 15, 50);
+  useEffect(() => {
+    void reload();
+  }, [reload]);
 
-      autoTable(doc, {
-        startY: 65,
-        head: [['Element', 'Montant (MAD)']],
-        body: [
-          ['Chiffre d\'affaires', '1 200 000.00'],
-          ['Charges d\'exploitation', '450 000.00'],
-          ['Salaires bruts', '300 000.00'],
-          ['Amortissements', '50 000.00'],
-          ['Resultat fiscal', '400 000.00'],
-          ['Taux IS applique', '20%'],
-          ['IS calcule', '80 000.00'],
-          ['Cotisation minimale (0.5%)', '6 000.00'],
-          ['IS A PAYER', '80 000.00'],
-          ['Acompte trimestriel', '20 000.00'],
-        ],
-        headStyles: { fillColor: [88, 28, 135] },
-        alternateRowStyles: { fillColor: [245, 247, 250] },
-      });
+  const maxCa = useMemo(
+    () => Math.max(...(dashboard?.monthlyEvolution.map((p) => p.ca) ?? [1]), 1),
+    [dashboard],
+  );
+
+  const exportReport = async (type: AtlasReportType, format: 'pdf' | 'csv') => {
+    if (!companyId) return;
+    setExporting(`${type}-${format}`);
+    try {
+      const q = periodQuery(companyId, preset, customFrom, customTo);
+      const { ok, data } = await reportsFetch<{ report?: AtlasReportPayload; error?: string }>(
+        `/api/reports/${type}?${q}`,
+      );
+      if (!ok || !data.report) {
+        setError(data.error ?? 'Export impossible.');
+        return;
+      }
+      if (format === 'pdf') {
+        await downloadPdfReport(data.report);
+      } else {
+        downloadCsvReport(data.report);
+      }
+    } finally {
+      setExporting(null);
     }
-
-    if (type === 'cnss') {
-      doc.setTextColor(0, 0, 0);
-      doc.setFontSize(16);
-      doc.setFont('helvetica', 'bold');
-      doc.text('BORDEREAU CNSS - Avril 2026', 15, 50);
-
-      autoTable(doc, {
-        startY: 65,
-        head: [['Employe', 'CIN', 'Salaire Brut', 'CNSS Sal.', 'AMO Sal.', 'IR']],
-        body: [
-          ['Ahmed Benali', 'BK123456', '8 000.00', '339.12', '180.80', '1 109.59'],
-          ['Fatima Zahra', 'BE789012', '12 000.00', '339.12', '271.20', '2 438.85'],
-          ['Youssef Kadiri', 'BJ345678', '6 000.00', '268.80', '135.60', '513.15'],
-          ['TOTAL', '', '26 000.00', '947.04', '587.60', '4 061.59'],
-        ],
-        headStyles: { fillColor: [21, 128, 61] },
-        alternateRowStyles: { fillColor: [245, 247, 250] },
-      });
-
-      const finalY = ((doc as DocWithAutoTable).lastAutoTable?.finalY ?? 65) + 10;
-      autoTable(doc, {
-        startY: finalY,
-        head: [['Cotisation', 'Taux', 'Montant (MAD)']],
-        body: [
-          ['CNSS salarial', '4.48%', '947.04'],
-          ['CNSS patronal', '21.26%', '5 527.60'],
-          ['AMO salarial', '2.26%', '587.60'],
-          ['AMO patronal', '2.03%', '527.80'],
-          ['TOTAL A VERSER CNSS', '', '7 590.04'],
-        ],
-        headStyles: { fillColor: [21, 128, 61] },
-      });
-    }
-
-    if (type === 'bilan') {
-      doc.setTextColor(0, 0, 0);
-      doc.setFontSize(16);
-      doc.setFont('helvetica', 'bold');
-      doc.text('BILAN SIMPLIFIE - Exercice 2025', 15, 50);
-
-      doc.setFontSize(12);
-      doc.text('ACTIF', 15, 65);
-      autoTable(doc, {
-        startY: 70,
-        head: [['Poste', 'Montant (MAD)']],
-        body: [
-          ['Immobilisations nettes', '250 000.00'],
-          ['Stocks', '80 000.00'],
-          ['Creances clients', '120 000.00'],
-          ['Tresorerie', '50 000.00'],
-          ['TOTAL ACTIF', '500 000.00'],
-        ],
-        headStyles: { fillColor: [37, 99, 235] },
-        alternateRowStyles: { fillColor: [245, 247, 250] },
-        tableWidth: 85,
-      });
-
-      doc.setFontSize(12);
-      doc.setFont('helvetica', 'bold');
-      doc.text('PASSIF', 115, 65);
-      autoTable(doc, {
-        startY: 70,
-        margin: { left: 110 },
-        head: [['Poste', 'Montant (MAD)']],
-        body: [
-          ['Capital social', '200 000.00'],
-          ['Reserves', '100 000.00'],
-          ['Resultat net', '80 000.00'],
-          ['Dettes fournisseurs', '120 000.00'],
-          ['TOTAL PASSIF', '500 000.00'],
-        ],
-        headStyles: { fillColor: [37, 99, 235] },
-        alternateRowStyles: { fillColor: [245, 247, 250] },
-        tableWidth: 85,
-      });
-    }
-
-    // Footer
-    const pageCount = doc.getNumberOfPages();
-    for (let i = 1; i <= pageCount; i++) {
-      doc.setPage(i);
-      doc.setFillColor(15, 31, 61);
-      doc.rect(0, 285, 210, 12, 'F');
-      doc.setTextColor(255, 255, 255);
-      doc.setFontSize(7);
-      doc.text('ZAFIRIX PRO - Logiciel de comptabilite Maroc - www.zafirix.group', 15, 292);
-      doc.text(`Page ${i}/${pageCount}`, 185, 292);
-    }
-
-    doc.save(`${type}_${now.getFullYear()}_${String(now.getMonth() + 1).padStart(2, '0')}.pdf`);
-    setGenerating(null);
   };
 
-  const rapports = [
-    { id: 'tva', label: 'Declaration TVA', desc: 'TVA collectee, deductible, net a payer', icon: Receipt, color: 'bg-blue-500', period: 'Avril 2026' },
-    { id: 'is', label: 'Declaration IS', desc: 'Resultat fiscal, IS calcule, acomptes', icon: Calculator, color: 'bg-purple-500', period: 'Exercice 2025' },
-    { id: 'cnss', label: 'Bordereau CNSS', desc: 'Salaries, cotisations, total a verser', icon: Users, color: 'bg-green-500', period: 'Avril 2026' },
-    { id: 'bilan', label: 'Bilan simplifie', desc: 'Actif, passif, situation nette', icon: TrendingUp, color: 'bg-amber-500', period: 'Exercice 2025' },
-  ];
+  if (!supabaseEnabled) {
+    return (
+      <div className="flex h-screen bg-gray-50">
+        <AppSidebar variant="module" />
+        <main className="flex-1 flex items-center justify-center p-8">
+          <div className="max-w-md text-center space-y-3">
+            <AlertCircle className="mx-auto text-amber-600" size={32} />
+            <h1 className="text-lg font-semibold text-gray-800">Rapports — Supabase requis</h1>
+            <p className="text-sm text-gray-500">
+              Les rapports utilisent uniquement les données persistées en production (Supabase).
+            </p>
+          </div>
+        </main>
+      </div>
+    );
+  }
 
   return (
     <div className="flex h-screen bg-gray-50">
       <AppSidebar variant="module" />
 
       <main className="flex-1 flex flex-col overflow-hidden">
-        <header className="bg-white border-b border-gray-200 px-8 py-4">
-          <h1 className="text-xl font-bold text-gray-800">Rapports & Declarations PDF</h1>
-          <p className="text-xs text-gray-400 mt-0.5">Generez vos documents officiels en un clic</p>
+        <header className="bg-white border-b border-gray-200 px-8 py-4 shrink-0">
+          <div className="flex flex-wrap items-center justify-between gap-4">
+            <div>
+              <div className="flex items-center gap-2">
+                <h1 className="text-xl font-bold text-gray-800">Rapports</h1>
+                <BetaSurfaceBadge />
+              </div>
+              <p className="text-xs text-gray-400 mt-0.5">
+                {dashboard?.companyName ?? '—'} · Données réelles · {dashboard?.period.periodLabel ?? ''}
+              </p>
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
+              <select
+                value={preset}
+                onChange={(e) => setPreset(e.target.value as AtlasReportPeriodPreset)}
+                className="px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:border-blue-400"
+              >
+                <option value="month">Mois en cours</option>
+                <option value="quarter">Trimestre en cours</option>
+                <option value="year">Année en cours</option>
+                <option value="custom">Période personnalisée</option>
+              </select>
+              {preset === 'custom' && (
+                <>
+                  <input
+                    type="date"
+                    value={customFrom}
+                    onChange={(e) => setCustomFrom(e.target.value)}
+                    className="px-3 py-2 text-sm border border-gray-200 rounded-lg"
+                  />
+                  <input
+                    type="date"
+                    value={customTo}
+                    onChange={(e) => setCustomTo(e.target.value)}
+                    className="px-3 py-2 text-sm border border-gray-200 rounded-lg"
+                  />
+                </>
+              )}
+              <button
+                type="button"
+                onClick={() => void reload()}
+                className="px-3 py-2 text-sm bg-gray-100 rounded-lg hover:bg-gray-200"
+              >
+                Actualiser
+              </button>
+            </div>
+          </div>
         </header>
 
-        <div className="flex-1 overflow-y-auto px-8 py-6">
-          <div className="grid grid-cols-2 gap-6">
-            {rapports.map(r => (
-              <div key={r.id} className="bg-white rounded-xl p-6 shadow-sm border border-gray-100 hover:shadow-md transition-shadow">
-                <div className="flex items-start gap-4">
-                  <div className={`w-12 h-12 ${r.color} rounded-xl flex items-center justify-center shrink-0`}>
-                    <r.icon size={24} className="text-white" />
+        <div className="flex-1 overflow-y-auto px-8 py-6 space-y-6">
+          {loading && (
+            <div className="flex items-center justify-center py-16 text-gray-400 gap-2">
+              <Loader2 className="animate-spin" size={20} />
+              Chargement des rapports…
+            </div>
+          )}
+
+          {!loading && error && (
+            <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">{error}</div>
+          )}
+
+          {!loading && !companyId && (
+            <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+              Sélectionnez une société active pour générer les rapports.
+            </div>
+          )}
+
+          {!loading && dashboard && (
+            <>
+              <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+                {[
+                  { label: "Chiffre d'affaires", value: formatMad(dashboard.kpis.chiffreAffaires), color: 'text-blue-600' },
+                  { label: 'Factures émises', value: String(dashboard.kpis.facturesEmises), color: 'text-gray-800' },
+                  {
+                    label: 'Factures impayées',
+                    value: `${dashboard.kpis.facturesImpayees} (${formatMad(dashboard.kpis.facturesImpayeesMontant)})`,
+                    color: 'text-amber-700',
+                  },
+                  { label: 'Encaissements', value: formatMad(dashboard.kpis.encaissements), color: 'text-green-600' },
+                  { label: 'Dépenses fournisseurs', value: formatMad(dashboard.kpis.depensesFournisseurs), color: 'text-red-600' },
+                  { label: 'TVA nette', value: formatMad(dashboard.kpis.tvaNette), color: 'text-purple-600' },
+                ].map((kpi) => (
+                  <div key={kpi.label} className="bg-white rounded-xl p-4 shadow-sm border border-gray-100">
+                    <p className="text-xs text-gray-400">{kpi.label}</p>
+                    <p className={`text-lg font-bold mt-1 ${kpi.color}`}>{kpi.value}</p>
                   </div>
-                  <div className="flex-1">
-                    <h2 className="font-bold text-gray-800">{r.label}</h2>
-                    <p className="text-sm text-gray-400 mt-1">{r.desc}</p>
-                    <p className="text-xs text-blue-500 mt-1 font-medium">Periode: {r.period}</p>
-                  </div>
-                </div>
-                <button
-                  onClick={() => generatePDF(r.id)}
-                  disabled={generating === r.id}
-                  className="mt-4 w-full flex items-center justify-center gap-2 px-4 py-3 bg-[#1B2A4A] text-white rounded-lg text-sm font-medium hover:bg-[#243660] transition-colors disabled:opacity-50"
-                >
-                  {generating === r.id ? (
-                    <>
-                      <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
-                      Generation en cours...
-                    </>
-                  ) : (
-                    <>
-                      <Download size={16} /> Telecharger PDF
-                    </>
-                  )}
-                </button>
+                ))}
               </div>
-            ))}
-          </div>
+
+              <div className="bg-white rounded-xl p-5 shadow-sm border border-gray-100">
+                <h2 className="font-semibold text-gray-700 mb-4 flex items-center gap-2">
+                  <BarChart3 size={16} className="text-blue-500" />
+                  Évolution mensuelle — CA HT
+                </h2>
+                {dashboard.monthlyEvolution.length === 0 ? (
+                  <p className="text-sm text-gray-400">Aucune donnée sur la période.</p>
+                ) : (
+                  <div className="flex items-end gap-2 h-40">
+                    {dashboard.monthlyEvolution.map((p) => (
+                      <div key={p.monthKey} className="flex-1 flex flex-col items-center gap-1 min-w-0">
+                        <div
+                          className="w-full bg-blue-500 rounded-t transition-all"
+                          style={{ height: `${Math.max(4, (p.ca / maxCa) * 120)}px` }}
+                          title={`${p.label}: ${formatMad(p.ca)}`}
+                        />
+                        <span className="text-[10px] text-gray-400 truncate w-full text-center">{p.label}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                {REPORT_META.map((r) => (
+                  <div
+                    key={r.type}
+                    className="bg-white rounded-xl p-6 shadow-sm border border-gray-100 hover:shadow-md transition-shadow"
+                  >
+                    <div className="flex items-start gap-4">
+                      <div className={`w-12 h-12 ${r.color} rounded-xl flex items-center justify-center shrink-0`}>
+                        <r.icon size={22} className="text-white" />
+                      </div>
+                      <div className="flex-1">
+                        <h2 className="font-bold text-gray-800">{r.label}</h2>
+                        <p className="text-sm text-gray-400 mt-1">{r.desc}</p>
+                        <p className="text-xs text-blue-500 mt-1 font-medium">
+                          Période: {dashboard.period.periodLabel}
+                        </p>
+                      </div>
+                    </div>
+                    <div className="mt-4 flex gap-2">
+                      <button
+                        type="button"
+                        onClick={() => void exportReport(r.type, 'pdf')}
+                        disabled={exporting === `${r.type}-pdf`}
+                        className="flex-1 flex items-center justify-center gap-2 px-3 py-2.5 bg-[#1B2A4A] text-white rounded-lg text-sm font-medium hover:bg-[#243660] disabled:opacity-50"
+                      >
+                        {exporting === `${r.type}-pdf` ? (
+                          <Loader2 size={14} className="animate-spin" />
+                        ) : (
+                          <Download size={14} />
+                        )}
+                        PDF
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => void exportReport(r.type, 'csv')}
+                        disabled={exporting === `${r.type}-csv`}
+                        className="flex-1 flex items-center justify-center gap-2 px-3 py-2.5 bg-white border border-gray-200 text-gray-700 rounded-lg text-sm font-medium hover:bg-gray-50 disabled:opacity-50"
+                      >
+                        {exporting === `${r.type}-csv` ? (
+                          <Loader2 size={14} className="animate-spin" />
+                        ) : (
+                          <FileSpreadsheet size={14} />
+                        )}
+                        CSV
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </>
+          )}
         </div>
       </main>
     </div>
