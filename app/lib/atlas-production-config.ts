@@ -36,4 +36,12 @@ export function validateProductionConfiguration(): void {
   if (!process.env.PADDLE_API_KEY?.trim()) {
     console.warn(`${PREFIX} PADDLE_API_KEY not set — server-side Paddle operations may be unavailable.`);
   }
+
+  const anthropic = process.env['ANTHROPIC_API_KEY'];
+  if (typeof anthropic !== 'string' || !anthropic.trim()) {
+    console.error(
+      `${PREFIX} ANTHROPIC_API_KEY is required in production for Consultant IA, Juridique, and OCR. ` +
+        'Add it in Vercel → Settings → Environment Variables → Production, then redeploy.',
+    );
+  }
 }

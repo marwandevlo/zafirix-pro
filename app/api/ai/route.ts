@@ -9,8 +9,17 @@ import {
   OCR_PROVIDER,
 } from '@/app/lib/atlas-ocr';
 import { captureAtlasServerException } from '@/app/lib/atlas-server-log';
+import { getAnthropicApiKey } from '@/app/lib/anthropic-env';
 
 const IS_DEV = process.env.NODE_ENV === 'development';
+
+function createAnthropicClient(): Anthropic {
+  const apiKey = getAnthropicApiKey();
+  if (!apiKey) {
+    throw new Error('ANTHROPIC_API_KEY missing');
+  }
+  return new Anthropic({ apiKey });
+}
 
 function aiError(
   status: number,
@@ -30,10 +39,6 @@ function aiError(
   if (IS_DEV) console.error('[api/ai]', payload);
   return NextResponse.json(IS_DEV ? payload : { error: message, code }, { status });
 }
-
-const client = new Anthropic({
-  apiKey: process.env.ANTHROPIC_API_KEY,
-});
 
 const CONSULTANT_SYSTEM = `Tu es un expert-comptable et conseiller fiscal marocain. Tu connais parfaitement:
 - Le Code Général des Impôts du Maroc (CGI)
@@ -197,6 +202,7 @@ export async function POST(request: NextRequest) {
       messages = [{ role: 'user', content: message }];
     }
 
+    const client = createAnthropicClient();
     const response = await client.messages.create({
       model: 'claude-sonnet-4-5',
       max_tokens: 4096,

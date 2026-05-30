@@ -6,6 +6,7 @@ import Anthropic from '@anthropic-ai/sdk';
 import type { AtlasOcrExtraction } from '@/app/types/atlas-document';
 import { anthropicImageMediaType, OCR_PROVIDER, parseOcrJsonResponse } from '@/app/lib/atlas-ocr';
 import { parseAnthropicOcrError } from '@/app/lib/atlas-ocr-image-prep';
+import { getAnthropicApiKey } from '@/app/lib/anthropic-env';
 
 const OCR_SYSTEM = `Tu es un expert en extraction de données de factures marocaines.
 Extrais les informations en JSON avec ces champs exactement:
@@ -40,7 +41,8 @@ export async function runInvoiceOcrExtraction(
   imageBase64: string,
   mimeType: string,
 ): Promise<InvoiceOcrSuccess | InvoiceOcrFailure> {
-  if (!process.env.ANTHROPIC_API_KEY?.trim()) {
+  const apiKey = getAnthropicApiKey();
+  if (!apiKey) {
     return {
       ok: false,
       step: 'auth',
@@ -62,7 +64,7 @@ export async function runInvoiceOcrExtraction(
   }
 
   try {
-    const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+    const client = new Anthropic({ apiKey });
     const response = await client.messages.create({
       model: 'claude-sonnet-4-5',
       max_tokens: 4096,

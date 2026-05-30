@@ -1,5 +1,6 @@
 import type { NextRequest } from 'next/server';
 import { requireAtlasSupabaseSession } from '@/app/lib/atlas-api-session';
+import { isAnthropicConfigured } from '@/app/lib/anthropic-env';
 
 type AuthOk = { ok: true; status: 200; user: { id: string } };
 type AuthErrorCode = 'missing_token' | 'invalid_token' | 'server_not_configured' | 'ocr_not_configured';
@@ -29,7 +30,7 @@ function mapSessionError(code: 'missing_session' | 'invalid_token' | 'misconfigu
  * Legacy `ATLAS_AI_REQUIRE_AUTH` is ignored; auth is required unless `ATLAS_AI_ALLOW_ANON` is explicitly enabled.
  */
 export async function authenticateAiRequest(request: NextRequest): Promise<AuthOk | AuthErr> {
-  if (!process.env.ANTHROPIC_API_KEY?.trim()) {
+  if (!isAnthropicConfigured()) {
     return { ok: false, status: 503, code: 'ocr_not_configured' };
   }
 
