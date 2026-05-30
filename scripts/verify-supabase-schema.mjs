@@ -33,6 +33,9 @@ const REQUIRED_TABLES = [
   'atlas_subscriptions',
   'atlas_payment_requests',
   'atlas_accounting_entries',
+  'atlas_agent_conversations',
+  'atlas_agent_messages',
+  'atlas_agent_tasks',
 ];
 
 const PAYMENT_REQUEST_COLUMNS = ['plan_id', 'amount_mad', 'status', 'payment_method', 'manual_provider', 'metadata'];
@@ -93,5 +96,6 @@ if (failed > 0) {
   console.log('Hint: run missing baselines in Supabase SQL Editor, e.g.');
   console.log('  supabase/migrations/ensure_atlas_payment_requests_baseline.sql');
   console.log('  supabase/migrations/ensure_atlas_subscriptions_baseline.sql');
+  console.log('  supabase/migrations/20260601120000_atlas_agents_real.sql');
 }
 process.exit(failed === 0 ? 0 : 1);

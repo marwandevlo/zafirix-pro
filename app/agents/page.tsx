@@ -1,282 +1,266 @@
 'use client';
-import { useState } from 'react';
-import { fetchAi } from '../lib/fetch-ai';
-import { Receipt, Users, TrendingUp, Shield, Bell, Play, Pause, MessageSquare, CheckCircle, Clock } from 'lucide-react';
+
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { MessageSquare, Loader2 } from 'lucide-react';
 import { AppSidebar } from '@/app/components/shell/AppSidebar';
 import { BetaSurfaceBadge } from '@/app/components/safety/BetaSurfaceBadge';
-import { ProductionBlockedSurface } from '@/app/components/safety/ProductionBlockedSurface';
-import { isDemoFeatureBlocked } from '@/app/lib/atlas-runtime-guards';
+import {
+  ATLAS_AGENT_DEFINITIONS,
+  agentDefinition,
+  type AtlasAgentDefinition,
+} from '@/app/lib/atlas-agents-config';
+import { getActiveCompanyDbRowId } from '@/app/lib/atlas-active-company';
+import type {
+  AtlasAgentConversation,
+  AtlasAgentMessage,
+  AtlasAgentOverviewStats,
+  AtlasAgentType,
+} from '@/app/types/atlas-agent';
 
-const agents = [
-  {
-    id: 'tva',
-    name: 'Agent TVA',
-    role: 'Spécialiste TVA',
-    icon: Receipt,
-    color: 'bg-blue-500',
-    colorLight: 'bg-blue-50',
-    colorText: 'text-blue-600',
-    colorBorder: 'border-blue-200',
-    description: 'Analyse vos factures, calcule la TVA et prépare vos déclarations automatiquement.',
-    tasks: [
-      'Analyse des factures par OCR',
-      'Calcul TVA collectée/déductible',
-      'Génération XML DGI automatique',
-      'Alerte avant échéance 20 du mois',
-    ],
-    stats: { done: 12, pending: 2, alerts: 1 },
-    lastActivity: 'Il y a 2 heures',
-    status: 'active',
-  },
-  {
-    id: 'paie',
-    name: 'Agent Paie',
-    role: 'Spécialiste RH & Paie',
-    icon: Users,
-    color: 'bg-green-500',
-    colorLight: 'bg-green-50',
-    colorText: 'text-green-600',
-    colorBorder: 'border-green-200',
-    description: 'Calcule les salaires, gère CNSS/AMO/IR et génère les bulletins de paie chaque mois.',
-    tasks: [
-      'Calcul automatique CNSS/AMO/IR',
-      'Génération bulletins de paie PDF',
-      'Export XML CNSS mensuel',
-      'Alerte virement salaires',
-    ],
-    stats: { done: 8, pending: 1, alerts: 0 },
-    lastActivity: 'Il y a 5 heures',
-    status: 'active',
-  },
-  {
-    id: 'is',
-    name: 'Agent IS',
-    role: 'Spécialiste Fiscalité',
-    icon: TrendingUp,
-    color: 'bg-purple-500',
-    colorLight: 'bg-purple-50',
-    colorText: 'text-purple-600',
-    colorBorder: 'border-purple-200',
-    description: 'Surveille vos bénéfices, prévoit l\'IS et suggère des optimisations fiscales légales.',
-    tasks: [
-      'Suivi résultat fiscal en temps réel',
-      'Prévision IS fin d\'exercice',
-      'Calcul acomptes provisionnels',
-      'Optimisation fiscale légale',
-    ],
-    stats: { done: 4, pending: 1, alerts: 1 },
-    lastActivity: 'Il y a 1 jour',
-    status: 'active',
-  },
-  {
-    id: 'audit',
-    name: 'Agent Audit',
-    role: 'Contrôleur & Auditeur',
-    icon: Shield,
-    color: 'bg-amber-500',
-    colorLight: 'bg-amber-50',
-    colorText: 'text-amber-600',
-    colorBorder: 'border-amber-200',
-    description: 'Vérifie toutes vos opérations, détecte les erreurs et garantit la conformité légale.',
-    tasks: [
-      'Vérification quotidienne des écritures',
-      'Détection anomalies et doublons',
-      'Score de conformité /100',
-      'Rapport hebdomadaire d\'audit',
-    ],
-    stats: { done: 45, pending: 3, alerts: 2 },
-    lastActivity: 'Il y a 30 min',
-    status: 'active',
-  },
-  {
-    id: 'alert',
-    name: 'Agent Alert',
-    role: 'Gestionnaire des Alertes',
-    icon: Bell,
-    color: 'bg-red-500',
-    colorLight: 'bg-red-50',
-    colorText: 'text-red-600',
-    colorBorder: 'border-red-200',
-    description: 'Surveille tous vos délais fiscaux et vous alerte avant chaque échéance importante.',
-    tasks: [
-      'Calendrier fiscal automatique',
-      'Alertes J-7, J-3, J-1',
-      'Résumé quotidien du matin',
-      'Priorités du jour',
-    ],
-    stats: { done: 28, pending: 4, alerts: 3 },
-    lastActivity: 'Il y a 10 min',
-    status: 'active',
-  },
-];
-
-export default function AgentsPage() {
-  if (isDemoFeatureBlocked('agents_mock')) {
-    return <ProductionBlockedSurface title="Agents IA" featureId="agents_mock" />;
-  }
-  return <AgentsPageContent />;
+function formatRelativeTime(iso: string | null): string {
+  if (!iso) return '—';
+  const diff = Date.now() - new Date(iso).getTime();
+  if (diff < 60_000) return "À l'instant";
+  if (diff < 3_600_000) return `Il y a ${Math.floor(diff / 60_000)} min`;
+  if (diff < 86_400_000) return `Il y a ${Math.floor(diff / 3_600_000)} h`;
+  return new Date(iso).toLocaleDateString('fr-MA');
 }
 
-function AgentsPageContent() {
-  const [activeAgent, setActiveAgent] = useState<string | null>(null);
-  const [agentStatus, setAgentStatus] = useState<Record<string, boolean>>({
-    tva: true, paie: true, is: true, audit: true, alert: true,
-  });
-  const [chat, setChat] = useState<Record<string, { role: string; content: string }[]>>({});
-  const [input, setInput] = useState('');
-  const [loading, setLoading] = useState(false);
+async function agentsFetch<T>(path: string, init?: RequestInit): Promise<{ ok: boolean; status: number; data: T }> {
+  const res = await fetch(path, { ...init, credentials: 'include', headers: { 'Content-Type': 'application/json', ...init?.headers } });
+  const data = (await res.json().catch(() => ({}))) as T;
+  return { ok: res.ok, status: res.status, data };
+}
 
-  const toggleAgent = (id: string) => {
-    setAgentStatus(prev => ({ ...prev, [id]: !prev[id] }));
+export default function AgentsPage() {
+  const [companyId, setCompanyId] = useState<string | null>(null);
+  const [stats, setStats] = useState<AtlasAgentOverviewStats | null>(null);
+  const [loadError, setLoadError] = useState('');
+  const [loadingOverview, setLoadingOverview] = useState(true);
+
+  const [activeType, setActiveType] = useState<AtlasAgentType | null>(null);
+  const [conversationId, setConversationId] = useState<string | null>(null);
+  const [messages, setMessages] = useState<AtlasAgentMessage[]>([]);
+  const [input, setInput] = useState('');
+  const [chatLoading, setChatLoading] = useState(false);
+  const [openingChat, setOpeningChat] = useState(false);
+
+  const reloadOverview = useCallback(async () => {
+    setLoadError('');
+    setLoadingOverview(true);
+    try {
+      const cid = await getActiveCompanyDbRowId();
+      setCompanyId(cid);
+      const q = cid ? `?companyId=${encodeURIComponent(cid)}` : '';
+      const { ok, data } = await agentsFetch<{ stats?: AtlasAgentOverviewStats; error?: string }>(
+        `/api/agents/stats${q}`,
+      );
+      if (!ok) {
+        setStats(null);
+        setLoadError(data.error ?? 'Impossible de charger les agents.');
+        return;
+      }
+      setStats(data.stats ?? null);
+    } catch {
+      setLoadError('Erreur réseau.');
+      setStats(null);
+    } finally {
+      setLoadingOverview(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void reloadOverview();
+  }, [reloadOverview]);
+
+  const statsFor = useCallback(
+    (type: AtlasAgentType) => stats?.byType.find((s) => s.agentType === type),
+    [stats],
+  );
+
+  const hasAnyActivity = (stats?.totalConversations ?? 0) > 0;
+
+  const openChat = async (type: AtlasAgentType) => {
+    setOpeningChat(true);
+    setLoadError('');
+    setActiveType(type);
+    try {
+      const q = new URLSearchParams({ agentType: type });
+      if (companyId) q.set('companyId', companyId);
+
+      const listRes = await agentsFetch<{ conversations?: AtlasAgentConversation[] }>(
+        `/api/agents/conversations?${q}`,
+      );
+      let convId = listRes.data.conversations?.[0]?.id ?? null;
+
+      if (!convId) {
+        const createRes = await agentsFetch<{ conversation?: AtlasAgentConversation; error?: string }>(
+          '/api/agents/conversations',
+          {
+            method: 'POST',
+            body: JSON.stringify({ agentType: type, companyId }),
+          },
+        );
+        if (!createRes.ok || !createRes.data.conversation) {
+          setLoadError(createRes.data.error ?? 'Impossible de démarrer la conversation.');
+          setActiveType(null);
+          return;
+        }
+        convId = createRes.data.conversation.id;
+      }
+
+      setConversationId(convId);
+      const msgRes = await agentsFetch<{ messages?: AtlasAgentMessage[] }>(
+        `/api/agents/conversations/${convId}/messages`,
+      );
+      setMessages(msgRes.data.messages ?? []);
+    } catch {
+      setLoadError('Erreur réseau.');
+      setActiveType(null);
+    } finally {
+      setOpeningChat(false);
+    }
   };
 
-  const sendMessage = async (agentId: string) => {
-    if (!input.trim()) return;
-    const agent = agents.find(a => a.id === agentId);
-    const userMsg = { role: 'user', content: input };
-    setChat(prev => ({ ...prev, [agentId]: [...(prev[agentId] || []), userMsg] }));
+  const closeChat = () => {
+    setActiveType(null);
+    setConversationId(null);
+    setMessages([]);
     setInput('');
-    setLoading(true);
+    void reloadOverview();
+  };
+
+  const sendMessage = async () => {
+    if (!conversationId || !input.trim() || chatLoading) return;
+    const text = input.trim();
+    setInput('');
+    setChatLoading(true);
+    setLoadError('');
+
+    const optimistic: AtlasAgentMessage = {
+      id: `tmp-${Date.now()}`,
+      conversationId,
+      userId: '',
+      role: 'user',
+      content: text,
+      metadata: {},
+      createdAt: new Date().toISOString(),
+    };
+    setMessages((m) => [...m, optimistic]);
 
     try {
-      const response = await fetchAi({
-        message: input,
-        type: 'consultant',
-        systemPrompt: `Tu es ${agent?.name}, un agent IA spécialisé en ${agent?.role} pour les entreprises marocaines. Tu réponds de manière concise et professionnelle en français ou darija selon la question.`,
+      const { ok, data } = await agentsFetch<{
+        userMessage?: AtlasAgentMessage;
+        assistantMessage?: AtlasAgentMessage;
+        error?: string;
+      }>(`/api/agents/conversations/${conversationId}/messages`, {
+        method: 'POST',
+        body: JSON.stringify({ content: text }),
       });
-      const data = await response.json().catch(() => ({}));
-      setChat(prev => ({
-        ...prev,
-        [agentId]: [...(prev[agentId] || []), {
-          role: 'assistant',
-          content: response.ok && typeof data.response === 'string'
-            ? data.response
-            : (typeof data.error === 'string' ? data.error : 'Erreur de connexion ou session expirée.'),
-        }],
-      }));
+
+      if (!ok || !data.assistantMessage) {
+        setMessages((m) => m.filter((x) => x.id !== optimistic.id));
+        setLoadError(data.error ?? 'Échec de l’envoi.');
+        return;
+      }
+
+      setMessages((m) => [
+        ...m.filter((x) => x.id !== optimistic.id),
+        data.userMessage ?? optimistic,
+        data.assistantMessage!,
+      ]);
+      void reloadOverview();
     } catch {
-      setChat(prev => ({
-        ...prev,
-        [agentId]: [...(prev[agentId] || []), { role: 'assistant', content: 'Erreur de connexion.' }]
-      }));
+      setMessages((m) => m.filter((x) => x.id !== optimistic.id));
+      setLoadError('Erreur réseau.');
+    } finally {
+      setChatLoading(false);
     }
-    setLoading(false);
   };
 
-  const selected = agents.find(a => a.id === activeAgent);
+  const selected: AtlasAgentDefinition | null = activeType ? agentDefinition(activeType) : null;
+
+  const globalTotals = useMemo(
+    () => ({
+      done: stats?.totalDone ?? 0,
+      pending: stats?.totalPending ?? 0,
+      failed: stats?.totalFailed ?? 0,
+    }),
+    [stats],
+  );
 
   return (
     <div className="flex h-screen bg-gray-50">
-      <AppSidebar
-        variant="module"
-        footer={
-          <div className="px-4 py-4 border-t border-white/10">
-            <p className="text-white/30 text-xs mb-2">Agents actifs</p>
-            {agents.map((a) => (
-              <div key={a.id} className="flex items-center gap-2 py-1.5">
-                <div className={`w-2 h-2 rounded-full ${agentStatus[a.id] ? 'bg-green-400' : 'bg-gray-500'}`} />
-                <span className="text-white/50 text-xs flex-1">{a.name}</span>
-                {a.stats.alerts > 0 && (
-                  <span className="w-4 h-4 bg-red-500 rounded-full text-white text-xs flex items-center justify-center">{a.stats.alerts}</span>
-                )}
-              </div>
-            ))}
-          </div>
-        }
-      />
+      <AppSidebar variant="module" />
 
       <main className="flex-1 flex overflow-hidden">
-        {/* Agents List */}
-        <div className={`${activeAgent ? 'hidden lg:flex' : 'flex'} flex-col flex-1 overflow-hidden`}>
+        <div className={`${activeType ? 'hidden lg:flex' : 'flex'} flex-col flex-1 overflow-hidden`}>
           <header className="bg-white border-b border-gray-200 px-8 py-4">
-            <h1 className="text-xl font-bold text-gray-800">Agents IA — Equipe Virtuelle</h1>
-            <p className="text-xs text-gray-400 mt-0.5">Votre équipe de comptables et fiscalistes virtuels 24/7</p>
+            <h1 className="text-xl font-bold text-gray-800">Agents IA</h1>
+            <p className="text-xs text-gray-400 mt-0.5">Assistants spécialisés — historique et tâches enregistrés</p>
           </header>
 
           <div className="shrink-0 px-8 pt-3">
-            <BetaSurfaceBadge label="Bêta · Agents & démonstrations" />
+            <BetaSurfaceBadge label="Bêta · Agents IA" />
           </div>
 
-          <div className="flex-1 overflow-y-auto px-8 py-6 space-y-4">
-            {/* Global Stats */}
-            <div className="grid grid-cols-3 gap-4">
-              <div className="bg-white rounded-xl p-4 shadow-sm border border-gray-100">
-                <p className="text-xs text-gray-400">Tâches complétées</p>
-                <p className="text-2xl font-bold text-green-600 mt-1">{agents.reduce((s, a) => s + a.stats.done, 0)}</p>
-              </div>
-              <div className="bg-white rounded-xl p-4 shadow-sm border border-gray-100">
-                <p className="text-xs text-gray-400">En cours</p>
-                <p className="text-2xl font-bold text-amber-600 mt-1">{agents.reduce((s, a) => s + a.stats.pending, 0)}</p>
-              </div>
-              <div className="bg-white rounded-xl p-4 shadow-sm border border-gray-100">
-                <p className="text-xs text-gray-400">Alertes actives</p>
-                <p className="text-2xl font-bold text-red-600 mt-1">{agents.reduce((s, a) => s + a.stats.alerts, 0)}</p>
-              </div>
+          {loadError ? (
+            <div className="mx-8 mt-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">
+              {loadError}
             </div>
+          ) : null}
 
-            {/* Agents Cards */}
-            {agents.map(agent => (
-              <div key={agent.id} className={`bg-white rounded-xl shadow-sm border ${agentStatus[agent.id] ? agent.colorBorder : 'border-gray-100'} overflow-hidden transition-all`}>
-                <div className="p-5">
-                  <div className="flex items-start gap-4">
-                    <div className={`w-12 h-12 ${agent.color} rounded-xl flex items-center justify-center shrink-0`}>
-                      <agent.icon size={24} className="text-white" />
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2 flex-wrap">
-                        <h2 className="font-bold text-gray-800">{agent.name}</h2>
-                        <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${agentStatus[agent.id] ? agent.colorLight + ' ' + agent.colorText : 'bg-gray-100 text-gray-400'}`}>
-                          {agentStatus[agent.id] ? '● Actif' : '○ Inactif'}
-                        </span>
-                        {agent.stats.alerts > 0 && (
-                          <span className="text-xs px-2 py-0.5 rounded-full bg-red-100 text-red-600 font-medium">
-                            {agent.stats.alerts} alerte(s)
-                          </span>
-                        )}
-                      </div>
-                      <p className="text-xs text-gray-400 mt-0.5">{agent.role}</p>
-                      <p className="text-sm text-gray-600 mt-2">{agent.description}</p>
-                    </div>
-                  </div>
-
-                  <div className="mt-4 grid grid-cols-2 gap-2">
-                    {agent.tasks.map((task, i) => (
-                      <div key={i} className="flex items-center gap-2 text-xs text-gray-500">
-                        <CheckCircle size={12} className="text-green-500 shrink-0" />
-                        {task}
-                      </div>
-                    ))}
-                  </div>
-
-                  <div className="mt-4 flex items-center justify-between">
-                    <div className="flex items-center gap-4 text-xs text-gray-400">
-                      <span className="flex items-center gap-1"><CheckCircle size={12} className="text-green-500" /> {agent.stats.done} faites</span>
-                      <span className="flex items-center gap-1"><Clock size={12} className="text-amber-500" /> {agent.stats.pending} en cours</span>
-                      <span>{agent.lastActivity}</span>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <button
-                        onClick={() => setActiveAgent(agent.id)}
-                        className={`flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-medium ${agent.colorLight} ${agent.colorText} hover:opacity-80 transition-opacity`}
-                      >
-                        <MessageSquare size={12} /> Discuter
-                      </button>
-                      <button
-                        onClick={() => toggleAgent(agent.id)}
-                        className={`flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${agentStatus[agent.id] ? 'bg-red-50 text-red-600 hover:bg-red-100' : 'bg-green-50 text-green-600 hover:bg-green-100'}`}
-                      >
-                        {agentStatus[agent.id] ? <><Pause size={12} /> Pause</> : <><Play size={12} /> Activer</>}
-                      </button>
-                    </div>
-                  </div>
+          <div className="flex-1 overflow-y-auto px-8 py-6 space-y-4">
+            {loadingOverview ? (
+              <p className="text-sm text-gray-500 text-center py-12 flex items-center justify-center gap-2">
+                <Loader2 size={16} className="animate-spin" /> Chargement…
+              </p>
+            ) : !hasAnyActivity ? (
+              <div className="rounded-xl border border-dashed border-gray-300 bg-white px-8 py-16 text-center">
+                <p className="text-lg font-semibold text-gray-700">Aucun agent lancé</p>
+                <p className="text-sm text-gray-500 mt-2 max-w-md mx-auto">
+                  Choisissez un agent ci-dessous et cliquez sur <strong>Discuter</strong> pour démarrer une conversation
+                  enregistrée.
+                </p>
+              </div>
+            ) : (
+              <div className="grid grid-cols-3 gap-4">
+                <div className="bg-white rounded-xl p-4 shadow-sm border border-gray-100">
+                  <p className="text-xs text-gray-400">Tâches terminées</p>
+                  <p className="text-2xl font-bold text-green-600 mt-1">{globalTotals.done}</p>
+                </div>
+                <div className="bg-white rounded-xl p-4 shadow-sm border border-gray-100">
+                  <p className="text-xs text-gray-400">En cours</p>
+                  <p className="text-2xl font-bold text-amber-600 mt-1">{globalTotals.pending}</p>
+                </div>
+                <div className="bg-white rounded-xl p-4 shadow-sm border border-gray-100">
+                  <p className="text-xs text-gray-400">Échecs</p>
+                  <p className="text-2xl font-bold text-red-600 mt-1">{globalTotals.failed}</p>
                 </div>
               </div>
-            ))}
+            )}
+
+            {ATLAS_AGENT_DEFINITIONS.map((agent) => {
+              const typeStats = statsFor(agent.type);
+              const convCount = typeStats?.conversationCount ?? 0;
+              return (
+                <AgentCard
+                  key={agent.type}
+                  agent={agent}
+                  done={typeStats?.done ?? 0}
+                  pending={typeStats?.pending ?? 0}
+                  failed={typeStats?.failed ?? 0}
+                  lastActivity={formatRelativeTime(typeStats?.lastActivityAt ?? null)}
+                  hasConversations={convCount > 0}
+                  onDiscuss={() => void openChat(agent.type)}
+                  discussing={openingChat && activeType === agent.type}
+                />
+              );
+            })}
           </div>
         </div>
 
-        {/* Agent Chat */}
-        {activeAgent && selected && (
+        {activeType && selected && (
           <div className="flex flex-col flex-1 lg:max-w-md border-l border-gray-200 bg-white">
             <div className={`${selected.color} px-4 py-3 flex items-center justify-between`}>
               <div className="flex items-center gap-3">
@@ -286,27 +270,35 @@ function AgentsPageContent() {
                   <p className="text-white/70 text-xs">{selected.role}</p>
                 </div>
               </div>
-              <button onClick={() => setActiveAgent(null)} className="text-white/70 hover:text-white text-xs">✕</button>
+              <button type="button" onClick={closeChat} className="text-white/70 hover:text-white text-xs">
+                ✕
+              </button>
             </div>
 
             <div className="flex-1 overflow-y-auto p-4 space-y-3">
-              {!(chat[activeAgent]?.length) && (
+              {messages.length === 0 && !chatLoading && (
                 <div className={`${selected.colorLight} rounded-xl p-4 text-sm ${selected.colorText}`}>
-                  Bonjour! Je suis {selected.name}. Comment puis-je vous aider aujourd&apos;hui?
+                  Bonjour — je suis {selected.name}. Posez votre question ; la conversation est enregistrée.
                 </div>
               )}
-              {(chat[activeAgent] || []).map((m, i) => (
-                <div key={i} className={`flex ${m.role === 'user' ? 'justify-end' : 'justify-start'}`}>
-                  <div className={`max-w-xs px-3 py-2 rounded-xl text-sm ${m.role === 'user' ? 'bg-[#1B2A4A] text-white' : selected.colorLight + ' ' + selected.colorText}`}>
+              {messages.map((m) => (
+                <div key={m.id} className={`flex ${m.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+                  <div
+                    className={`max-w-[85%] px-3 py-2 rounded-xl text-sm whitespace-pre-wrap ${
+                      m.role === 'user'
+                        ? 'bg-[#1B2A4A] text-white'
+                        : `${selected.colorLight} ${selected.colorText}`
+                    }`}
+                  >
                     {m.content}
                   </div>
                 </div>
               ))}
-              {loading && (
+              {chatLoading && (
                 <div className="flex gap-1 p-2">
-                  <div className="w-2 h-2 bg-gray-300 rounded-full animate-bounce"></div>
-                  <div className="w-2 h-2 bg-gray-300 rounded-full animate-bounce" style={{animationDelay:'0.1s'}}></div>
-                  <div className="w-2 h-2 bg-gray-300 rounded-full animate-bounce" style={{animationDelay:'0.2s'}}></div>
+                  <div className="w-2 h-2 bg-gray-300 rounded-full animate-bounce" />
+                  <div className="w-2 h-2 bg-gray-300 rounded-full animate-bounce" style={{ animationDelay: '0.1s' }} />
+                  <div className="w-2 h-2 bg-gray-300 rounded-full animate-bounce" style={{ animationDelay: '0.2s' }} />
                 </div>
               )}
             </div>
@@ -315,12 +307,18 @@ function AgentsPageContent() {
               <div className="flex gap-2">
                 <input
                   value={input}
-                  onChange={e => setInput(e.target.value)}
-                  onKeyDown={e => e.key === 'Enter' && sendMessage(activeAgent)}
-                  placeholder={`Parlez à ${selected.name}...`}
+                  onChange={(e) => setInput(e.target.value)}
+                  onKeyDown={(e) => e.key === 'Enter' && void sendMessage()}
+                  placeholder={`Parlez à ${selected.name}…`}
+                  disabled={chatLoading || !conversationId}
                   className="flex-1 px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:border-blue-400"
                 />
-                <button onClick={() => sendMessage(activeAgent)} disabled={loading} className={`px-3 py-2 ${selected.color} text-white rounded-lg text-sm hover:opacity-90 disabled:opacity-50`}>
+                <button
+                  type="button"
+                  onClick={() => void sendMessage()}
+                  disabled={chatLoading || !conversationId}
+                  className={`px-3 py-2 ${selected.color} text-white rounded-lg text-sm hover:opacity-90 disabled:opacity-50`}
+                >
                   →
                 </button>
               </div>
@@ -328,6 +326,71 @@ function AgentsPageContent() {
           </div>
         )}
       </main>
+    </div>
+  );
+}
+
+function AgentCard({
+  agent,
+  done,
+  pending,
+  failed,
+  lastActivity,
+  hasConversations,
+  onDiscuss,
+  discussing,
+}: {
+  agent: AtlasAgentDefinition;
+  done: number;
+  pending: number;
+  failed: number;
+  lastActivity: string;
+  hasConversations: boolean;
+  onDiscuss: () => void;
+  discussing: boolean;
+}) {
+  return (
+    <div
+      className={`bg-white rounded-xl shadow-sm border ${hasConversations ? agent.colorBorder : 'border-gray-100'} overflow-hidden`}
+    >
+      <div className="p-5">
+        <div className="flex items-start gap-4">
+          <div className={`w-12 h-12 ${agent.color} rounded-xl flex items-center justify-center shrink-0`}>
+            <agent.icon size={24} className="text-white" />
+          </div>
+          <div className="flex-1 min-w-0">
+            <h2 className="font-bold text-gray-800">{agent.name}</h2>
+            <p className="text-xs text-gray-400 mt-0.5">{agent.role}</p>
+            <p className="text-sm text-gray-600 mt-2">{agent.description}</p>
+          </div>
+        </div>
+
+        <ul className="mt-4 grid grid-cols-1 sm:grid-cols-2 gap-2">
+          {agent.capabilities.map((cap) => (
+            <li key={cap} className="text-xs text-gray-500">
+              · {cap}
+            </li>
+          ))}
+        </ul>
+
+        <div className="mt-4 flex items-center justify-between flex-wrap gap-3">
+          <div className="flex items-center gap-3 text-xs text-gray-500">
+            <span className="text-green-600 font-medium">{done} terminées</span>
+            <span className="text-amber-600 font-medium">{pending} en cours</span>
+            {failed > 0 ? <span className="text-red-600 font-medium">{failed} échec(s)</span> : null}
+            <span>{lastActivity}</span>
+          </div>
+          <button
+            type="button"
+            onClick={onDiscuss}
+            disabled={discussing}
+            className={`flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-medium ${agent.colorLight} ${agent.colorText} hover:opacity-80 disabled:opacity-50`}
+          >
+            {discussing ? <Loader2 size={12} className="animate-spin" /> : <MessageSquare size={12} />}
+            Discuter
+          </button>
+        </div>
+      </div>
     </div>
   );
 }
