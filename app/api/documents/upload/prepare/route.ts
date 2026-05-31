@@ -3,7 +3,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { atlasDataBackend } from '@/app/lib/atlas-data-source';
 import { isUuid } from '@/app/lib/admin/atlas-admin-profile-fields';
 import { ATLAS_DOCUMENTS_BUCKET } from '@/app/lib/atlas-document-storage';
-import { logUploadStep, prepareStorageUploadSlot } from '@/app/lib/atlas-document-upload-server';
+import { logUploadStep, prepareStorageUploadSlot } from '@/app/lib/atlas-document-upload-core';
 import {
   createDocumentUploadSupabaseClient,
   documentUploadSessionUserId,

@@ -2,6 +2,10 @@
  * Server-side PDF rendering for Documents IA OCR (pdf-to-img / pdfjs-dist).
  */
 
+import { ensureAtlasDomPolyfills } from '@/app/lib/atlas-dom-polyfill';
+
+ensureAtlasDomPolyfills();
+
 import { pdf } from 'pdf-to-img';
 
 export const PDF_OCR_RENDER_SCALE = 1.5;

@@ -101,7 +101,7 @@ function apiErrorBody(
   const code = body.error ?? body.code ?? 'upload_failed';
   const fromBody = sanitizeUploadUserMessage(body.message);
   const fromRegister = step === 'register' ? frenchMessageForRegisterCode(code, body.message) : null;
-  const fromHttp = frenchMessageForUploadHttpStatus(status, code);
+  const fromHttp = frenchMessageForUploadHttpStatus(status, code, step);
   return {
     error: code,
     code,

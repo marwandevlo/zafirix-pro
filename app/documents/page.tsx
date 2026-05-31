@@ -123,7 +123,7 @@ function formatDocumentsUploadError(status: number, body: UploadErrorBody): stri
   const sanitized = sanitizeUploadUserMessage(body.message);
   if (sanitized) return sanitized;
 
-  const fromHttp = frenchMessageForUploadHttpStatus(status, code);
+  const fromHttp = frenchMessageForUploadHttpStatus(status, code, body.step);
   if (fromHttp) return fromHttp;
 
   if (code === 'storage_permission_denied' || code === 'storage_upload_failed') {

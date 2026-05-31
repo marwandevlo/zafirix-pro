@@ -6,7 +6,8 @@ import {
   createDocumentUploadSupabaseClient,
   documentUploadSessionUserId,
 } from '@/app/lib/atlas-document-upload-auth';
-import { logUploadStep, registerStoredDocument, removeOrphanStorageObject } from '@/app/lib/atlas-document-upload-server';
+import { logUploadStep } from '@/app/lib/atlas-document-upload-core';
+import { registerStoredDocument, removeOrphanStorageObject } from '@/app/lib/atlas-document-upload-register';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';

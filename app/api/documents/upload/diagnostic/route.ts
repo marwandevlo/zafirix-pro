@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 
 import { documentUploadSessionUserId } from '@/app/lib/atlas-document-upload-auth';
-import { logUploadStep } from '@/app/lib/atlas-document-upload-server';
+import { logUploadStep } from '@/app/lib/atlas-document-upload-core';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';

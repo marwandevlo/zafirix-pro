@@ -2,7 +2,10 @@
  * Map API HTTP status + error codes to French user-facing messages.
  */
 
-export function frenchMessageForUploadHttpStatus(status: number, code?: string): string {
+export function frenchMessageForUploadHttpStatus(status: number, code?: string, step?: string): string {
+  if (code === 'prepare_failed' || (step === 'prepare' && status >= 500)) {
+    return 'Échec de la préparation du téléversement. Réessayez dans quelques instants.';
+  }
   if (status === 401 || code === 'auth_required') {
     return 'Session expirée. Reconnectez-vous.';
   }

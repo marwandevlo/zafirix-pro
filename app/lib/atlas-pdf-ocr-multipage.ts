@@ -2,6 +2,10 @@
  * Multi-page PDF OCR pipeline for Documents IA.
  */
 
+import { ensureAtlasDomPolyfills } from '@/app/lib/atlas-dom-polyfill';
+
+ensureAtlasDomPolyfills();
+
 import { pdf } from 'pdf-to-img';
 import type { AtlasOcrDetectedInvoice, AtlasOcrError, AtlasOcrExtraction } from '@/app/types/atlas-document';
 import { preparePdfPageForOcr } from '@/app/lib/atlas-ocr-image-prep';

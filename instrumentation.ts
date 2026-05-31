@@ -1,5 +1,7 @@
 export async function register() {
   if (process.env.NEXT_RUNTIME === 'nodejs') {
+    const { ensureAtlasDomPolyfills } = await import('@/app/lib/atlas-dom-polyfill');
+    ensureAtlasDomPolyfills();
     const { validateProductionConfiguration } = await import('@/app/lib/atlas-production-config');
     validateProductionConfiguration();
   }
