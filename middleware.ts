@@ -125,8 +125,22 @@ export async function middleware(request: NextRequest) {
     },
   });
 
-  const { data } = await supabase.auth.getUser();
-  const user = data.user;
+  let { data } = await supabase.auth.getUser();
+  let user = data.user;
+
+  // Documents API: allow Bearer token (OCR retrigger scripts / mobile clients).
+  if (!user && pathname.startsWith('/api/documents/')) {
+    const auth = request.headers.get('authorization') ?? '';
+    const bearer = auth.toLowerCase().startsWith('bearer ') ? auth.slice(7).trim() : '';
+    if (bearer) {
+      const bearerClient = createServerClient(supabaseUrl, supabaseAnonKey, {
+        global: { headers: { Authorization: `Bearer ${bearer}` } },
+        cookies: { getAll: () => [], setAll: () => {} },
+      });
+      const { data: bearerData } = await bearerClient.auth.getUser();
+      user = bearerData.user ?? null;
+    }
+  }
 
   if (pathname.startsWith('/api/admin') && request.method === 'OPTIONS') {
     return NextResponse.next();
