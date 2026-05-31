@@ -1,0 +1,31 @@
+/**
+ * Map API HTTP status + error codes to French user-facing messages.
+ */
+
+export function frenchMessageForUploadHttpStatus(status: number, code?: string): string {
+  if (status === 401 || code === 'auth_required') {
+    return 'Session expirée. Reconnectez-vous.';
+  }
+  if (status === 403 || code === 'storage_permission_denied' || code === 'company_not_found_or_forbidden') {
+    return 'Autorisation stockage refusée.';
+  }
+  if (status === 413 || code === 'file_too_large') {
+    return 'Fichier trop volumineux (PDF max 50 Mo, images max 20 Mo).';
+  }
+  if (status === 408 || code === 'upload_timeout' || code === 'ocr_timeout') {
+    return 'Délai dépassé. Réessayez avec une connexion stable.';
+  }
+  if (status >= 500 || code === 'db_insert_failed' || code === 'server_error') {
+    return 'Erreur serveur. Réessayez dans quelques instants.';
+  }
+  return '';
+}
+
+export function sanitizeUploadUserMessage(message: string | undefined): string | null {
+  if (!message?.trim()) return null;
+  const m = message.trim();
+  if (m === 'StorageApiError' || m === 'StorageError' || /^Storage\w*Error$/i.test(m)) {
+    return null;
+  }
+  return m;
+}

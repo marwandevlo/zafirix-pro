@@ -134,8 +134,12 @@ export async function middleware(request: NextRequest) {
 
   // Require login for private pages. Public routes (e.g. /landing, /login) already returned above — no loop on `next`.
   if (!user) {
-    if (pathname.startsWith('/api/admin')) {
-      return NextResponse.json({ error: 'auth_required' }, { status: 401 });
+    // API routes must return JSON — never an HTML redirect (breaks fetch + shows generic upload errors).
+    if (pathname.startsWith('/api/')) {
+      return NextResponse.json(
+        { error: 'auth_required', code: 'auth_required', step: 'auth' },
+        { status: 401 },
+      );
     }
     const url = request.nextUrl.clone();
     // Admin UI: send anonymous users to login (not the marketing landing).

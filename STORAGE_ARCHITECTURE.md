@@ -6,7 +6,7 @@
 |----------|-------|
 | ID / name | `atlas-documents` |
 | Public | `false` (private) |
-| Max file size | 10 MB (`10485760` bytes) |
+| Max file size | 50 MB (`52428800` bytes) |
 | Allowed MIME | `image/jpeg`, `image/png`, `image/webp`, `image/gif`, `application/pdf` |
 
 Defined in: `supabase/migrations/20260528150000_atlas_documents_real_foundation.sql`
@@ -30,13 +30,12 @@ a1b2c3d4-.../e5f6g7h8-.../doc-uuid-.../facture-janvier.pdf
 - **documentId** — matches `atlas_documents.id`.
 - **sanitizedFilename** — stripped of unsafe characters via `sanitizeDocumentFilename()`.
 
-## Upload Flow
+## Upload Flow (direct Storage — no file bytes through Vercel)
 
-1. Client POSTs multipart to `/api/documents/upload` with `file` + `companyId`.
-2. Server validates auth, company ownership, MIME, size.
-3. Server inserts `atlas_documents` row with `storage_path`.
-4. Server uploads bytes to `atlas-documents` bucket.
-5. On storage failure: DB row deleted (compensating transaction).
+1. Client POSTs JSON to `/api/documents/upload/prepare` (`companyId`, `filename`, `mimeType`, `sizeBytes`) → `{ documentId, storagePath, signedUploadToken? }`.
+2. Client uploads file **directly** to Supabase Storage (`uploadToSignedUrl` or authenticated `.upload()`).
+3. Client POSTs JSON to `/api/documents/upload/register` (metadata only) → creates `atlas_documents` row, compresses image working copy, enqueues OCR from Storage.
+4. Legacy `POST /api/documents/upload` (multipart) returns **410** — do not use on Vercel.
 
 ## Access Model
 
