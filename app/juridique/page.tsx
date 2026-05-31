@@ -1,7 +1,7 @@
 'use client';
 import { useState, useEffect } from 'react';
 import type { ParagraphChild } from 'docx';
-import { ArrowLeft, FileText, Download, Search, Building2, RefreshCw, ChevronRight, CheckCircle, Loader2 } from 'lucide-react';
+import { ArrowLeft, FileText, Download, Search, Building2, RefreshCw, ChevronRight, CheckCircle, Loader2, Scale } from 'lucide-react';
 import { fetchAi } from '../lib/fetch-ai';
 import { createAtlasLink } from '@/app/lib/atlas-links-repository';
 import { createDocument } from '@/app/lib/atlas-documents-repository';
@@ -9,6 +9,7 @@ import { AppSidebar } from '@/app/components/shell/AppSidebar';
 import { isAtlasSupabaseDataEnabled } from '@/app/lib/atlas-data-source';
 import { listAtlasCompanies } from '@/app/lib/atlas-companies-repository';
 import { BetaSurfaceBadge } from '@/app/components/safety/BetaSurfaceBadge';
+import { JuridiqueDocumentsPanel } from '@/app/juridique/JuridiqueDocumentsPanel';
 
 type Company = {
   id: number; raisonSociale: string; formeJuridique: string; if_fiscal: string;
@@ -988,6 +989,23 @@ EN-TETE: ${header}
       const content = await callAI(prompts[modType]);
       setGeneratedContent(content);
       setStep('done');
+      const docRes = await createDocument({
+        type: 'juridique',
+        title: modTypes.find((m) => m.id === modType)?.label ?? 'Modification juridique',
+        content: { text: content, template: modType },
+        metadata: { companyName: c.raisonSociale, modType },
+        source: 'generated',
+      });
+      if (docRes.ok) {
+        await createAtlasLink({
+          fromType: 'document',
+          fromId: docRes.id,
+          toType: 'company',
+          toId: String(c.id),
+          relation: 'attached_to',
+          metadata: { source: 'juridique_modification' },
+        });
+      }
     } catch { setStep('form'); }
   };
 
@@ -1199,7 +1217,7 @@ EN-TETE: ${header}
 
 // ==================== MAIN PAGE ====================
 export default function JuridiquePage() {
-  const [activeTab, setActiveTab] = useState<'creation' | 'modifications'>('creation');
+  const [activeTab, setActiveTab] = useState<'creation' | 'modifications' | 'documents'>('creation');
   const [companies, setCompanies] = useState<Company[]>([]);
 
   useEffect(() => {
@@ -1242,14 +1260,21 @@ export default function JuridiquePage() {
           >
             <RefreshCw size={14} /> Modifications
           </button>
+          <button
+            type="button"
+            onClick={() => setActiveTab('documents')}
+            className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-all ${activeTab === 'documents' ? 'bg-amber-500/20 text-amber-400' : 'text-white/40 hover:text-white/70'}`}
+          >
+            <Scale size={14} /> Documents juridiques
+          </button>
         </div>
       </AppSidebar>
       <main className="flex-1 flex flex-col overflow-hidden min-w-0">
-        <div className="shrink-0 px-6 pt-4 pb-2 border-b border-gray-200 bg-white">
-          <BetaSurfaceBadge label="Bêta · Juridique & IA" />
+        <div className="shrink-0 px-6 pt-4 pb-2 border-b border-gray-200 bg-white space-y-2">
+          <BetaSurfaceBadge label="Bêta · Juridique & IA · Documents à valider par juriste/expert" />
         </div>
         <div className="flex-1 flex overflow-hidden min-h-0">
-        {activeTab === 'creation' ? <CreationForm companies={companies} /> : <ModificationsForm companies={companies} />}
+        {activeTab === 'creation' ? <CreationForm companies={companies} /> : activeTab === 'modifications' ? <ModificationsForm companies={companies} /> : <JuridiqueDocumentsPanel companies={companies} />}
         </div>
       </main>
     </div>
