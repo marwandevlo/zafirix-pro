@@ -3,12 +3,12 @@ import { createServerClient } from '@supabase/ssr';
 import { cookies } from 'next/headers';
 
 import { atlasDataBackend } from '@/app/lib/atlas-data-source';
-import { runPdfOcrJob } from '@/app/lib/atlas-document-ocr-job';
+import { runImageOcrJob } from '@/app/lib/atlas-document-ocr-job';
 import { OCR_PROVIDER } from '@/app/lib/atlas-ocr';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
-export const maxDuration = 300;
+export const maxDuration = 120;
 
 const IS_DEV = process.env.NODE_ENV === 'development';
 
@@ -98,10 +98,16 @@ export async function POST(
     return NextResponse.json({ error: 'document_not_found', code: 'document_not_found' }, { status: 404 });
   }
 
+  await supabase
+    .from('atlas_documents')
+    .update({ processing_status: 'processing', updated_at: new Date().toISOString() })
+    .eq('id', documentId)
+    .eq('user_id', userId);
+
   const asyncMode = request.nextUrl.searchParams.get('async') !== '0';
 
   const execute = () =>
-    runPdfOcrJob(supabase, userId, documentId, {
+    runImageOcrJob(supabase, userId, documentId, {
       id: String(row.id),
       mime_type: row.mime_type,
       storage_path: row.storage_path,
@@ -113,18 +119,12 @@ export async function POST(
   if (asyncMode) {
     void execute().then((result) => {
       if (IS_DEV && !result.ok) {
-        console.error('[documents/ocr] background job failed', documentId, result);
+        console.error('[documents/ocr-image] background job failed', documentId, result);
       }
     });
 
     return NextResponse.json(
-      {
-        ok: true,
-        accepted: true,
-        documentId,
-        processingStatus: 'processing',
-        provider: OCR_PROVIDER,
-      },
+      { ok: true, accepted: true, documentId, processingStatus: 'processing', provider: OCR_PROVIDER },
       { status: 202 },
     );
   }
@@ -133,7 +133,7 @@ export async function POST(
   if (!result.ok) {
     return NextResponse.json(
       IS_DEV
-        ? { error: result.message, code: result.code, step: 'pdf_ocr', provider: OCR_PROVIDER }
+        ? { error: result.message, code: result.code, provider: OCR_PROVIDER }
         : { error: result.message, code: result.code },
       { status: result.status },
     );

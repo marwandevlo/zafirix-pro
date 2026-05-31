@@ -38,7 +38,13 @@ import { createAtlasLink } from '@/app/lib/atlas-links-repository';
 import { listAtlasCompanies } from '@/app/lib/atlas-companies-repository';
 import { listAtlasInvoices } from '@/app/lib/atlas-invoices-repository';
 import { getActiveCompanyDbRowId } from '@/app/lib/atlas-active-company';
-import { inferDocumentMimeType } from '@/app/lib/atlas-document-storage';
+import {
+  ATLAS_DOCUMENT_MAX_FILES_PER_BATCH,
+  formatMaxUploadLabel,
+  inferDocumentMimeType,
+  isAllowedDocumentMime,
+  maxUploadBytesForMime,
+} from '@/app/lib/atlas-document-storage';
 import {
   formatOcrDevDiagnostics,
   formatOcrUiMessage,
@@ -130,7 +136,7 @@ function formatDocumentsUploadError(status: number, body: UploadErrorBody): stri
   return base;
 }
 
-type OcrProgressPhase = 'idle' | 'uploading' | 'rendering' | 'analyzing' | 'saving';
+type OcrProgressPhase = 'idle' | 'uploading' | 'rendering' | 'analyzing' | 'saving' | 'completed';
 
 type OcrProgressState = {
   phase: OcrProgressPhase;
@@ -140,8 +146,8 @@ type OcrProgressState = {
   documentId?: string;
 };
 
-const OCR_UPLOAD_TIMEOUT_MS = 90_000;
-const OCR_PDF_TIMEOUT_MS = 190_000;
+const OCR_UPLOAD_TIMEOUT_MS = 300_000;
+const OCR_KICKOFF_TIMEOUT_MS = 60_000;
 
 async function fetchWithTimeout(url: string, init: RequestInit, timeoutMs: number): Promise<Response> {
   const controller = new AbortController();
@@ -175,9 +181,22 @@ function ocrProgressLabel(progress: OcrProgressState): string {
         : 'Analyse de l’image…';
     case 'saving':
       return 'Enregistrement des résultats…';
+    case 'completed':
+      return 'OCR terminé';
     default:
       return '';
   }
+}
+
+function validateOcrUploadFile(file: File): string | null {
+  const mime = inferDocumentMimeType(file);
+  if (!mime || !isAllowedDocumentMime(mime)) {
+    return 'Type de fichier non autorisé (images ou PDF uniquement).';
+  }
+  if (file.size > maxUploadBytesForMime(mime)) {
+    return `Fichier trop volumineux (max ${formatMaxUploadLabel(mime)}).`;
+  }
+  return null;
 }
 
 const SUPPLIER_INVOICES_MIGRATION_FILES = [
@@ -226,6 +245,8 @@ export default function DocumentsPage() {
   const ocrPollRef = useRef<number | null>(null);
   const ocrPollAbortRef = useRef<AbortController | null>(null);
   const ocrPollInFlightRef = useRef(false);
+  const ocrPollingIdsRef = useRef<Set<string>>(new Set());
+  const uploadQueueRef = useRef(0);
   const [localDocuments, setLocalDocuments] = useState<LocalOcrDocument[]>([]);
   const [ocrDocuments, setOcrDocuments] = useState<AtlasDocument[]>([]);
   const [activeCompanyId, setActiveCompanyId] = useState<string | null>(null);
@@ -265,48 +286,6 @@ export default function DocumentsPage() {
 
   useEffect(() => () => stopOcrPoll(), [stopOcrPoll]);
 
-  const startOcrProgressPoll = useCallback(
-    (documentId: string) => {
-      stopOcrPoll();
-
-      const tick = async () => {
-        if (ocrPollInFlightRef.current) return;
-
-        ocrPollInFlightRef.current = true;
-        ocrPollAbortRef.current?.abort();
-        const controller = new AbortController();
-        ocrPollAbortRef.current = controller;
-
-        try {
-          const live = await fetchOcrProgressFromApi(documentId, controller.signal);
-          if (!live?.ok) return;
-
-          if (live.processingStatus === 'processed' || live.processingStatus === 'failed') {
-            stopOcrPoll();
-            return;
-          }
-
-          if (live.progressPhase) {
-            setOcrProgress((prev) => ({
-              ...prev,
-              documentId,
-              phase: live.progressPhase === 'rendering' ? 'rendering' : 'analyzing',
-              page: live.progressPage,
-              totalPages: live.progressTotal,
-              isPdf: true,
-            }));
-          }
-        } finally {
-          ocrPollInFlightRef.current = false;
-        }
-      };
-
-      void tick();
-      ocrPollRef.current = window.setInterval(() => void tick(), OCR_PROGRESS_POLL_MS);
-    },
-    [stopOcrPoll],
-  );
-
   const refreshOcr = useCallback(async () => {
     setOcrError('');
     if (!isAtlasSupabaseDataEnabled()) return;
@@ -331,6 +310,78 @@ export default function DocumentsPage() {
     }
   }, []);
 
+  const enqueueOcrProgressPoll = useCallback(
+    (documentId: string) => {
+      ocrPollingIdsRef.current.add(documentId);
+      if (ocrPollRef.current) return;
+
+      const tick = async () => {
+        if (ocrPollInFlightRef.current) return;
+        const ids = Array.from(ocrPollingIdsRef.current);
+        if (ids.length === 0) {
+          stopOcrPoll();
+          return;
+        }
+
+        ocrPollInFlightRef.current = true;
+        ocrPollAbortRef.current?.abort();
+        const controller = new AbortController();
+        ocrPollAbortRef.current = controller;
+
+        try {
+          let needsRefresh = false;
+          for (const id of ids) {
+            const live = await fetchOcrProgressFromApi(id, controller.signal);
+            if (!live?.ok) continue;
+
+            if (live.processingStatus === 'processed') {
+              ocrPollingIdsRef.current.delete(id);
+              needsRefresh = true;
+              setOcrProgress({
+                phase: 'completed',
+                documentId: id,
+                isPdf: true,
+                page: live.progressPage,
+                totalPages: live.progressTotal,
+              });
+              setOcrPageInfo('OCR terminé');
+              window.setTimeout(() => {
+                setOcrProgress((prev) => (prev.documentId === id ? { phase: 'idle' } : prev));
+              }, 4000);
+              continue;
+            }
+
+            if (live.processingStatus === 'failed') {
+              ocrPollingIdsRef.current.delete(id);
+              needsRefresh = true;
+              setOcrError(formatOcrUiMessage('ocr_failed'));
+              continue;
+            }
+
+            if (live.progressPhase) {
+              setOcrProgress({
+                documentId: id,
+                phase: live.progressPhase === 'rendering' ? 'rendering' : 'analyzing',
+                page: live.progressPage,
+                totalPages: live.progressTotal,
+                isPdf: true,
+              });
+            }
+          }
+
+          if (needsRefresh) await refreshOcr();
+          if (ocrPollingIdsRef.current.size === 0) stopOcrPoll();
+        } finally {
+          ocrPollInFlightRef.current = false;
+        }
+      };
+
+      void tick();
+      ocrPollRef.current = window.setInterval(() => void tick(), OCR_PROGRESS_POLL_MS);
+    },
+    [stopOcrPoll, refreshOcr],
+  );
+
   const refreshLibrary = async () => {
     const companyId = isAtlasSupabaseDataEnabled() ? await getActiveCompanyDbRowId() : undefined;
     const [docs, cs, invs] = await Promise.all([
@@ -348,6 +399,15 @@ export default function DocumentsPage() {
     if (tab !== 'ocr') return;
     if (supabaseMode) void refreshOcr();
   }, [tab, refreshOcr, supabaseMode]);
+
+  useEffect(() => {
+    if (!supabaseMode || tab !== 'ocr') return;
+    for (const doc of ocrDocuments) {
+      if (doc.processingStatus === 'processing') {
+        enqueueOcrProgressPoll(String(doc.id));
+      }
+    }
+  }, [ocrDocuments, supabaseMode, tab, enqueueOcrProgressPoll]);
 
   useEffect(() => {
     if (tab !== 'library') return;
@@ -542,14 +602,62 @@ export default function DocumentsPage() {
     }
   };
 
+  const kickOffServerOcr = async (documentId: string, mimeType: string, fileSize: number) => {
+    const isPdf = isPdfMimeType(mimeType);
+    const endpoint = isPdf
+      ? `/api/documents/${documentId}/ocr`
+      : `/api/documents/${documentId}/ocr-image`;
+
+    enqueueOcrProgressPoll(documentId);
+    setOcrProgress({ phase: isPdf ? 'rendering' : 'analyzing', documentId, isPdf });
+
+    try {
+      const ocrRes = await fetchWithTimeout(
+        endpoint,
+        { method: 'POST', credentials: 'include' },
+        OCR_KICKOFF_TIMEOUT_MS,
+      );
+      const ocrBody = (await ocrRes.json().catch(() => ({}))) as OcrAiErrorBody & { ok?: boolean; accepted?: boolean };
+
+      if (ocrRes.status === 202 || (ocrRes.ok && (ocrBody.ok || ocrBody.accepted))) {
+        return;
+      }
+
+      ocrPollingIdsRef.current.delete(documentId);
+      setOcrError(formatOcrDevDiagnostics({
+        documentId,
+        mimeType,
+        fileSize,
+        step: ocrBody.step ?? 'ocr',
+        code: ocrBody.code ?? 'ocr_failed',
+        message: ocrBody.message ?? ocrBody.error,
+        provider: OCR_PROVIDER,
+        httpStatus: ocrRes.status,
+      }));
+      await refreshOcr();
+    } catch (err) {
+      if (err instanceof Error && err.message === 'ocr_timeout') {
+        return;
+      }
+      ocrPollingIdsRef.current.delete(documentId);
+      setOcrError(formatOcrUiMessage('ocr_failed'));
+    }
+  };
+
   const analyzeImageSupabase = async (file: File) => {
+    const validationError = validateOcrUploadFile(file);
+    if (validationError) {
+      setOcrError(validationError);
+      return;
+    }
+
     const mimeTypeGuess = inferDocumentMimeType(file);
     const isPdf = isPdfMimeType(mimeTypeGuess);
+    uploadQueueRef.current += 1;
     setAnalyzing(true);
     setOcrError('');
     setOcrPageInfo('');
     setOcrProgress({ phase: 'uploading', isPdf });
-    stopOcrPoll();
     try {
       const companyId = activeCompanyId ?? (await getActiveCompanyDbRowId());
       if (!companyId) {
@@ -573,8 +681,6 @@ export default function DocumentsPage() {
       const mimeType = uploadBody.document.mimeType ?? mimeTypeGuess;
       const fileSize = uploadBody.document.sizeBytes ?? file.size;
 
-      setOcrProgress({ phase: 'saving', documentId, isPdf });
-
       const processing = await updateAtlasDocumentProcessingStatus(documentId, 'processing');
       if (!processing.ok) {
         const ocrError: AtlasOcrError = {
@@ -595,166 +701,9 @@ export default function DocumentsPage() {
         await refreshOcr();
         return;
       }
-      await refreshOcr();
-
-      if (isPdfMimeType(mimeType)) {
-        setOcrProgress({ phase: 'rendering', documentId, isPdf: true });
-        startOcrProgressPoll(documentId);
-
-        let ocrRes: Response;
-        try {
-          ocrRes = await fetchWithTimeout(
-            `/api/documents/${documentId}/ocr`,
-            { method: 'POST', credentials: 'include' },
-            OCR_PDF_TIMEOUT_MS,
-          );
-        } catch (err) {
-          const code = err instanceof Error && err.message === 'ocr_timeout' ? 'ocr_timeout' : 'ocr_failed';
-          setOcrError(formatOcrUiMessage(code));
-          await refreshOcr();
-          return;
-        } finally {
-          stopOcrPoll();
-        }
-
-        setOcrProgress({ phase: 'saving', documentId, isPdf: true });
-
-        const ocrBody = (await ocrRes.json().catch(() => ({}))) as OcrAiErrorBody & {
-          ok?: boolean;
-          processedPageCount?: number;
-          successPageCount?: number;
-          partialFailure?: boolean;
-          invoiceCount?: number;
-        };
-
-        if (!ocrRes.ok || !ocrBody.ok) {
-          if (process.env.NODE_ENV === 'development') {
-            console.debug('[documents/ocr] pdf_failed', {
-              documentId,
-              mimeType,
-              fileSize,
-              httpStatus: ocrRes.status,
-              ...ocrBody,
-              provider: OCR_PROVIDER,
-            });
-          }
-          setOcrError(formatOcrDevDiagnostics({
-            documentId,
-            mimeType,
-            fileSize,
-            step: ocrBody.step ?? 'pdf_ocr',
-            code: ocrBody.code ?? 'ocr_failed',
-            message: ocrBody.message ?? ocrBody.error,
-            provider: OCR_PROVIDER,
-            httpStatus: ocrRes.status,
-          }));
-        } else {
-          const processed = ocrBody.processedPageCount ?? ocrBody.successPageCount ?? 0;
-          const success = ocrBody.successPageCount ?? processed;
-          const invoiceCount = ocrBody.invoiceCount ?? 0;
-          if (invoiceCount > 1) {
-            setOcrPageInfo(`${invoiceCount} factures détectées`);
-          } else if (processed > 0) {
-            setOcrPageInfo(
-              ocrBody.partialFailure
-                ? `${success}/${processed} page(s) analysée(s) (partiel)`
-                : `${processed} page(s) analysée(s)`,
-            );
-          }
-        }
-
-        await refreshOcr();
-        return;
-      }
-
-      setOcrProgress({ phase: 'analyzing', documentId, isPdf: false });
-
-      const base64 = await new Promise<string>((resolve, reject) => {
-        const reader = new FileReader();
-        reader.onload = () => {
-          const result = reader.result as string;
-          resolve(result.split(',')[1]);
-        };
-        reader.onerror = () => reject(new Error('read_failed'));
-        reader.readAsDataURL(file);
-      });
-
-      const response = await fetchAi({ type: 'ocr', imageBase64: base64, mimeType });
-      const data = (await response.json().catch(() => ({}))) as OcrAiErrorBody & { response?: string };
-
-      if (!response.ok) {
-        const ocrError = ocrErrorFromAiBody(data, data.step ?? 'ai_provider');
-        await persistOcrFailure(documentId, ocrError);
-        if (process.env.NODE_ENV === 'development') {
-          console.debug('[documents/ocr] ai_failed', {
-            documentId,
-            mimeType,
-            fileSize,
-            httpStatus: response.status,
-            ...ocrError,
-            provider: OCR_PROVIDER,
-          });
-        }
-        setOcrError(formatOcrDevDiagnostics({
-          documentId,
-          mimeType,
-          fileSize,
-          step: ocrError.step,
-          code: ocrError.code,
-          message: ocrError.message,
-          provider: OCR_PROVIDER,
-          httpStatus: response.status,
-        }));
-        await refreshOcr();
-        return;
-      }
-
-      setOcrProgress({ phase: 'saving', documentId, isPdf: false });
-
-      try {
-        const parsed = parseOcrJsonResponse(String(data.response ?? ''));
-        const saveRes = await saveAtlasDocumentOcrResult(documentId, {
-          extraction: parsed,
-          processingStatus: 'processed',
-          extractedText: JSON.stringify(parsed, null, 2),
-        });
-        if (!saveRes.ok) {
-          const ocrError: AtlasOcrError = {
-            step: 'db_update',
-            code: 'db_update_failed',
-            message: saveRes.error,
-          };
-          await persistOcrFailure(documentId, ocrError, parsed);
-          setOcrError(formatOcrDevDiagnostics({
-            documentId,
-            mimeType,
-            fileSize,
-            step: ocrError.step,
-            code: ocrError.code,
-            message: ocrError.message,
-            provider: OCR_PROVIDER,
-          }));
-        }
-      } catch (parseErr) {
-        const message = parseErr instanceof Error ? parseErr.message : 'json_parse_failed';
-        const ocrError: AtlasOcrError = {
-          step: 'json_parse',
-          code: 'json_parse_failed',
-          message,
-        };
-        await persistOcrFailure(documentId, ocrError, { description: String(data.response ?? '').slice(0, 500) });
-        setOcrError(formatOcrDevDiagnostics({
-          documentId,
-          mimeType,
-          fileSize,
-          step: ocrError.step,
-          code: ocrError.code,
-          message: ocrError.message,
-          provider: OCR_PROVIDER,
-        }));
-      }
 
       await refreshOcr();
+      void kickOffServerOcr(documentId, mimeType, fileSize);
     } catch (err) {
       const message = err instanceof Error ? err.message : 'ocr_failed';
       const code = message === 'ocr_timeout' ? 'ocr_timeout' : 'ocr_failed';
@@ -764,9 +713,11 @@ export default function DocumentsPage() {
       setOcrError(formatOcrUiMessage(code, message));
       await refreshOcr();
     } finally {
-      stopOcrPoll();
-      setAnalyzing(false);
-      setOcrProgress({ phase: 'idle' });
+      uploadQueueRef.current -= 1;
+      if (uploadQueueRef.current <= 0) {
+        uploadQueueRef.current = 0;
+        setAnalyzing(false);
+      }
     }
   };
 
@@ -790,9 +741,12 @@ export default function DocumentsPage() {
     }
   };
 
-  const handleFile = (file: File) => {
-    if (file && (file.type.startsWith('image/') || file.type === 'application/pdf')) {
-      analyzeImage(file);
+  const handleFiles = (fileList: FileList | File[]) => {
+    const files = Array.from(fileList).slice(0, ATLAS_DOCUMENT_MAX_FILES_PER_BATCH);
+    for (const file of files) {
+      const mime = inferDocumentMimeType(file);
+      if (!mime || (!mime.startsWith('image/') && !isPdfMimeType(mime))) continue;
+      void analyzeImage(file);
     }
   };
 
@@ -992,7 +946,7 @@ export default function DocumentsPage() {
                 {ocrError}
               </div>
             )}
-            {analyzing && ocrProgress.phase !== 'idle' && (
+            {ocrProgress.phase !== 'idle' && (
               <div className="rounded-xl border border-rose-100 bg-rose-50 px-4 py-3 text-sm text-rose-900 flex items-start gap-3">
                 <div className="w-5 h-5 mt-0.5 border-2 border-rose-500 border-t-transparent rounded-full animate-spin shrink-0" />
                 <div>
@@ -1027,12 +981,27 @@ export default function DocumentsPage() {
               <p className="text-xs text-gray-500">{ocrPageSummary}</p>
             )}
 
-          <input ref={fileRef} type="file" accept="image/*,.pdf" className="hidden" onChange={e => e.target.files?.[0] && handleFile(e.target.files[0])} />
+          <input
+            ref={fileRef}
+            type="file"
+            accept="image/*,.pdf"
+            multiple
+            className="hidden"
+            onChange={(e) => {
+              if (e.target.files?.length) handleFiles(e.target.files);
+              e.target.value = '';
+            }}
+          />
 
           <div
             onDragOver={e => { e.preventDefault(); if (!analyzing) setDragging(true); }}
             onDragLeave={() => setDragging(false)}
-            onDrop={e => { e.preventDefault(); setDragging(false); if (analyzing) return; const file = e.dataTransfer.files[0]; if (file) handleFile(file); }}
+            onDrop={(e) => {
+              e.preventDefault();
+              setDragging(false);
+              if (analyzing || !e.dataTransfer.files.length) return;
+              handleFiles(e.dataTransfer.files);
+            }}
             onClick={() => { if (!analyzing) fileRef.current?.click(); }}
             className={`border-2 border-dashed rounded-xl p-10 text-center transition-all ${
               analyzing
@@ -1050,8 +1019,13 @@ export default function DocumentsPage() {
                 <div className="w-14 h-14 bg-rose-100 rounded-full flex items-center justify-center">
                   <Upload size={28} className="text-rose-500" />
                 </div>
-                <p className="font-medium text-gray-700">Déposez votre facture ici</p>
-                <p className="text-sm text-gray-400">Images (JPG, PNG) ou PDF</p>
+                <p className="font-medium text-gray-700">Déposez vos factures ici</p>
+                <p className="text-sm text-gray-400">
+                  PDF jusqu’à 50 Mo · images jusqu’à 20 Mo · plusieurs fichiers
+                </p>
+                <p className="text-xs text-gray-500">
+                  Compression et découpage automatiques — vous pouvez quitter la page pendant l’analyse.
+                </p>
                 <p className="text-xs text-rose-500 font-medium">Extraction : n° de facture, fournisseur, montants, TVA</p>
               </div>
             )}

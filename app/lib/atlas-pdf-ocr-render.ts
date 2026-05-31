@@ -6,9 +6,10 @@ import { pdf } from 'pdf-to-img';
 
 export const PDF_OCR_RENDER_SCALE = 1.5;
 export const PDF_OCR_RENDERED_MIME = 'image/png' as const;
-export const PDF_OCR_MAX_PAGES = 10;
-export const PDF_OCR_ROUTE_TIMEOUT_MS = 180_000;
-export const PDF_OCR_PAGE_TIMEOUT_MS = 45_000;
+/** Large accounting PDFs — process sequentially with progress updates. */
+export const PDF_OCR_MAX_PAGES = 50;
+export const PDF_OCR_ROUTE_TIMEOUT_MS = 280_000;
+export const PDF_OCR_PAGE_TIMEOUT_MS = 60_000;
 
 type PdfDocument = Awaited<ReturnType<typeof pdf>>;
 
