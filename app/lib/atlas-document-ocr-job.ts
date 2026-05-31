@@ -17,6 +17,7 @@ import { prepareUploadedImageForOcr } from '@/app/lib/atlas-document-image-uploa
 import { isPdfMimeType } from '@/app/lib/atlas-document-storage';
 import { processMultiPagePdfOcr } from '@/app/lib/atlas-pdf-ocr-multipage';
 import { PDF_OCR_RENDERED_MIME } from '@/app/lib/atlas-pdf-ocr-render';
+import { logAtlasServerEvent } from '@/app/lib/atlas-server-log';
 import { runInvoiceOcrExtraction } from '@/app/lib/atlas-ocr-invoice-server';
 
 type DocumentRow = {
@@ -59,6 +60,8 @@ export async function runPdfOcrJob(
     mimeType: mimeType,
     sizeBytes: row.size_bytes,
   });
+
+  logAtlasServerEvent('documents/ocr', 'info', 'pdf_ocr_start', { documentId, userId });
 
   const { data: fileBlob, error: downloadErr } = await supabase.storage
     .from(ATLAS_DOCUMENTS_BUCKET)
@@ -201,6 +204,7 @@ export async function runPdfOcrJob(
     return { ok: false, status: 500, code: 'db_update_failed', message: persist.error };
   }
 
+  logAtlasServerEvent('documents/ocr', 'info', 'pdf_ocr_complete', { documentId, userId });
   return { ok: true };
 }
 
