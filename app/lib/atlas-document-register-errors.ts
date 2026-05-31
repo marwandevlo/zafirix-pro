@@ -9,7 +9,7 @@ export function frenchMessageForRegisterCode(code: string, rawMessage?: string):
     case 'company_not_found_or_forbidden':
       return 'Société active introuvable ou non autorisée.';
     case 'file_too_large':
-      return 'Fichier trop volumineux (PDF max 50 Mo, images max 20 Mo).';
+      return 'Pour les gros fichiers, compressez le document avant téléversement. Le support 50 Mo est en cours de stabilisation.';
     case 'storage_object_missing':
       return 'Le fichier n’a pas été trouvé dans le stockage après le téléversement. Réessayez.';
     case 'storage_verify_failed':

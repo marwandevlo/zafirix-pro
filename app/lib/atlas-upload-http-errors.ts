@@ -13,7 +13,7 @@ export function frenchMessageForUploadHttpStatus(status: number, code?: string, 
     return 'Autorisation stockage refusée.';
   }
   if (status === 413 || code === 'file_too_large') {
-    return 'Fichier trop volumineux (PDF max 50 Mo, images max 20 Mo).';
+    return 'Pour les gros fichiers, compressez le document avant téléversement. Le support 50 Mo est en cours de stabilisation.';
   }
   if (status === 408 || code === 'upload_timeout' || code === 'ocr_timeout') {
     return 'Délai dépassé. Réessayez avec une connexion stable.';

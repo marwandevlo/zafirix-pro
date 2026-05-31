@@ -292,7 +292,7 @@ export function atlasDocumentErrorMessage(code: string): string {
     case 'file_required':
       return 'Fichier requis.';
     case 'file_too_large':
-      return 'Fichier trop volumineux (PDF max 50 Mo, images max 20 Mo).';
+      return 'Pour les gros fichiers, compressez le document avant téléversement. Le support 50 Mo est en cours de stabilisation.';
     case 'storage_permission_denied':
       return 'Autorisation stockage refusée. Reconnectez-vous ou contactez le support.';
     case 'upload_timeout':

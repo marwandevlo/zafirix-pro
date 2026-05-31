@@ -14,7 +14,7 @@ import { getSupabaseServiceRoleClient } from '@/app/lib/supabase-admin';
 import {
   ATLAS_DOCUMENTS_BUCKET,
   buildAtlasDocumentWorkingStoragePath,
-  formatMaxUploadLabel,
+  documentUploadLimitExceededMessage,
   isPdfMimeType,
   maxUploadBytesForMime,
   sanitizeDocumentFilename,
@@ -86,7 +86,7 @@ export async function registerStoredDocument(
 
   const maxBytes = maxUploadBytesForMime(mimeType);
   if (sizeBytes > maxBytes) {
-    return registerFailure('file_too_large', formatMaxUploadLabel(mimeType), 400, ctx, 'register_size');
+    return registerFailure('file_too_large', documentUploadLimitExceededMessage(mimeType), 413, ctx, 'register_size');
   }
 
   const { data: companyRow, error: companyErr } = await supabase

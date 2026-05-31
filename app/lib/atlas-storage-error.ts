@@ -69,7 +69,8 @@ export function parseSupabaseStorageError(err: unknown): ParsedStorageError {
   ) {
     return {
       code: 'file_too_large',
-      message: 'Fichier trop volumineux pour le bucket Supabase (vérifiez la limite 50 Mo).',
+      message:
+        'Pour les gros fichiers, compressez le document avant téléversement. Le support 50 Mo est en cours de stabilisation.',
       statusCode: 413,
       raw: message || e.name,
     };

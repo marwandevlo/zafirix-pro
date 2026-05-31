@@ -6,7 +6,8 @@
 |----------|-------|
 | ID / name | `atlas-documents` |
 | Public | `false` (private) |
-| Max file size | 50 MB (`52428800` bytes) |
+| Bucket max file size | 50 MB (`52428800` bytes) — storage ceiling |
+| App upload limit (production) | PDF 10 MB · images 4 MB (`atlas-document-storage.ts`) |
 | Allowed MIME | `image/jpeg`, `image/png`, `image/webp`, `image/gif`, `application/pdf` |
 
 Defined in: `supabase/migrations/20260528150000_atlas_documents_real_foundation.sql`
@@ -34,8 +35,11 @@ a1b2c3d4-.../e5f6g7h8-.../doc-uuid-.../facture-janvier.pdf
 
 1. Client POSTs JSON to `/api/documents/upload/prepare` (`companyId`, `filename`, `mimeType`, `sizeBytes`) → `{ documentId, storagePath, signedUploadToken? }`.
 2. Client uploads file **directly** to Supabase Storage (`uploadToSignedUrl` or authenticated `.upload()`).
-3. Client POSTs JSON to `/api/documents/upload/register` (metadata only) → creates `atlas_documents` row, compresses image working copy, enqueues OCR from Storage.
-4. Legacy `POST /api/documents/upload` (multipart) returns **410** — do not use on Vercel.
+3. Client POSTs JSON to `/api/documents/upload/register` (metadata only) → creates `atlas_documents` row, compresses image working copy if needed.
+4. Client POSTs `/api/documents/[id]/ocr` or `ocr-image` (`async=0`) — OCR runs in a dedicated serverless invocation (not fire-and-forget after register).
+5. Legacy `POST /api/documents/upload` (multipart) returns **410** — do not use on Vercel.
+
+Large files (>10 MB PDF / >4 MB image): rejected with stabilization message until a Supabase queue worker handles 50 MB path.
 
 ## Access Model
 

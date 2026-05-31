@@ -39,7 +39,7 @@ import { listAtlasInvoices } from '@/app/lib/atlas-invoices-repository';
 import { getActiveCompanyDbRowId } from '@/app/lib/atlas-active-company';
 import {
   ATLAS_DOCUMENT_MAX_FILES_PER_BATCH,
-  formatMaxUploadLabel,
+  documentUploadLimitExceededMessage,
   inferDocumentMimeType,
   isAllowedDocumentMime,
   maxUploadBytesForMime,
@@ -193,7 +193,7 @@ function validateOcrUploadFile(file: File): string | null {
     return 'Type de fichier non autorisé (images ou PDF uniquement).';
   }
   if (file.size > maxUploadBytesForMime(mime)) {
-    return `Fichier trop volumineux (max ${formatMaxUploadLabel(mime)}).`;
+    return documentUploadLimitExceededMessage(mime);
   }
   return null;
 }
@@ -414,8 +414,12 @@ export default function DocumentsPage() {
   useEffect(() => {
     if (!supabaseMode || tab !== 'ocr') return;
     for (const doc of ocrDocuments) {
-      if (doc.processingStatus === 'processing' || doc.processingStatus === 'uploading') {
-        enqueueOcrProgressPoll(String(doc.id));
+      if (doc.processingStatus !== 'processing' && doc.processingStatus !== 'uploading') continue;
+      const id = String(doc.id);
+      enqueueOcrProgressPoll(id);
+      if (!ocrRetriggeredRef.current.has(id)) {
+        ocrRetriggeredRef.current.add(id);
+        triggerDocumentOcrJob(id, doc.mimeType ?? 'application/pdf');
       }
     }
   }, [ocrDocuments, supabaseMode, tab, enqueueOcrProgressPoll]);
@@ -979,7 +983,7 @@ export default function DocumentsPage() {
                 </div>
                 <p className="font-medium text-gray-700">Déposez vos factures ici</p>
                 <p className="text-sm text-gray-400">
-                  PDF jusqu’à 50 Mo · images jusqu’à 20 Mo · plusieurs fichiers
+                  PDF jusqu’à 10 Mo · images jusqu’à 4 Mo · plusieurs fichiers (50 Mo bientôt)
                 </p>
                 <p className="text-xs text-gray-500">
                   Compression et découpage automatiques — vous pouvez quitter la page pendant l’analyse.

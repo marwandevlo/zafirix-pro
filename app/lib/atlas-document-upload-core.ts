@@ -7,7 +7,7 @@ import { logAtlasServerEvent } from '@/app/lib/atlas-server-log';
 import {
   ATLAS_DOCUMENTS_BUCKET,
   buildAtlasDocumentStoragePath,
-  formatMaxUploadLabel,
+  documentUploadLimitExceededMessage,
   isAllowedDocumentMime,
   maxUploadBytesForMime,
   sanitizeDocumentFilename,
@@ -66,8 +66,8 @@ export async function prepareStorageUploadSlot(
     return {
       ok: false,
       code: 'file_too_large',
-      message: `Exceeds ${formatMaxUploadLabel(mimeType)}`,
-      httpStatus: 400,
+      message: documentUploadLimitExceededMessage(mimeType),
+      httpStatus: 413,
     };
   }
 

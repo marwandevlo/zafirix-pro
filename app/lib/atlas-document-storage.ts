@@ -6,14 +6,24 @@
 
 export const ATLAS_DOCUMENTS_BUCKET = 'atlas-documents';
 
-/** PDF uploads (accounting scans, multi-page). */
-export const ATLAS_DOCUMENT_MAX_PDF_BYTES = 50 * 1024 * 1024; // 50 MB
+/**
+ * Production upload limits (conservative until Supabase/queue OCR worker for large files).
+ * Bucket may allow 50 MB; app rejects above these limits before Storage upload.
+ */
+export const ATLAS_DOCUMENT_MAX_PDF_BYTES = 10 * 1024 * 1024; // 10 MB
 
-/** Single image uploads. */
-export const ATLAS_DOCUMENT_MAX_IMAGE_BYTES = 20 * 1024 * 1024; // 20 MB
+/** Single image uploads — compress client-side if larger. */
+export const ATLAS_DOCUMENT_MAX_IMAGE_BYTES = 4 * 1024 * 1024; // 4 MB
+
+/** Future bucket / worker target (not enforced in app yet). */
+export const ATLAS_DOCUMENT_FUTURE_MAX_PDF_BYTES = 50 * 1024 * 1024;
 
 /** Upper bound for proxy / validation (PDF limit). */
 export const ATLAS_DOCUMENT_MAX_BYTES = ATLAS_DOCUMENT_MAX_PDF_BYTES;
+
+/** Shown when file exceeds stabilized limits (large-file path deferred to worker). */
+export const LARGE_FILE_STABILIZATION_MESSAGE_FR =
+  'Pour les gros fichiers, compressez le document avant téléversement. Le support 50 Mo est en cours de stabilisation.';
 
 export const ATLAS_DOCUMENT_MAX_FILES_PER_BATCH = 10;
 
@@ -37,6 +47,10 @@ export function maxUploadBytesForMime(mime: string): number {
 export function formatMaxUploadLabel(mime: string): string {
   const mb = Math.round(maxUploadBytesForMime(mime) / (1024 * 1024));
   return `${mb} Mo`;
+}
+
+export function documentUploadLimitExceededMessage(mime: string): string {
+  return `${LARGE_FILE_STABILIZATION_MESSAGE_FR} (max actuel : ${formatMaxUploadLabel(mime)}).`;
 }
 
 export function sanitizeDocumentFilename(name: string): string {
