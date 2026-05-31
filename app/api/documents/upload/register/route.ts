@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { waitUntil } from '@vercel/functions';
 
 import { atlasDataBackend } from '@/app/lib/atlas-data-source';
+import { executeDocumentOcrServer } from '@/app/lib/atlas-document-ocr-runner';
 import { isUuid } from '@/app/lib/admin/atlas-admin-profile-fields';
 import {
   createDocumentUploadSupabaseClient,
@@ -109,6 +111,12 @@ export async function POST(request: NextRequest) {
     mimeType,
     fileSize: sizeBytes,
   });
+
+  waitUntil(
+    executeDocumentOcrServer(userId, documentId, 'register').catch((err) => {
+      console.error('[documents/upload/register] OCR waitUntil failed', documentId, err);
+    }),
+  );
 
   return NextResponse.json({
     document: result.document,

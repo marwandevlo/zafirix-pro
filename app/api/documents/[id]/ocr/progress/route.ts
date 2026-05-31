@@ -94,5 +94,15 @@ export async function GET(
     progressPhase: result.progress.progressPhase,
     progressPage: result.progress.progressPage,
     progressTotal: result.progress.progressTotal,
+    progressPercent: result.progress.progressPercent,
+    fileName: result.progress.fileName,
+    mimeType: result.progress.mimeType,
+    sizeBytes: result.progress.sizeBytes,
+    pageCount: result.progress.pageCount,
+    pagesProcessed: result.progress.pagesProcessed,
+    startedAt: result.progress.startedAt,
+    completedAt: result.progress.completedAt,
+    errorMessage: result.progress.errorMessage,
+    errorCode: result.progress.errorCode,
   });
 }

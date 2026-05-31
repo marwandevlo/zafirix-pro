@@ -23,6 +23,16 @@ export async function destroyPdfDocument(document: PdfDocument): Promise<void> {
   }
 }
 
+/** Page count without rendering (for OCR progress metadata). */
+export async function getPdfPageCount(pdfBytes: Buffer): Promise<number> {
+  const document = await pdf(pdfBytes, { scale: PDF_OCR_RENDER_SCALE });
+  try {
+    return document.length;
+  } finally {
+    await destroyPdfDocument(document);
+  }
+}
+
 export async function renderPdfFirstPageToPng(pdfBytes: Buffer): Promise<Buffer> {
   const document = await pdf(pdfBytes, { scale: PDF_OCR_RENDER_SCALE });
   try {

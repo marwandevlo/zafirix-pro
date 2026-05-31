@@ -28,7 +28,11 @@ import {
   listAtlasOcrDocuments,
   ocrExtractionFromDocument,
   ocrInvoicesFromDocument,
+  formatDocumentSizeBytes,
+  ocrFailureFromDocument,
+  ocrPageProgressFromDocument,
   ocrProcessedPageCountFromDocument,
+  ocrTextPreviewFromDocument,
   ocrUiStatus,
   saveAtlasDocumentOcrResult,
   searchDocuments,
@@ -82,6 +86,10 @@ type OcrDisplayRow = {
   montant_ht?: number;
   montant_tva?: number;
   montant_ttc?: number;
+  fileSizeLabel?: string;
+  pageProgressLabel?: string;
+  errorDetail?: string;
+  textPreview?: string;
   localDoc?: LocalOcrDocument;
   supabaseId?: string;
   detectedInvoices?: AtlasOcrDetectedInvoice[];
@@ -148,6 +156,7 @@ type OcrProgressPhase =
   | 'storage'
   | 'registered'
   | 'uploading'
+  | 'started'
   | 'rendering'
   | 'analyzing'
   | 'saving'
@@ -169,6 +178,10 @@ function ocrProgressLabel(progress: OcrProgressState): string {
       return 'Fichier enregistré…';
     case 'uploading':
       return 'Téléversement vers le stockage…';
+    case 'started':
+      return progress.totalPages
+        ? `Démarrage OCR (${progress.totalPages} page${progress.totalPages > 1 ? 's' : ''})…`
+        : 'Démarrage analyse OCR…';
     case 'rendering':
       return progress.page && progress.totalPages
         ? `Page ${progress.page}/${progress.totalPages}…`
@@ -209,9 +222,12 @@ const OCR_PROGRESS_POLL_MS = 2000;
 type OcrProgressApiBody = {
   ok?: boolean;
   processingStatus?: string;
-  progressPhase?: 'rendering' | 'analyzing';
+  progressPhase?: 'started' | 'rendering' | 'analyzing' | 'completed' | 'failed';
   progressPage?: number;
   progressTotal?: number;
+  progressPercent?: number;
+  pageCount?: number;
+  errorMessage?: string;
   code?: string;
 };
 
@@ -354,13 +370,15 @@ export default function DocumentsPage() {
             if (live.processingStatus === 'failed') {
               ocrPollingIdsRef.current.delete(id);
               needsRefresh = true;
-              setOcrError(formatOcrUiMessage('ocr_failed'));
+              setOcrError(live.errorMessage ?? formatOcrUiMessage('ocr_failed'));
+              setOcrProgress({ phase: 'idle' });
               continue;
             }
 
             if (
               live.processingStatus === 'processing' &&
-              !live.progressPhase &&
+              (!live.progressPhase || live.progressPhase === 'started') &&
+              !live.progressPage &&
               !ocrRetriggeredRef.current.has(id)
             ) {
               const doc = ocrDocuments.find((d) => String(d.id) === id);
@@ -369,12 +387,18 @@ export default function DocumentsPage() {
               triggerDocumentOcrJob(id, mime);
             }
 
-            if (live.progressPhase) {
+            if (live.progressPhase && live.progressPhase !== 'completed' && live.progressPhase !== 'failed') {
+              const uiPhase: OcrProgressPhase =
+                live.progressPhase === 'started'
+                  ? 'started'
+                  : live.progressPhase === 'rendering'
+                    ? 'rendering'
+                    : 'analyzing';
               setOcrProgress({
                 documentId: id,
-                phase: live.progressPhase === 'rendering' ? 'rendering' : 'analyzing',
+                phase: uiPhase,
                 page: live.progressPage,
-                totalPages: live.progressTotal,
+                totalPages: live.progressTotal ?? live.pageCount,
                 isPdf: true,
               });
             }
@@ -464,6 +488,15 @@ export default function DocumentsPage() {
           ),
         ).length;
 
+        const prog = ocrPageProgressFromDocument(doc);
+        const pageLabel =
+          prog.page != null && prog.total
+            ? `Page ${prog.page}/${prog.total}${prog.percent != null ? ` (${prog.percent}%)` : ''}`
+            : prog.total
+              ? `${prog.total} page${prog.total > 1 ? 's' : ''}`
+              : undefined;
+        const fail = ocrFailureFromDocument(doc);
+
         return {
           key: docId,
           nom: doc.filename ?? doc.title,
@@ -473,6 +506,10 @@ export default function DocumentsPage() {
           montant_ht: extraction?.montant_ht,
           montant_tva: extraction?.montant_tva,
           montant_ttc: extraction?.montant_ttc,
+          fileSizeLabel: formatDocumentSizeBytes(doc.sizeBytes),
+          pageProgressLabel: doc.processingStatus === 'processing' ? pageLabel : undefined,
+          errorDetail: fail?.message,
+          textPreview: doc.processingStatus === 'processed' ? ocrTextPreviewFromDocument(doc) : undefined,
           supabaseId: docId,
           detectedInvoices: allInvoices,
           creatableInvoiceCount: creatable.length,
@@ -1024,6 +1061,20 @@ export default function DocumentsPage() {
                             <FileText size={14} className="text-gray-400" />
                             <span className="text-gray-700 text-xs">{d.nom.substring(0, 20)}</span>
                           </div>
+                          {supabaseMode && d.fileSizeLabel && (
+                            <span className="text-[10px] text-gray-400 pl-5">{d.fileSizeLabel}</span>
+                          )}
+                          {supabaseMode && d.pageProgressLabel && d.statut === 'en cours' && (
+                            <span className="text-[10px] text-amber-700 font-medium pl-5">{d.pageProgressLabel}</span>
+                          )}
+                          {supabaseMode && d.statut === 'erreur' && d.errorDetail && (
+                            <span className="text-[10px] text-red-600 pl-5 line-clamp-2">{d.errorDetail}</span>
+                          )}
+                          {supabaseMode && d.statut === 'analysé' && d.textPreview && (
+                            <span className="text-[10px] text-gray-500 pl-5 line-clamp-2" title={d.textPreview}>
+                              {d.textPreview}
+                            </span>
+                          )}
                           {supabaseMode && (d.creatableInvoiceCount ?? 0) > 1 && (
                             <span className="text-[10px] text-emerald-700 font-medium pl-5">
                               {d.creatableInvoiceCount} factures détectées

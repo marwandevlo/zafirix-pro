@@ -4,7 +4,14 @@
 
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { ATLAS_DOCUMENTS_BUCKET } from '@/app/lib/atlas-document-storage';
-import { persistDocumentOcrResult, updateDocumentOcrProgress } from '@/app/lib/atlas-documents-ocr-server';
+import { frenchOcrErrorMessage } from '@/app/lib/atlas-document-ocr-errors';
+import {
+  markDocumentOcrJobStarted,
+  persistDocumentOcrResult,
+  updateDocumentOcrPageCount,
+  updateDocumentOcrProgress,
+} from '@/app/lib/atlas-documents-ocr-server';
+import { getPdfPageCount } from '@/app/lib/atlas-pdf-ocr-render';
 import { getSupabaseServiceRoleClient } from '@/app/lib/supabase-admin';
 import { prepareUploadedImageForOcr } from '@/app/lib/atlas-document-image-upload';
 import { isPdfMimeType } from '@/app/lib/atlas-document-storage';
@@ -47,11 +54,11 @@ export async function runPdfOcrJob(
     return { ok: false, status: 400, code: 'storage_path_missing', message: 'Missing storage path' };
   }
 
-  await supabase
-    .from('atlas_documents')
-    .update({ processing_status: 'processing', updated_at: new Date().toISOString() })
-    .eq('id', documentId)
-    .eq('user_id', userId);
+  await markDocumentOcrJobStarted(supabase, userId, documentId, {
+    filename: row.filename,
+    mimeType: mimeType,
+    sizeBytes: row.size_bytes,
+  });
 
   const { data: fileBlob, error: downloadErr } = await supabase.storage
     .from(ATLAS_DOCUMENTS_BUCKET)
@@ -63,12 +70,18 @@ export async function runPdfOcrJob(
       ocrError: {
         step: 'storage_download',
         code: 'storage_download_failed',
-        message: downloadErr?.message ?? 'Failed to download PDF',
+        message: frenchOcrErrorMessage('storage_download_failed', downloadErr?.message),
       },
       pdfMeta: {
         original_mime_type: mimeType,
         processed_page: 1,
         rendered_image_mime_type: PDF_OCR_RENDERED_MIME,
+      },
+      preserveFileMeta: {
+        filename: row.filename,
+        mimeType,
+        sizeBytes: row.size_bytes,
+        existingMetadata: row.metadata,
       },
     });
     return {
@@ -82,6 +95,15 @@ export async function runPdfOcrJob(
   let multiPageResult;
   try {
     const pdfBytes = Buffer.from(await fileBlob.arrayBuffer());
+    try {
+      const pageCount = await getPdfPageCount(pdfBytes);
+      if (pageCount > 0) {
+        await updateDocumentOcrPageCount(supabase, userId, documentId, pageCount);
+      }
+    } catch {
+      /* page count best-effort */
+    }
+
     multiPageResult = await processMultiPagePdfOcr(pdfBytes, {
       onProgress: async (event) => {
         await updateDocumentOcrProgress(supabase, userId, documentId, {
@@ -92,7 +114,10 @@ export async function runPdfOcrJob(
       },
     });
   } catch (err) {
-    const message = err instanceof Error ? err.message : 'pdf_render_failed';
+    const message = frenchOcrErrorMessage(
+      'pdf_render_failed',
+      err instanceof Error ? err.message : undefined,
+    );
     await persistDocumentOcrResult(supabase, userId, documentId, {
       processingStatus: 'failed',
       ocrError: { step: 'pdf_render', code: 'pdf_render_failed', message },
@@ -100,6 +125,12 @@ export async function runPdfOcrJob(
         original_mime_type: mimeType,
         processed_page: 1,
         rendered_image_mime_type: PDF_OCR_RENDERED_MIME,
+      },
+      preserveFileMeta: {
+        filename: row.filename,
+        mimeType,
+        sizeBytes: row.size_bytes,
+        existingMetadata: row.metadata,
       },
     });
     return { ok: false, status: 422, code: 'pdf_render_failed', message };
@@ -123,12 +154,23 @@ export async function runPdfOcrJob(
       processingStatus: 'failed',
       extraction: multiPageResult.merged,
       extractedText: JSON.stringify({ pages: multiPageResult.pageResults }, null, 2),
-      ocrError: firstErr ?? {
-        step: 'ai_provider',
-        code: 'ocr_failed',
-        message: 'All PDF pages failed OCR',
-      },
+      ocrError: firstErr
+        ? {
+            ...firstErr,
+            message: frenchOcrErrorMessage(firstErr.code, firstErr.message),
+          }
+        : {
+            step: 'ai_provider',
+            code: 'ocr_failed',
+            message: frenchOcrErrorMessage('ocr_failed'),
+          },
       pdfMeta,
+      preserveFileMeta: {
+        filename: row.filename,
+        mimeType,
+        sizeBytes: row.size_bytes,
+        existingMetadata: row.metadata,
+      },
     });
     return {
       ok: false,
@@ -147,6 +189,12 @@ export async function runPdfOcrJob(
       2,
     ),
     pdfMeta,
+    preserveFileMeta: {
+      filename: row.filename,
+      mimeType,
+      sizeBytes: row.size_bytes,
+      existingMetadata: row.metadata,
+    },
   });
 
   if (!persist.ok) {
@@ -171,6 +219,12 @@ export async function runImageOcrJob(
     return { ok: false, status: 400, code: 'image_required', message: 'Not an image document' };
   }
 
+  await markDocumentOcrJobStarted(supabase, userId, documentId, {
+    filename: row.filename,
+    mimeType,
+    sizeBytes: row.size_bytes,
+  }, { pageCount: 1 });
+
   await updateDocumentOcrProgress(supabase, userId, documentId, {
     phase: 'analyzing',
     page: 1,
@@ -187,7 +241,13 @@ export async function runImageOcrJob(
       ocrError: {
         step: 'storage_download',
         code: 'storage_download_failed',
-        message: downloadErr?.message ?? 'Failed to download image',
+        message: frenchOcrErrorMessage('storage_download_failed', downloadErr?.message),
+      },
+      preserveFileMeta: {
+        filename: row.filename,
+        mimeType,
+        sizeBytes: row.size_bytes,
+        existingMetadata: row.metadata,
       },
     });
     return {
@@ -217,7 +277,13 @@ export async function runImageOcrJob(
       ocrError: {
         step: 'image_compress',
         code: 'image_compress_failed',
-        message: 'Automatic image compression failed',
+        message: frenchOcrErrorMessage('image_compress_failed'),
+      },
+      preserveFileMeta: {
+        filename: row.filename,
+        mimeType,
+        sizeBytes: row.size_bytes,
+        existingMetadata: row.metadata,
       },
     });
     return { ok: false, status: 422, code: 'image_compress_failed', message: 'Compression failed' };
@@ -231,7 +297,13 @@ export async function runImageOcrJob(
       ocrError: {
         step: ocrResult.step,
         code: ocrResult.code,
-        message: ocrResult.message,
+        message: frenchOcrErrorMessage(ocrResult.code, ocrResult.message),
+      },
+      preserveFileMeta: {
+        filename: row.filename,
+        mimeType,
+        sizeBytes: row.size_bytes,
+        existingMetadata: row.metadata,
       },
     });
     return {
@@ -246,6 +318,12 @@ export async function runImageOcrJob(
     processingStatus: 'processed',
     extraction: ocrResult.extraction,
     extractedText: JSON.stringify(ocrResult.extraction, null, 2),
+    preserveFileMeta: {
+      filename: row.filename,
+      mimeType,
+      sizeBytes: row.size_bytes,
+      existingMetadata: row.metadata,
+    },
   });
 
   if (!persist.ok) {

@@ -1,8 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createServerClient } from '@supabase/ssr';
 import { cookies } from 'next/headers';
+import { waitUntil } from '@vercel/functions';
 
 import { atlasDataBackend } from '@/app/lib/atlas-data-source';
+import { executeDocumentOcrServer } from '@/app/lib/atlas-document-ocr-runner';
 import { runDocumentOcrJob } from '@/app/lib/atlas-document-ocr-job';
 import { logAtlasServerEvent } from '@/app/lib/atlas-server-log';
 import { OCR_PROVIDER } from '@/app/lib/atlas-ocr';
@@ -127,11 +129,11 @@ export async function POST(
   };
 
   if (asyncMode) {
-    void execute().then((result) => {
-      if (!result.ok) {
-        console.error('[documents/ocr] background job failed', documentId, result);
-      }
-    });
+    waitUntil(
+      executeDocumentOcrServer(userId, documentId, 'api_run').catch((err) => {
+        console.error('[documents/ocr] waitUntil failed', documentId, err);
+      }),
+    );
 
     return NextResponse.json(
       {

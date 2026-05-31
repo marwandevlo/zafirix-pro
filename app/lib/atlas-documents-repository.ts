@@ -552,6 +552,38 @@ export function ocrFailureFromDocument(doc: AtlasDocument): AtlasOcrError | null
   return { step: rec.step, message: rec.message, code: rec.code };
 }
 
+export function ocrPageProgressFromDocument(doc: AtlasDocument): {
+  page?: number;
+  total?: number;
+  percent?: number;
+  phase?: string;
+} {
+  const raw = doc.metadata?.ocr;
+  if (!raw || typeof raw !== 'object') return {};
+  const ocr = raw as Record<string, unknown>;
+  return {
+    page: typeof ocr.progress_page === 'number' ? ocr.progress_page : undefined,
+    total: typeof ocr.progress_total === 'number' ? ocr.progress_total : (typeof ocr.page_count === 'number' ? ocr.page_count : undefined),
+    percent: typeof ocr.progress_percent === 'number' ? ocr.progress_percent : undefined,
+    phase: typeof ocr.progress_phase === 'string' ? ocr.progress_phase : undefined,
+  };
+}
+
+export function ocrTextPreviewFromDocument(doc: AtlasDocument, maxLen = 160): string | undefined {
+  const text = doc.extractedText?.trim();
+  if (!text) return undefined;
+  const flat = text.replace(/\s+/g, ' ').trim();
+  if (flat.length <= maxLen) return flat;
+  return `${flat.slice(0, maxLen)}…`;
+}
+
+export function formatDocumentSizeBytes(bytes?: number | null): string | undefined {
+  if (bytes == null || !Number.isFinite(bytes) || bytes <= 0) return undefined;
+  if (bytes < 1024) return `${bytes} o`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} Ko`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} Mo`;
+}
+
 export function ocrUiStatus(doc: AtlasDocument): 'analysé' | 'en cours' | 'erreur' {
   switch (doc.processingStatus) {
     case 'processed':
