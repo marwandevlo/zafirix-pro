@@ -1,28 +1,32 @@
 /**
  * Direct client → Supabase Storage upload (no file bytes through Vercel).
- * Flow: prepare (path + signed token) → Storage upload → register (metadata + OCR).
+ * Flow: prepare (path) → authenticated Storage.upload (retry) → register (metadata + OCR).
  */
 
 import {
   ATLAS_DOCUMENTS_BUCKET,
   inferDocumentMimeType,
+  isAllowedDocumentMime,
 } from '@/app/lib/atlas-document-storage';
+import { logUploadDiagnostic } from '@/app/lib/atlas-document-upload-diagnostics';
+import { formatStorageErrorForUi, parseSupabaseStorageError } from '@/app/lib/atlas-storage-error';
+import { frenchMessageForUploadHttpStatus, sanitizeUploadUserMessage } from '@/app/lib/atlas-upload-http-errors';
 import { supabase } from '@/app/lib/supabase';
 
 /** Above this size, never use multipart `/api/documents/upload`. */
 export const DIRECT_STORAGE_UPLOAD_THRESHOLD_BYTES = 256 * 1024;
 
 const STORAGE_UPLOAD_TIMEOUT_MS = 600_000;
+const SESSION_REFRESH_IF_EXPIRES_WITHIN_SEC = 300;
+const UPLOAD_MAX_ATTEMPTS = 3;
+const UPLOAD_RETRY_BASE_MS = 800;
 
-export type DocumentUploadProgressPhase =
-  | 'storage'
-  | 'registered'
-  | 'ocr'
-  | 'idle';
+export type DocumentUploadProgressPhase = 'storage' | 'registered' | 'ocr' | 'idle';
 
 export type DocumentUploadProgress = {
   phase: DocumentUploadProgressPhase;
   storagePercent?: number;
+  attempt?: number;
 };
 
 export type DocumentUploadResult = {
@@ -50,62 +54,174 @@ type PrepareResponse = {
   documentId: string;
   storagePath: string;
   bucket: string;
-  signedUploadToken?: string | null;
-  signedUploadPath?: string | null;
 };
 
-function mapStorageError(err: { message?: string; name?: string }): DocumentUploadErrorBody {
-  const msg = err.message ?? '';
-  if (/policy|permission|denied|unauthorized|403|row-level security/i.test(msg)) {
-    return {
-      error: 'storage_permission_denied',
-      code: 'storage_permission_denied',
-      step: 'client_storage_upload',
-      message: msg,
-    };
-  }
-  if (/too large|413|payload|size/i.test(msg)) {
-    return {
-      error: 'file_too_large',
-      code: 'file_too_large',
-      step: 'client_storage_upload',
-      message: msg,
-    };
-  }
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => window.setTimeout(resolve, ms));
+}
+
+function bodyFromStorageError(
+  err: unknown,
+  step = 'client_storage_upload',
+): DocumentUploadErrorBody {
+  const parsed = parseSupabaseStorageError(err);
   return {
-    error: 'storage_upload_failed',
-    code: 'storage_upload_failed',
-    step: 'client_storage_upload',
-    message: msg,
+    error: parsed.code,
+    code: parsed.code,
+    step,
+    message: formatStorageErrorForUi(parsed),
   };
 }
 
-async function uploadToStorageWithProgress(
-  file: File,
-  mimeType: string,
-  prepare: PrepareResponse,
-  onProgress?: (percent: number) => void,
-): Promise<{ ok: true } | { ok: false; body: DocumentUploadErrorBody }> {
-  const bucket = prepare.bucket || ATLAS_DOCUMENTS_BUCKET;
-  const path = prepare.signedUploadPath ?? prepare.storagePath;
-  const token = prepare.signedUploadToken;
+function isRetryableUploadError(body: DocumentUploadErrorBody): boolean {
+  const code = body.code ?? body.error ?? '';
+  if (code === 'storage_permission_denied' || code === 'file_too_large' || code === 'mime_not_allowed') {
+    return false;
+  }
+  if (code === 'auth_required' || code === 'company_not_found_or_forbidden') {
+    return false;
+  }
+  if (code === 'storage_duplicate') {
+    return false;
+  }
+  return (
+    code === 'upload_timeout' ||
+    code === 'storage_upload_failed' ||
+    code === 'server_error' ||
+    code === 'use_direct_storage'
+  );
+}
 
-  if (token && path) {
+function apiErrorBody(
+  status: number,
+  body: DocumentUploadErrorBody,
+  step: string,
+): DocumentUploadErrorBody {
+  const code = body.error ?? body.code ?? 'upload_failed';
+  const fromHttp = frenchMessageForUploadHttpStatus(status, code);
+  const fromBody = sanitizeUploadUserMessage(body.message);
+  return {
+    error: code,
+    code,
+    step,
+    message: fromBody ?? fromHttp ?? 'Échec du téléversement. Réessayez.',
+  };
+}
+
+async function fetchJsonWithRetry<T>(
+  url: string,
+  init: RequestInit,
+  step: string,
+): Promise<{ ok: true; status: number; data: T } | { ok: false; status: number; body: DocumentUploadErrorBody }> {
+  let lastStatus = 0;
+  let lastBody: DocumentUploadErrorBody = { error: 'upload_failed', code: 'upload_failed', step };
+
+  for (let attempt = 1; attempt <= UPLOAD_MAX_ATTEMPTS; attempt++) {
     try {
-      const { error } = await supabase.storage.from(bucket).uploadToSignedUrl(path, token, file, {
-        contentType: mimeType,
-        upsert: false,
-      });
-      if (error) {
-        return { ok: false, body: mapStorageError(error) };
+      const res = await fetch(url, { ...init, credentials: 'include' });
+      lastStatus = res.status;
+      const data = (await res.json().catch(() => ({}))) as T & DocumentUploadErrorBody;
+
+      if (res.ok) {
+        return { ok: true, status: res.status, data };
       }
-      onProgress?.(100);
-      return { ok: true };
+
+      lastBody = apiErrorBody(res.status, data, step);
+      logUploadDiagnostic({
+        event: `${step}_failed`,
+        step,
+        httpStatus: res.status,
+        errorCode: lastBody.code,
+        errorMessage: lastBody.message,
+        attempt,
+        responseBody: data,
+      });
+
+      if (!isRetryableUploadError(lastBody) || attempt >= UPLOAD_MAX_ATTEMPTS) {
+        return { ok: false, status: res.status, body: lastBody };
+      }
     } catch (err) {
-      const message = err instanceof Error ? err.message : 'storage_upload_failed';
-      return { ok: false, body: mapStorageError({ message }) };
+      lastStatus = 0;
+      lastBody = {
+        error: 'upload_timeout',
+        code: 'upload_timeout',
+        step,
+        message: 'Délai dépassé ou réseau indisponible.',
+      };
+      logUploadDiagnostic({
+        event: `${step}_network_error`,
+        step,
+        errorMessage: err instanceof Error ? err.message : String(err),
+        attempt,
+      });
+      if (attempt >= UPLOAD_MAX_ATTEMPTS) {
+        return { ok: false, status: 408, body: lastBody };
+      }
+    }
+
+    await sleep(UPLOAD_RETRY_BASE_MS * 2 ** (attempt - 1));
+  }
+
+  return { ok: false, status: lastStatus || 500, body: lastBody };
+}
+
+async function ensureAuthenticatedStorageSession(): Promise<
+  { ok: true } | { ok: false; body: DocumentUploadErrorBody }
+> {
+  const { data, error } = await supabase.auth.getSession();
+  if (error) {
+    return {
+      ok: false,
+      body: {
+        error: 'auth_required',
+        code: 'auth_required',
+        step: 'client_auth',
+        message: 'Session expirée. Reconnectez-vous.',
+      },
+    };
+  }
+  if (!data.session?.access_token) {
+    return {
+      ok: false,
+      body: {
+        error: 'auth_required',
+        code: 'auth_required',
+        step: 'client_auth',
+        message: 'Connectez-vous pour téléverser un document.',
+      },
+    };
+  }
+
+  const expiresAt = data.session.expires_at ?? 0;
+  const nowSec = Math.floor(Date.now() / 1000);
+  if (expiresAt > 0 && expiresAt - nowSec < SESSION_REFRESH_IF_EXPIRES_WITHIN_SEC) {
+    const { error: refreshErr } = await supabase.auth.refreshSession();
+    if (refreshErr) {
+      return {
+        ok: false,
+        body: {
+          error: 'auth_required',
+          code: 'auth_required',
+          step: 'client_auth_refresh',
+          message: 'Session expirée. Reconnectez-vous.',
+        },
+      };
     }
   }
+
+  return { ok: true };
+}
+
+async function uploadOnceViaAuthenticatedClient(
+  file: File,
+  mimeType: string,
+  storagePath: string,
+  bucket: string,
+): Promise<{ ok: true } | { ok: false; body: DocumentUploadErrorBody }> {
+  const auth = await ensureAuthenticatedStorageSession();
+  if (!auth.ok) return auth;
+
+  const contentType = isAllowedDocumentMime(mimeType) ? mimeType : inferDocumentMimeType(file);
 
   return new Promise((resolve) => {
     const timer = window.setTimeout(() => {
@@ -115,32 +231,90 @@ async function uploadToStorageWithProgress(
           error: 'upload_timeout',
           code: 'upload_timeout',
           step: 'client_storage_upload',
-          message: 'Storage upload timed out',
+          message: 'Délai dépassé pendant le téléversement vers le stockage.',
         },
       });
     }, STORAGE_UPLOAD_TIMEOUT_MS);
 
     void (async () => {
-      const { error } = await supabase.storage.from(bucket).upload(prepare.storagePath, file, {
-        contentType: mimeType,
-        upsert: false,
-      });
-      window.clearTimeout(timer);
-      if (error) {
-        resolve({ ok: false, body: mapStorageError(error) });
-        return;
+      try {
+        const { error } = await supabase.storage.from(bucket).upload(storagePath, file, {
+          contentType,
+          upsert: false,
+          cacheControl: '3600',
+        });
+
+        window.clearTimeout(timer);
+
+        if (error) {
+          resolve({ ok: false, body: bodyFromStorageError(error) });
+          return;
+        }
+
+        resolve({ ok: true });
+      } catch (err) {
+        window.clearTimeout(timer);
+        resolve({ ok: false, body: bodyFromStorageError(err) });
       }
-      onProgress?.(100);
-      resolve({ ok: true });
     })();
   });
+}
+
+async function uploadViaAuthenticatedClientWithRetry(
+  file: File,
+  mimeType: string,
+  storagePath: string,
+  bucket: string,
+  companyId: string,
+  documentId: string,
+  onProgress?: (percent: number, attempt: number) => void,
+): Promise<{ ok: true } | { ok: false; body: DocumentUploadErrorBody }> {
+  let lastBody: DocumentUploadErrorBody = {
+    error: 'storage_upload_failed',
+    code: 'storage_upload_failed',
+    step: 'client_storage_upload',
+    message: 'Échec du téléversement vers le stockage.',
+  };
+
+  for (let attempt = 1; attempt <= UPLOAD_MAX_ATTEMPTS; attempt++) {
+    onProgress?.(Math.min(90, attempt * 30), attempt);
+
+    const result = await uploadOnceViaAuthenticatedClient(file, mimeType, storagePath, bucket);
+    if (result.ok) {
+      onProgress?.(100, attempt);
+      return result;
+    }
+
+    lastBody = result.body;
+    logUploadDiagnostic({
+      event: 'storage_upload_failed',
+      step: 'client_storage_upload',
+      companyId,
+      documentId,
+      storagePath,
+      bucket,
+      fileSize: file.size,
+      mimeType,
+      httpStatus: lastBody.code === 'file_too_large' ? 413 : lastBody.code === 'storage_permission_denied' ? 403 : 500,
+      errorCode: lastBody.code,
+      errorMessage: lastBody.message,
+      attempt,
+    });
+
+    if (!isRetryableUploadError(lastBody) || attempt >= UPLOAD_MAX_ATTEMPTS) {
+      return result;
+    }
+
+    await sleep(UPLOAD_RETRY_BASE_MS * 2 ** (attempt - 1));
+  }
+
+  return { ok: false, body: lastBody };
 }
 
 export function shouldUseDirectStorageUpload(file: File): boolean {
   return file.size > DIRECT_STORAGE_UPLOAD_THRESHOLD_BYTES;
 }
 
-/** Always use direct Storage in Supabase mode (durable on Vercel). */
 export function mustUseDirectStorageUpload(): boolean {
   return true;
 }
@@ -155,55 +329,131 @@ export async function uploadDocumentForOcr(
   const mimeType = inferDocumentMimeType(file);
   const onProgress = options?.onProgress;
 
-  onProgress?.({ phase: 'storage', storagePercent: 0 });
-
-  const prepareRes = await fetch('/api/documents/upload/prepare', {
-    method: 'POST',
-    credentials: 'include',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      companyId,
-      filename: file.name,
-      mimeType,
-      sizeBytes: file.size,
-    }),
-  });
-
-  const prepareBody = (await prepareRes.json().catch(() => ({}))) as PrepareResponse & DocumentUploadErrorBody;
-  if (!prepareRes.ok || !prepareBody.documentId || !prepareBody.storagePath) {
-    return { ok: false, status: prepareRes.status, body: prepareBody };
+  if (!mimeType || !isAllowedDocumentMime(mimeType)) {
+    return {
+      ok: false,
+      status: 400,
+      body: {
+        error: 'mime_not_allowed',
+        code: 'mime_not_allowed',
+        step: 'validation',
+        message: 'Type de fichier non autorisé (images ou PDF uniquement).',
+      },
+    };
   }
 
-  const storageResult = await uploadToStorageWithProgress(file, mimeType, prepareBody, (pct) => {
-    onProgress?.({ phase: 'storage', storagePercent: pct });
+  onProgress?.({ phase: 'storage', storagePercent: 0, attempt: 1 });
+
+  const prepareResult = await fetchJsonWithRetry<PrepareResponse>(
+    '/api/documents/upload/prepare',
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        companyId,
+        filename: file.name,
+        mimeType,
+        sizeBytes: file.size,
+      }),
+    },
+    'prepare',
+  );
+
+  if (!prepareResult.ok) {
+    return { ok: false, status: prepareResult.status, body: prepareResult.body };
+  }
+
+  const prepareBody = prepareResult.data;
+  if (!prepareBody.documentId || !prepareBody.storagePath) {
+    return {
+      ok: false,
+      status: 500,
+      body: { error: 'server_error', code: 'server_error', step: 'prepare', message: 'Erreur serveur.' },
+    };
+  }
+
+  const bucket = prepareBody.bucket || ATLAS_DOCUMENTS_BUCKET;
+
+  logUploadDiagnostic({
+    event: 'storage_upload_start',
+    step: 'client_storage_upload',
+    companyId,
+    documentId: prepareBody.documentId,
+    storagePath: prepareBody.storagePath,
+    bucket,
+    fileSize: file.size,
+    mimeType,
   });
+
+  const storageResult = await uploadViaAuthenticatedClientWithRetry(
+    file,
+    mimeType,
+    prepareBody.storagePath,
+    bucket,
+    companyId,
+    prepareBody.documentId,
+    (pct, attempt) => onProgress?.({ phase: 'storage', storagePercent: pct, attempt }),
+  );
 
   if (!storageResult.ok) {
     await removeFailedStorageObject(prepareBody.storagePath);
-    return { ok: false, status: 403, body: storageResult.body };
+    const status =
+      storageResult.body.code === 'file_too_large'
+        ? 413
+        : storageResult.body.code === 'storage_permission_denied'
+          ? 403
+          : storageResult.body.code === 'upload_timeout'
+            ? 408
+            : storageResult.body.code === 'auth_required'
+              ? 401
+              : 500;
+    return { ok: false, status, body: storageResult.body };
   }
 
   onProgress?.({ phase: 'registered' });
 
-  const registerRes = await fetch('/api/documents/upload/register', {
-    method: 'POST',
-    credentials: 'include',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      documentId: prepareBody.documentId,
-      companyId,
-      filename: file.name,
-      mimeType,
-      sizeBytes: file.size,
-      storagePath: prepareBody.storagePath,
-    }),
-  });
+  const registerResult = await fetchJsonWithRetry<DocumentUploadResult>(
+    '/api/documents/upload/register',
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        documentId: prepareBody.documentId,
+        companyId,
+        filename: file.name,
+        mimeType,
+        sizeBytes: file.size,
+        storagePath: prepareBody.storagePath,
+      }),
+    },
+    'register',
+  );
 
-  const registerBody = (await registerRes.json().catch(() => ({}))) as DocumentUploadResult & DocumentUploadErrorBody;
-  if (!registerRes.ok || !registerBody.document?.id) {
+  if (!registerResult.ok) {
     await removeFailedStorageObject(prepareBody.storagePath);
-    return { ok: false, status: registerRes.status, body: registerBody };
+    return { ok: false, status: registerResult.status, body: registerResult.body };
   }
+
+  const registerBody = registerResult.data;
+  if (!registerBody.document?.id) {
+    await removeFailedStorageObject(prepareBody.storagePath);
+    return {
+      ok: false,
+      status: 500,
+      body: { error: 'server_error', code: 'server_error', step: 'register', message: 'Erreur serveur.' },
+    };
+  }
+
+  logUploadDiagnostic({
+    event: 'upload_complete',
+    step: 'register',
+    companyId,
+    documentId: registerBody.document.id,
+    storagePath: prepareBody.storagePath,
+    bucket,
+    fileSize: file.size,
+    mimeType,
+  });
 
   onProgress?.({ phase: 'ocr' });
 

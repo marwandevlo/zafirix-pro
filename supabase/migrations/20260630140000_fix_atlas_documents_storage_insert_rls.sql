@@ -1,4 +1,6 @@
--- Storage RLS: user uploads under own prefix; service reads via user JWT in API routes.
+-- Fix Storage INSERT RLS: foldername() returns directory segments only (not filename).
+-- Path userId/companyId/documentId/file.pdf → foldername length 3, not 4.
+-- Previous policy (array_length >= 4) blocked all authenticated uploads.
 
 insert into storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
 values (

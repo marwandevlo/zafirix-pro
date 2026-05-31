@@ -36,7 +36,7 @@ export async function POST(request: NextRequest) {
 
   const userId = await documentUploadSessionUserId(request);
   if (!userId) {
-    return uploadErrorResponse(401, 'auth', 'auth_required', 'Session required');
+    return uploadErrorResponse(401, 'auth', 'auth_required', 'Session expirée. Reconnectez-vous.');
   }
 
   let body: PrepareBody;
@@ -89,8 +89,6 @@ export async function POST(request: NextRequest) {
     documentId: slot.documentId,
     storagePath: slot.storagePath,
     bucket: ATLAS_DOCUMENTS_BUCKET,
-    signedUploadToken: slot.signedUploadToken ?? null,
-    signedUploadPath: slot.signedUploadPath ?? slot.storagePath,
-    uploadMode: 'direct_storage',
+    uploadMode: 'authenticated_storage',
   });
 }

@@ -280,7 +280,9 @@ export async function getAtlasDocumentSignedUrl(
 export function atlasDocumentErrorMessage(code: string): string {
   switch (code) {
     case 'auth_required':
-      return 'Connectez-vous pour gérer vos documents.';
+      return 'Session expirée. Reconnectez-vous.';
+    case 'server_error':
+      return 'Erreur serveur. Réessayez dans quelques instants.';
     case 'company_required':
       return 'Sélectionnez une société active avant d’importer un document.';
     case 'company_not_found_or_forbidden':
@@ -303,8 +305,11 @@ export function atlasDocumentErrorMessage(code: string): string {
     case 'image_compress_failed':
       return 'Compression automatique impossible. Réessayez avec une autre image.';
     case 'storage_upload_failed':
+      return 'Échec du téléversement vers le stockage. Réessayez ou reconnectez-vous.';
     case 'storage_object_missing':
-      return 'Échec du stockage du fichier. Vérifiez la configuration Supabase (bucket atlas-documents, limite 50 Mo).';
+      return 'Fichier introuvable dans le stockage après téléversement. Réessayez.';
+    case 'storage_duplicate':
+      return 'Ce fichier existe déjà. Renommez-le ou réessayez.';
     case 'db_insert_failed':
       return 'Impossible d’enregistrer le document en base. Contactez le support si le problème persiste.';
     case 'invalid_json':

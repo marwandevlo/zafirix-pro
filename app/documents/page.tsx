@@ -45,6 +45,7 @@ import {
   maxUploadBytesForMime,
 } from '@/app/lib/atlas-document-storage';
 import { uploadDocumentForOcr } from '@/app/lib/atlas-document-upload-client';
+import { frenchMessageForUploadHttpStatus, sanitizeUploadUserMessage } from '@/app/lib/atlas-upload-http-errors';
 import {
   formatOcrDevDiagnostics,
   formatOcrUiMessage,
@@ -118,38 +119,27 @@ async function persistOcrFailure(
 
 function formatDocumentsUploadError(status: number, body: UploadErrorBody): string {
   const code = body.error ?? body.code ?? 'upload_failed';
-  const base = atlasDocumentErrorMessage(code);
 
-  if (status === 413 || code === 'file_too_large') {
-    return atlasDocumentErrorMessage('file_too_large');
-  }
+  const sanitized = sanitizeUploadUserMessage(body.message);
+  if (sanitized) return sanitized;
 
-  if (code === 'storage_permission_denied') {
+  const fromHttp = frenchMessageForUploadHttpStatus(status, code);
+  if (fromHttp) return fromHttp;
+
+  if (code === 'storage_permission_denied' || code === 'storage_upload_failed') {
     return atlasDocumentErrorMessage('storage_permission_denied');
   }
 
-  if (code === 'upload_timeout' || code === 'ocr_timeout') {
-    return atlasDocumentErrorMessage('upload_timeout');
-  }
-
-  if (status === 401 || code === 'auth_required') {
-    return atlasDocumentErrorMessage('auth_required');
-  }
-
-  const detail = [body.step, body.message, body.code ? `code=${body.code}` : '', `http=${status}`]
-    .filter(Boolean)
-    .join(' · ');
+  const base = atlasDocumentErrorMessage(code);
+  if (base && base !== code) return base;
 
   if (process.env.NODE_ENV === 'development') {
+    const detail = [body.step, body.message, `code=${code}`, `http=${status}`].filter(Boolean).join(' · ');
     console.debug('[documents/upload]', { status, body });
-    return detail ? `${base} (${detail})` : base;
+    return detail || 'Échec du téléversement. Réessayez.';
   }
 
-  if (code !== 'upload_failed' && detail) {
-    return `${base} (${body.code ?? code})`;
-  }
-
-  return base;
+  return 'Échec du téléversement. Réessayez.';
 }
 
 type OcrProgressPhase =
