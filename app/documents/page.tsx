@@ -657,6 +657,7 @@ export default function DocumentsPage() {
       const mimeType = uploadResult.data.document.mimeType ?? mimeTypeGuess;
 
       setOcrPageInfo(atlasDocumentErrorMessage('ocr_background'));
+      ocrRetriggeredRef.current.add(documentId);
       enqueueOcrProgressPoll(documentId);
       setOcrProgress({ phase: 'analyzing', documentId, isPdf });
       await refreshOcr();
