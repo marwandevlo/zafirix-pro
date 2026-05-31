@@ -291,8 +291,24 @@ export function atlasDocumentErrorMessage(code: string): string {
       return 'Fichier requis.';
     case 'file_too_large':
       return 'Fichier trop volumineux (PDF max 50 Mo, images max 20 Mo).';
+    case 'storage_permission_denied':
+      return 'Autorisation stockage refusée. Reconnectez-vous ou contactez le support.';
+    case 'upload_timeout':
+      return 'Délai dépassé pendant le téléversement. Réessayez avec une connexion stable.';
+    case 'use_direct_storage':
+      return 'Ce mode de téléversement n’est plus utilisé. Rechargez la page.';
+    case 'ocr_background':
+    case 'ocr_enqueued':
+      return 'OCR en arrière-plan — vous pouvez quitter cette page.';
     case 'image_compress_failed':
       return 'Compression automatique impossible. Réessayez avec une autre image.';
+    case 'storage_upload_failed':
+    case 'storage_object_missing':
+      return 'Échec du stockage du fichier. Vérifiez la configuration Supabase (bucket atlas-documents, limite 50 Mo).';
+    case 'db_insert_failed':
+      return 'Impossible d’enregistrer le document en base. Contactez le support si le problème persiste.';
+    case 'invalid_json':
+      return 'Requête invalide. Rechargez la page et réessayez.';
     case 'mime_not_allowed':
       return 'Type de fichier non autorisé (images ou PDF uniquement).';
     case 'upload_failed':
@@ -525,6 +541,7 @@ export function ocrUiStatus(doc: AtlasDocument): 'analysé' | 'en cours' | 'erre
     case 'processed':
       return 'analysé';
     case 'processing':
+    case 'uploading':
     case 'uploaded':
       return 'en cours';
     case 'failed':

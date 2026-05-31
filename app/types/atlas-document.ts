@@ -1,4 +1,4 @@
-export type AtlasDocumentProcessingStatus = 'uploaded' | 'processing' | 'processed' | 'failed';
+export type AtlasDocumentProcessingStatus = 'uploading' | 'uploaded' | 'processing' | 'processed' | 'failed';
 
 export type AtlasDocument = {
   id: string;
