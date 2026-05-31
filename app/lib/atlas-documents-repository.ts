@@ -312,6 +312,17 @@ export function atlasDocumentErrorMessage(code: string): string {
       return 'Ce fichier existe déjà. Renommez-le ou réessayez.';
     case 'db_insert_failed':
       return 'Impossible d’enregistrer le document en base. Contactez le support si le problème persiste.';
+    case 'register_failed':
+    case 'storage_file_uploaded_register_failed':
+      return 'Fichier téléversé, mais l’enregistrement du document a échoué. Réessayez.';
+    case 'storage_service_read_failed':
+      return 'Le serveur ne peut pas lire le fichier téléversé. Contactez le support.';
+    case 'storage_verify_failed':
+      return 'Impossible de vérifier le fichier dans le stockage. Réessayez.';
+    case 'working_copy_failed':
+      return 'Échec de la copie de travail pour l’OCR. Réessayez avec une autre image.';
+    case 'ocr_enqueue_failed':
+      return 'Document enregistré, mais l’OCR n’a pas pu démarrer. Réessayez depuis la liste.';
     case 'invalid_json':
       return 'Requête invalide. Rechargez la page et réessayez.';
     case 'mime_not_allowed':

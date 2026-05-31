@@ -15,7 +15,22 @@ export function frenchMessageForUploadHttpStatus(status: number, code?: string):
   if (status === 408 || code === 'upload_timeout' || code === 'ocr_timeout') {
     return 'Délai dépassé. Réessayez avec une connexion stable.';
   }
-  if (status >= 500 || code === 'db_insert_failed' || code === 'server_error') {
+  if (code === 'db_insert_failed') {
+    return 'Impossible d’enregistrer le document en base de données.';
+  }
+  if (code === 'storage_file_uploaded_register_failed' || code === 'register_failed') {
+    return 'Fichier téléversé, mais l’enregistrement du document a échoué. Réessayez.';
+  }
+  if (code === 'storage_service_read_failed') {
+    return 'Le serveur ne peut pas lire le fichier téléversé.';
+  }
+  if (code === 'working_copy_failed') {
+    return 'Échec de la copie de travail pour l’OCR.';
+  }
+  if (code === 'ocr_enqueue_failed') {
+    return 'Document enregistré, mais l’OCR n’a pas pu démarrer.';
+  }
+  if (status >= 500 && code === 'server_error') {
     return 'Erreur serveur. Réessayez dans quelques instants.';
   }
   return '';

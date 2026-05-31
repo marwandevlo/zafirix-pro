@@ -5,6 +5,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { ATLAS_DOCUMENTS_BUCKET } from '@/app/lib/atlas-document-storage';
 import { persistDocumentOcrResult, updateDocumentOcrProgress } from '@/app/lib/atlas-documents-ocr-server';
+import { getSupabaseServiceRoleClient } from '@/app/lib/supabase-admin';
 import { prepareUploadedImageForOcr } from '@/app/lib/atlas-document-image-upload';
 import { isPdfMimeType } from '@/app/lib/atlas-document-storage';
 import { processMultiPagePdfOcr } from '@/app/lib/atlas-pdf-ocr-multipage';
@@ -255,11 +256,11 @@ export async function runImageOcrJob(
 }
 
 export async function runDocumentOcrJob(
-  supabase: SupabaseClient,
   userId: string,
   documentId: string,
   row: DocumentRow,
 ): Promise<{ ok: true } | { ok: false; status: number; code: string; message: string }> {
+  const supabase = getSupabaseServiceRoleClient();
   const mimeType = String(row.mime_type ?? '').toLowerCase();
   if (isPdfMimeType(mimeType)) {
     return runPdfOcrJob(supabase, userId, documentId, row);

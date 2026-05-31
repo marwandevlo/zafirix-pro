@@ -617,6 +617,7 @@ export default function DocumentsPage() {
     try {
       const companyId = activeCompanyId ?? (await getActiveCompanyDbRowId());
       if (!companyId) {
+        setOcrProgress({ phase: 'idle' });
         setOcrError(atlasDocumentErrorMessage('company_required'));
         return;
       }
@@ -634,6 +635,7 @@ export default function DocumentsPage() {
       });
 
       if (!uploadResult.ok) {
+        setOcrProgress({ phase: 'idle' });
         setOcrError(formatDocumentsUploadError(uploadResult.status, uploadResult.body));
         return;
       }
@@ -651,6 +653,7 @@ export default function DocumentsPage() {
       if (process.env.NODE_ENV === 'development') {
         console.debug('[documents/ocr] unexpected', err);
       }
+      setOcrProgress({ phase: 'idle' });
       setOcrError(formatOcrUiMessage(code, message));
       await refreshOcr();
     } finally {

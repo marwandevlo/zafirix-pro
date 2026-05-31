@@ -10,6 +10,7 @@ import {
 } from '@/app/lib/atlas-document-storage';
 import { logUploadDiagnostic } from '@/app/lib/atlas-document-upload-diagnostics';
 import { formatStorageErrorForUi, parseSupabaseStorageError } from '@/app/lib/atlas-storage-error';
+import { frenchMessageForRegisterCode } from '@/app/lib/atlas-document-register-errors';
 import { frenchMessageForUploadHttpStatus, sanitizeUploadUserMessage } from '@/app/lib/atlas-upload-http-errors';
 import { supabase } from '@/app/lib/supabase';
 
@@ -98,13 +99,18 @@ function apiErrorBody(
   step: string,
 ): DocumentUploadErrorBody {
   const code = body.error ?? body.code ?? 'upload_failed';
-  const fromHttp = frenchMessageForUploadHttpStatus(status, code);
   const fromBody = sanitizeUploadUserMessage(body.message);
+  const fromRegister = step === 'register' ? frenchMessageForRegisterCode(code, body.message) : null;
+  const fromHttp = frenchMessageForUploadHttpStatus(status, code);
   return {
     error: code,
     code,
     step,
-    message: fromBody ?? fromHttp ?? 'Échec du téléversement. Réessayez.',
+    message:
+      fromBody ??
+      (fromRegister && fromRegister !== code ? fromRegister : null) ??
+      fromHttp ??
+      'Échec du téléversement. Réessayez.',
   };
 }
 
@@ -431,7 +437,27 @@ export async function uploadDocumentForOcr(
 
   if (!registerResult.ok) {
     await removeFailedStorageObject(prepareBody.storagePath);
-    return { ok: false, status: registerResult.status, body: registerResult.body };
+    const regBody = {
+      ...registerResult.body,
+      step: 'register',
+      code: registerResult.body.code ?? registerResult.body.error ?? 'register_failed',
+      error: registerResult.body.error ?? registerResult.body.code ?? 'register_failed',
+    };
+    if (!sanitizeUploadUserMessage(regBody.message)) {
+      regBody.message = frenchMessageForRegisterCode(regBody.code, regBody.message);
+    }
+    logUploadDiagnostic({
+      event: 'register_failed_after_storage',
+      step: 'register',
+      companyId,
+      documentId: prepareBody.documentId,
+      storagePath: prepareBody.storagePath,
+      bucket,
+      httpStatus: registerResult.status,
+      errorCode: regBody.code,
+      errorMessage: regBody.message,
+    });
+    return { ok: false, status: registerResult.status, body: regBody };
   }
 
   const registerBody = registerResult.data;

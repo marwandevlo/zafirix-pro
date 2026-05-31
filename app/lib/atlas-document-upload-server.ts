@@ -3,9 +3,11 @@
  */
 
 import type { SupabaseClient } from '@supabase/supabase-js';
+import { frenchMessageForRegisterCode } from '@/app/lib/atlas-document-register-errors';
 import { logAtlasServerEvent } from '@/app/lib/atlas-server-log';
 import { runDocumentOcrJob } from '@/app/lib/atlas-document-ocr-job';
 import { prepareUploadedImageForOcr } from '@/app/lib/atlas-document-image-upload';
+import { getSupabaseServiceRoleClient } from '@/app/lib/supabase-admin';
 import {
   ATLAS_DOCUMENTS_BUCKET,
   buildAtlasDocumentStoragePath,
@@ -126,6 +128,59 @@ export function assertStoragePathOwnedByUser(storagePath: string, userId: string
   return storagePath.startsWith(prefix) && !storagePath.includes('..');
 }
 
+function registerFailure(
+  code: string,
+  rawMessage: string | undefined,
+  httpStatus: number,
+  ctx: UploadLogContext,
+  step: string,
+): RegisterStoredDocumentResult {
+  const message = frenchMessageForRegisterCode(code, rawMessage);
+  logUploadStep(step, 'error', message, ctx, {
+    code,
+    rawMessage: rawMessage?.slice(0, 500),
+    bucket: ATLAS_DOCUMENTS_BUCKET,
+  });
+  return { ok: false, code, message, httpStatus };
+}
+
+/** Verify object exists without downloading (safe for large PDFs on Vercel). */
+export async function verifyStorageObjectExists(
+  admin: SupabaseClient,
+  storagePath: string,
+): Promise<{ ok: true } | { ok: false; code: string; message: string }> {
+  const segments = storagePath.split('/').filter(Boolean);
+  if (segments.length < 4) {
+    return { ok: false, code: 'storage_path_forbidden', message: 'Invalid storage path' };
+  }
+  const fileName = segments[segments.length - 1]!;
+  const folder = segments.slice(0, -1).join('/');
+
+  const { data, error } = await admin.storage.from(ATLAS_DOCUMENTS_BUCKET).list(folder, {
+    limit: 100,
+    search: fileName,
+  });
+
+  if (error) {
+    return {
+      ok: false,
+      code: 'storage_verify_failed',
+      message: error.message,
+    };
+  }
+
+  const found = (data ?? []).some((obj) => obj.name === fileName);
+  if (!found) {
+    return {
+      ok: false,
+      code: 'storage_object_missing',
+      message: 'Object not found in atlas-documents',
+    };
+  }
+
+  return { ok: true };
+}
+
 export type RegisterStoredDocumentInput = {
   userId: string;
   companyId: string;
@@ -159,29 +214,20 @@ export async function registerStoredDocument(
   input: RegisterStoredDocumentInput,
 ): Promise<RegisterStoredDocumentResult> {
   const { userId, companyId, documentId, storagePath, filename, mimeType, sizeBytes } = input;
+  const ctx: UploadLogContext = { userId, companyId, documentId, mimeType, fileSize: sizeBytes, storagePath };
 
   if (!assertStoragePathOwnedByUser(storagePath, userId)) {
-    return { ok: false, code: 'storage_path_forbidden', message: 'Invalid storage path', httpStatus: 403 };
+    return registerFailure('storage_path_forbidden', undefined, 403, ctx, 'register_path');
   }
 
   const expectedPrefix = `${userId}/${companyId}/${documentId}/`;
   if (!storagePath.startsWith(expectedPrefix)) {
-    return {
-      ok: false,
-      code: 'storage_path_forbidden',
-      message: 'Storage path does not match document',
-      httpStatus: 403,
-    };
+    return registerFailure('storage_path_forbidden', 'Path mismatch', 403, ctx, 'register_path');
   }
 
   const maxBytes = maxUploadBytesForMime(mimeType);
   if (sizeBytes > maxBytes) {
-    return {
-      ok: false,
-      code: 'file_too_large',
-      message: `Exceeds ${formatMaxUploadLabel(mimeType)}`,
-      httpStatus: 400,
-    };
+    return registerFailure('file_too_large', formatMaxUploadLabel(mimeType), 400, ctx, 'register_size');
   }
 
   const { data: companyRow, error: companyErr } = await supabase
@@ -192,29 +238,27 @@ export async function registerStoredDocument(
     .maybeSingle();
 
   if (companyErr || !companyRow?.id) {
-    return {
-      ok: false,
-      code: 'company_not_found_or_forbidden',
-      message: companyErr?.message ?? 'Company not owned',
-      httpStatus: 403,
-    };
+    return registerFailure(
+      'company_not_found_or_forbidden',
+      companyErr?.message,
+      403,
+      ctx,
+      'register_company',
+    );
   }
 
-  const { data: fileBlob, error: downloadErr } = await supabase.storage
-    .from(ATLAS_DOCUMENTS_BUCKET)
-    .download(storagePath);
+  let admin: SupabaseClient;
+  try {
+    admin = getSupabaseServiceRoleClient();
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : 'service_role_missing';
+    return registerFailure('server_misconfigured', msg, 503, ctx, 'register_admin');
+  }
 
-  if (downloadErr || !fileBlob) {
-    const msg = downloadErr?.message ?? '';
-    const isRls =
-      /policy|permission|denied|unauthorized|403|row-level security/i.test(msg) ||
-      downloadErr?.name === 'StorageApiError';
-    return {
-      ok: false,
-      code: isRls ? 'storage_permission_denied' : 'storage_object_missing',
-      message: msg || 'File not found in storage',
-      httpStatus: isRls ? 403 : 400,
-    };
+  const verify = await verifyStorageObjectExists(admin, storagePath);
+  if (!verify.ok) {
+    const httpStatus = verify.code === 'storage_object_missing' ? 400 : 502;
+    return registerFailure(verify.code, verify.message, httpStatus, ctx, 'register_storage_verify');
   }
 
   const safeName = sanitizeDocumentFilename(filename);
@@ -224,12 +268,22 @@ export async function registerStoredDocument(
   let compressed = false;
 
   if (!isPdfMimeType(mimeType)) {
+    const { data: fileBlob, error: downloadErr } = await admin.storage
+      .from(ATLAS_DOCUMENTS_BUCKET)
+      .download(storagePath);
+
+    if (downloadErr || !fileBlob) {
+      const msg = downloadErr?.message ?? 'download failed';
+      const code = /not found|404/i.test(msg) ? 'storage_object_missing' : 'storage_service_read_failed';
+      return registerFailure(code, msg, code === 'storage_object_missing' ? 400 : 502, ctx, 'register_image_download');
+    }
+
     try {
       const bytes = Buffer.from(await fileBlob.arrayBuffer());
       const prepared = await prepareUploadedImageForOcr(bytes, mimeType);
       if (prepared.compressed) {
         const workingPath = buildAtlasDocumentWorkingStoragePath(userId, companyId, documentId);
-        const { error: workingErr } = await supabase.storage
+        const { error: workingErr } = await admin.storage
           .from(ATLAS_DOCUMENTS_BUCKET)
           .upload(workingPath, prepared.ocrBuffer, {
             contentType: prepared.ocrMimeType,
@@ -237,12 +291,7 @@ export async function registerStoredDocument(
           });
 
         if (workingErr) {
-          return {
-            ok: false,
-            code: 'working_copy_failed',
-            message: workingErr.message,
-            httpStatus: 500,
-          };
+          return registerFailure('working_copy_failed', workingErr.message, 500, ctx, 'register_working_copy');
         }
 
         compressed = true;
@@ -258,11 +307,13 @@ export async function registerStoredDocument(
       }
     } catch (err) {
       const message = err instanceof Error ? err.message : 'image_compress_failed';
-      return { ok: false, code: 'image_compress_failed', message, httpStatus: 422 };
+      return registerFailure('image_compress_failed', message, 422, ctx, 'register_image_compress');
     }
   }
 
-  const { error: insertErr } = await supabase.from('atlas_documents').insert({
+  logUploadStep('register', 'info', 'db_insert_start', ctx);
+
+  const { error: insertErr } = await admin.from('atlas_documents').insert({
     id: documentId,
     user_id: userId,
     company_id: companyId,
@@ -280,12 +331,7 @@ export async function registerStoredDocument(
   });
 
   if (insertErr) {
-    return {
-      ok: false,
-      code: insertErr.code ?? 'db_insert_failed',
-      message: insertErr.message,
-      httpStatus: 500,
-    };
+    return registerFailure('db_insert_failed', insertErr.message, 500, ctx, 'register_db_insert');
   }
 
   const row = {
@@ -297,13 +343,29 @@ export async function registerStoredDocument(
     metadata,
   };
 
-  void runDocumentOcrJob(supabase, userId, documentId, row).then((result) => {
+  void runDocumentOcrJob(userId, documentId, row).then((result) => {
     if (!result.ok) {
-      logUploadStep('ocr_enqueue', 'error', result.message, { userId, documentId, companyId }, {
-        code: result.code,
-      });
+      logUploadStep('ocr_enqueue', 'error', result.message, ctx, { code: result.code });
+      void admin
+        .from('atlas_documents')
+        .update({
+          processing_status: 'failed',
+          metadata: {
+            ...asPlainMetadata(metadata),
+            ocr_error: {
+              step: 'ocr_enqueue',
+              code: result.code,
+              message: result.message,
+            },
+          },
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', documentId)
+        .eq('user_id', userId);
     }
   });
+
+  logUploadStep('register_complete', 'info', 'document_registered', ctx, { compressed });
 
   return {
     ok: true,
@@ -321,9 +383,18 @@ export async function registerStoredDocument(
   };
 }
 
+function asPlainMetadata(meta: Record<string, unknown>): Record<string, unknown> {
+  return meta && typeof meta === 'object' ? { ...meta } : {};
+}
+
 export async function removeOrphanStorageObject(
-  supabase: SupabaseClient,
+  _supabase: SupabaseClient | null,
   storagePath: string,
 ): Promise<void> {
-  await supabase.storage.from(ATLAS_DOCUMENTS_BUCKET).remove([storagePath]);
+  try {
+    const admin = getSupabaseServiceRoleClient();
+    await admin.storage.from(ATLAS_DOCUMENTS_BUCKET).remove([storagePath]);
+  } catch {
+    /* best effort */
+  }
 }
