@@ -1,7 +1,7 @@
 'use client';
 import { useState, useEffect } from 'react';
 import type { ParagraphChild } from 'docx';
-import { ArrowLeft, FileText, Download, Search, Building2, RefreshCw, ChevronRight, CheckCircle, Loader2, Scale, Landmark } from 'lucide-react';
+import { ArrowLeft, FileText, Download, Search, Building2, RefreshCw, ChevronRight, CheckCircle, Loader2 } from 'lucide-react';
 import { fetchAi } from '../lib/fetch-ai';
 import { createAtlasLink } from '@/app/lib/atlas-links-repository';
 import { createDocument } from '@/app/lib/atlas-documents-repository';
@@ -11,6 +11,7 @@ import { listAtlasCompanies } from '@/app/lib/atlas-companies-repository';
 import { BetaSurfaceBadge } from '@/app/components/safety/BetaSurfaceBadge';
 import { JuridiqueDocumentsPanel } from '@/app/juridique/JuridiqueDocumentsPanel';
 import { JuridiqueFormalitesPanel } from '@/app/juridique/JuridiqueFormalitesPanel';
+import { JuridiqueModuleTabs, type JuridiqueTabId } from '@/app/juridique/JuridiqueModuleTabs';
 import { persistLegalDocument } from '@/app/juridique/juridique-persist';
 
 type Company = {
@@ -1221,7 +1222,7 @@ EN-TETE: ${header}
 
 // ==================== MAIN PAGE ====================
 export default function JuridiquePage() {
-  const [activeTab, setActiveTab] = useState<'creation' | 'modifications' | 'formalites' | 'documents'>('creation');
+  const [activeTab, setActiveTab] = useState<JuridiqueTabId>('creation');
   const [companies, setCompanies] = useState<Company[]>([]);
 
   useEffect(() => {
@@ -1249,40 +1250,14 @@ export default function JuridiquePage() {
           </div>
         }
       >
-        <div className="mt-4 space-y-1">
-          <button
-            type="button"
-            onClick={() => setActiveTab('creation')}
-            className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-all ${activeTab === 'creation' ? 'bg-amber-500/20 text-amber-400' : 'text-white/40 hover:text-white/70'}`}
-          >
-            <Building2 size={14} /> Création
-          </button>
-          <button
-            type="button"
-            onClick={() => setActiveTab('modifications')}
-            className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-all ${activeTab === 'modifications' ? 'bg-amber-500/20 text-amber-400' : 'text-white/40 hover:text-white/70'}`}
-          >
-            <RefreshCw size={14} /> Modifications
-          </button>
-          <button
-            type="button"
-            onClick={() => setActiveTab('formalites')}
-            className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-all ${activeTab === 'formalites' ? 'bg-amber-500/20 text-amber-400' : 'text-white/40 hover:text-white/70'}`}
-          >
-            <Landmark size={14} /> Formalités juridiques
-          </button>
-          <button
-            type="button"
-            onClick={() => setActiveTab('documents')}
-            className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-all ${activeTab === 'documents' ? 'bg-amber-500/20 text-amber-400' : 'text-white/40 hover:text-white/70'}`}
-          >
-            <Scale size={14} /> Documents juridiques
-          </button>
-        </div>
+        <JuridiqueModuleTabs activeTab={activeTab} onChange={setActiveTab} variant="sidebar" />
       </AppSidebar>
       <main className="flex-1 flex flex-col overflow-hidden min-w-0">
-        <div className="shrink-0 px-6 pt-4 pb-2 border-b border-gray-200 bg-white space-y-2">
-          <BetaSurfaceBadge label="Bêta · Juridique & IA · Documents à valider par juriste/expert" />
+        <div className="shrink-0 border-b border-gray-200 bg-white">
+          <div className="px-6 pt-4 pb-2 space-y-2">
+            <BetaSurfaceBadge label="Bêta · Juridique & IA · Documents à valider par juriste/expert" />
+          </div>
+          <JuridiqueModuleTabs activeTab={activeTab} onChange={setActiveTab} variant="main" />
         </div>
         <div className="flex-1 flex overflow-hidden min-h-0">
         {activeTab === 'creation' ? (
