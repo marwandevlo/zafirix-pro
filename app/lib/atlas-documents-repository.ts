@@ -290,7 +290,9 @@ export function atlasDocumentErrorMessage(code: string): string {
     case 'file_required':
       return 'Fichier requis.';
     case 'file_too_large':
-      return 'Fichier trop volumineux (max 10 Mo).';
+      return 'Fichier trop volumineux (PDF max 50 Mo, images max 20 Mo).';
+    case 'image_compress_failed':
+      return 'Compression automatique impossible. Réessayez avec une autre image.';
     case 'mime_not_allowed':
       return 'Type de fichier non autorisé (images ou PDF uniquement).';
     case 'upload_failed':

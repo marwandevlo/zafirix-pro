@@ -1,9 +1,9 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
-  // Multipart uploads include boundaries; default 10MB proxy buffer truncates FormData.
+  // Multipart uploads include boundaries; must exceed PDF limit (50MB + overhead).
   experimental: {
-    proxyClientMaxBodySize: "15mb",
+    proxyClientMaxBodySize: "55mb",
   },
   serverExternalPackages: ["pdf-to-img", "pdfjs-dist", "sharp"],
 };
