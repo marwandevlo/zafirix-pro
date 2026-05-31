@@ -4,8 +4,7 @@ import { useState } from 'react';
 import type { LucideIcon } from 'lucide-react';
 import { ArrowLeft, Bot, Download, FileText, Gavel, Mail, ScrollText, Send, User } from 'lucide-react';
 import { fetchAi } from '@/app/lib/fetch-ai';
-import { createAtlasLink } from '@/app/lib/atlas-links-repository';
-import { createDocument } from '@/app/lib/atlas-documents-repository';
+import { persistLegalDocument } from '@/app/juridique/juridique-persist';
 
 type Company = {
   id: number;
@@ -194,25 +193,20 @@ Genere UNIQUEMENT le document.`,
       setGeneratedContent(text);
       setPhase('done');
 
-      const docRes = await createDocument({
-        type: 'juridique',
-        title: selectedDoc?.name ?? 'Document juridique',
-        content: { text, template: selectedDoc?.id },
-        metadata: { companyName: c?.raisonSociale, category: selectedDoc?.category },
-        source: 'generated',
+      const saved = await persistLegalDocument({
+        company: c,
+        procedureId: selectedDoc?.id ?? 'document_juridique',
+        procedureLabel: selectedDoc?.name ?? 'Document juridique',
+        content: text,
+        formData: data,
+        linkSource: 'juridique_documents',
       });
-      if (docRes.ok && c) {
-        await createAtlasLink({
-          fromType: 'document',
-          fromId: docRes.id,
-          toType: 'company',
-          toId: String(c.id),
-          relation: 'attached_to',
-          metadata: { source: 'juridique_documents' },
-        });
-        setPersistStatus('Document enregistré dans la bibliothèque.');
-      } else if (docRes.ok) {
-        setPersistStatus('Document enregistré (non lié à une société).');
+      if (saved.ok) {
+        setPersistStatus(
+          c
+            ? `Enregistré le ${new Date(saved.generatedAt).toLocaleString('fr-FR')} — lié à ${c.raisonSociale}.`
+            : `Enregistré le ${new Date(saved.generatedAt).toLocaleString('fr-FR')}.`,
+        );
       }
     } catch (e) {
       setMessages((prev) => [...prev, { role: 'assistant', content: e instanceof Error ? e.message : 'Erreur génération.' }]);

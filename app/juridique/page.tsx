@@ -1,7 +1,7 @@
 'use client';
 import { useState, useEffect } from 'react';
 import type { ParagraphChild } from 'docx';
-import { ArrowLeft, FileText, Download, Search, Building2, RefreshCw, ChevronRight, CheckCircle, Loader2, Scale } from 'lucide-react';
+import { ArrowLeft, FileText, Download, Search, Building2, RefreshCw, ChevronRight, CheckCircle, Loader2, Scale, Landmark } from 'lucide-react';
 import { fetchAi } from '../lib/fetch-ai';
 import { createAtlasLink } from '@/app/lib/atlas-links-repository';
 import { createDocument } from '@/app/lib/atlas-documents-repository';
@@ -10,6 +10,8 @@ import { isAtlasSupabaseDataEnabled } from '@/app/lib/atlas-data-source';
 import { listAtlasCompanies } from '@/app/lib/atlas-companies-repository';
 import { BetaSurfaceBadge } from '@/app/components/safety/BetaSurfaceBadge';
 import { JuridiqueDocumentsPanel } from '@/app/juridique/JuridiqueDocumentsPanel';
+import { JuridiqueFormalitesPanel } from '@/app/juridique/JuridiqueFormalitesPanel';
+import { persistLegalDocument } from '@/app/juridique/juridique-persist';
 
 type Company = {
   id: number; raisonSociale: string; formeJuridique: string; if_fiscal: string;
@@ -591,34 +593,35 @@ ARTICLE I CADRE LEGAL - ARTICLE II OBJET - ARTICLE III DUREE (1 an tacite recond
     ];
 
     const persisted = new Map<string, string>();
+    const generatedAt = new Date().toISOString();
+    const linkCompany = selectedCompany;
     for (const d of toPersist) {
-      const content = docs.find((x) => x.id === d.id)?.content ?? '';
-      const res = await createDocument({
-        type: 'juridique',
-        title: d.name,
-        content: d.id === 'depot_legal' || d.id === 'rc_declaration'
-          ? { kind: 'word_generated', template: d.id }
-          : { text: content, template: d.id },
-        metadata: {
-          companyName: c.raisonSociale,
-          city: c.ville,
-        },
-        source: 'generated',
-      });
-      if (res.ok) persisted.set(d.id, res.id);
-    }
-
-    // If user selected a company, auto-link all persisted docs to that company
-    if (selectedCompany) {
-      for (const docId of persisted.values()) {
-        await createAtlasLink({
-          fromType: 'document',
-          fromId: docId,
-          toType: 'company',
-          toId: String(selectedCompany.id),
-          relation: 'attached_to',
-          metadata: { source: 'juridique_auto' },
+      const textContent = docs.find((x) => x.id === d.id)?.content ?? '';
+      if (d.id === 'depot_legal' || d.id === 'rc_declaration') {
+        const res = await createDocument({
+          type: 'juridique',
+          title: d.name,
+          content: { kind: 'word_generated', template: d.id },
+          metadata: {
+            legalProcedure: d.id,
+            legalProcedureLabel: d.name,
+            generatedAt,
+            companyName: c.raisonSociale,
+            city: c.ville,
+          },
+          source: 'generated',
         });
+        if (res.ok) persisted.set(d.id, res.id);
+      } else if (textContent && textContent !== 'WORD_TABLE') {
+        const saved = await persistLegalDocument({
+          company: linkCompany as Company,
+          procedureId: d.id,
+          procedureLabel: d.name,
+          content: textContent,
+          formData: { ...f },
+          linkSource: 'juridique_creation',
+        });
+        if (saved.ok) persisted.set(d.id, saved.id);
       }
     }
   };
@@ -881,7 +884,7 @@ function ModificationsForm({ companies }: { companies: Company[] }) {
   const modTypes = [
     { id: 'cession', label: 'Cession de Parts', icon: '🔄', desc: 'Transfert de parts entre associés' },
     { id: 'transfert', label: 'Transfert Siège Social', icon: '📍', desc: 'Changement adresse siège' },
-    { id: 'dissolution', label: 'Dissolution & Liquidation', icon: '🔚', desc: 'Fermeture de la société' },
+    { id: 'dissolution', label: 'Dissolution', icon: '🔚', desc: 'Décision de dissolution (liquidation → Formalités)' },
     { id: 'augmentation', label: 'Augmentation Capital', icon: '📈', desc: 'Augmentation du capital social' },
   ];
 
@@ -989,23 +992,21 @@ EN-TETE: ${header}
       const content = await callAI(prompts[modType]);
       setGeneratedContent(content);
       setStep('done');
-      const docRes = await createDocument({
-        type: 'juridique',
-        title: modTypes.find((m) => m.id === modType)?.label ?? 'Modification juridique',
-        content: { text: content, template: modType },
-        metadata: { companyName: c.raisonSociale, modType },
-        source: 'generated',
+      const procedureIdMap: Record<string, string> = {
+        cession: 'cession_parts',
+        transfert: 'transfert_siege',
+        dissolution: 'dissolution',
+        augmentation: 'augmentation_capital',
+      };
+      const procedureId = procedureIdMap[modType] ?? modType;
+      await persistLegalDocument({
+        company: c,
+        procedureId,
+        procedureLabel: modTypes.find((m) => m.id === modType)?.label ?? 'Modification juridique',
+        content,
+        formData: f,
+        linkSource: 'juridique_modification',
       });
-      if (docRes.ok) {
-        await createAtlasLink({
-          fromType: 'document',
-          fromId: docRes.id,
-          toType: 'company',
-          toId: String(c.id),
-          relation: 'attached_to',
-          metadata: { source: 'juridique_modification' },
-        });
-      }
     } catch { setStep('form'); }
   };
 
@@ -1018,7 +1019,10 @@ EN-TETE: ${header}
     <div className="flex-1 flex flex-col overflow-hidden">
       <div className="px-6 py-4 border-b border-gray-100 bg-white">
         <h2 className="font-bold text-gray-800">Modifications de société</h2>
-        <p className="text-xs text-gray-400 mt-0.5">Choisissez le type de modification</p>
+        <p className="text-xs text-gray-400 mt-0.5">Raccourcis — formalités courantes</p>
+        <p className="text-xs text-amber-700 bg-amber-50 border border-amber-100 rounded-lg px-3 py-2 mt-2">
+          Réduction de capital, radiation, mise en sommeil, transformation… : onglet <strong>Formalités juridiques</strong>.
+        </p>
       </div>
       <div className="flex-1 overflow-y-auto p-4 space-y-3">
         {modTypes.map(m => (
@@ -1217,7 +1221,7 @@ EN-TETE: ${header}
 
 // ==================== MAIN PAGE ====================
 export default function JuridiquePage() {
-  const [activeTab, setActiveTab] = useState<'creation' | 'modifications' | 'documents'>('creation');
+  const [activeTab, setActiveTab] = useState<'creation' | 'modifications' | 'formalites' | 'documents'>('creation');
   const [companies, setCompanies] = useState<Company[]>([]);
 
   useEffect(() => {
@@ -1262,6 +1266,13 @@ export default function JuridiquePage() {
           </button>
           <button
             type="button"
+            onClick={() => setActiveTab('formalites')}
+            className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-all ${activeTab === 'formalites' ? 'bg-amber-500/20 text-amber-400' : 'text-white/40 hover:text-white/70'}`}
+          >
+            <Landmark size={14} /> Formalités juridiques
+          </button>
+          <button
+            type="button"
             onClick={() => setActiveTab('documents')}
             className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-all ${activeTab === 'documents' ? 'bg-amber-500/20 text-amber-400' : 'text-white/40 hover:text-white/70'}`}
           >
@@ -1274,7 +1285,15 @@ export default function JuridiquePage() {
           <BetaSurfaceBadge label="Bêta · Juridique & IA · Documents à valider par juriste/expert" />
         </div>
         <div className="flex-1 flex overflow-hidden min-h-0">
-        {activeTab === 'creation' ? <CreationForm companies={companies} /> : activeTab === 'modifications' ? <ModificationsForm companies={companies} /> : <JuridiqueDocumentsPanel companies={companies} />}
+        {activeTab === 'creation' ? (
+          <CreationForm companies={companies} />
+        ) : activeTab === 'modifications' ? (
+          <ModificationsForm companies={companies} />
+        ) : activeTab === 'formalites' ? (
+          <JuridiqueFormalitesPanel companies={companies} />
+        ) : (
+          <JuridiqueDocumentsPanel companies={companies} />
+        )}
         </div>
       </main>
     </div>
