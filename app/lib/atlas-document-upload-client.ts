@@ -8,6 +8,7 @@ import {
   inferDocumentMimeType,
   isAllowedDocumentMime,
 } from '@/app/lib/atlas-document-storage';
+import { triggerDocumentOcrJob } from '@/app/lib/atlas-document-ocr-client';
 import { logUploadDiagnostic } from '@/app/lib/atlas-document-upload-diagnostics';
 import { formatStorageErrorForUi, parseSupabaseStorageError } from '@/app/lib/atlas-storage-error';
 import { frenchMessageForRegisterCode } from '@/app/lib/atlas-document-register-errors';
@@ -482,6 +483,8 @@ export async function uploadDocumentForOcr(
   });
 
   onProgress?.({ phase: 'ocr' });
+
+  triggerDocumentOcrJob(registerBody.document.id, mimeType);
 
   return {
     ok: true,

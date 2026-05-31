@@ -44,6 +44,7 @@ import {
   isAllowedDocumentMime,
   maxUploadBytesForMime,
 } from '@/app/lib/atlas-document-storage';
+import { triggerDocumentOcrJob } from '@/app/lib/atlas-document-ocr-client';
 import { uploadDocumentForOcr } from '@/app/lib/atlas-document-upload-client';
 import { frenchMessageForUploadHttpStatus, sanitizeUploadUserMessage } from '@/app/lib/atlas-upload-http-errors';
 import {
@@ -244,6 +245,7 @@ export default function DocumentsPage() {
   const ocrPollAbortRef = useRef<AbortController | null>(null);
   const ocrPollInFlightRef = useRef(false);
   const ocrPollingIdsRef = useRef<Set<string>>(new Set());
+  const ocrRetriggeredRef = useRef<Set<string>>(new Set());
   const uploadQueueRef = useRef(0);
   const [localDocuments, setLocalDocuments] = useState<LocalOcrDocument[]>([]);
   const [ocrDocuments, setOcrDocuments] = useState<AtlasDocument[]>([]);
@@ -356,6 +358,17 @@ export default function DocumentsPage() {
               continue;
             }
 
+            if (
+              live.processingStatus === 'processing' &&
+              !live.progressPhase &&
+              !ocrRetriggeredRef.current.has(id)
+            ) {
+              const doc = ocrDocuments.find((d) => String(d.id) === id);
+              const mime = doc?.mimeType ?? 'application/pdf';
+              ocrRetriggeredRef.current.add(id);
+              triggerDocumentOcrJob(id, mime);
+            }
+
             if (live.progressPhase) {
               setOcrProgress({
                 documentId: id,
@@ -377,7 +390,7 @@ export default function DocumentsPage() {
       void tick();
       ocrPollRef.current = window.setInterval(() => void tick(), OCR_PROGRESS_POLL_MS);
     },
-    [stopOcrPoll, refreshOcr],
+    [stopOcrPoll, refreshOcr, ocrDocuments],
   );
 
   const refreshLibrary = async () => {

@@ -3,7 +3,8 @@ import { createServerClient } from '@supabase/ssr';
 import { cookies } from 'next/headers';
 
 import { atlasDataBackend } from '@/app/lib/atlas-data-source';
-import { runImageOcrJob } from '@/app/lib/atlas-document-ocr-job';
+import { runDocumentOcrJob } from '@/app/lib/atlas-document-ocr-job';
+import { logAtlasServerEvent } from '@/app/lib/atlas-server-log';
 import { OCR_PROVIDER } from '@/app/lib/atlas-ocr';
 
 export const runtime = 'nodejs';
@@ -106,19 +107,34 @@ export async function POST(
 
   const asyncMode = request.nextUrl.searchParams.get('async') !== '0';
 
-  const execute = () =>
-    runImageOcrJob(supabase, userId, documentId, {
-      id: String(row.id),
-      mime_type: row.mime_type,
-      storage_path: row.storage_path,
-      filename: row.filename,
-      size_bytes: row.size_bytes,
-      metadata: row.metadata,
-    });
+  const rowPayload = {
+    id: String(row.id),
+    mime_type: row.mime_type,
+    storage_path: row.storage_path,
+    filename: row.filename,
+    size_bytes: row.size_bytes,
+    metadata: row.metadata,
+  };
+
+  const execute = async () => {
+    logAtlasServerEvent('documents/ocr', 'info', 'image_ocr_start', { documentId, userId });
+    const result = await runDocumentOcrJob(userId, documentId, rowPayload);
+    if (!result.ok) {
+      logAtlasServerEvent('documents/ocr', 'error', result.message, {
+        documentId,
+        userId,
+        code: result.code,
+        step: 'image_ocr',
+      });
+    } else {
+      logAtlasServerEvent('documents/ocr', 'info', 'image_ocr_complete', { documentId, userId });
+    }
+    return result;
+  };
 
   if (asyncMode) {
     void execute().then((result) => {
-      if (IS_DEV && !result.ok) {
+      if (!result.ok) {
         console.error('[documents/ocr-image] background job failed', documentId, result);
       }
     });

@@ -203,31 +203,10 @@ export async function registerStoredDocument(
     metadata,
   };
 
-  void import('@/app/lib/atlas-document-ocr-job')
-    .then(({ runDocumentOcrJob }) => runDocumentOcrJob(userId, documentId, row))
-    .then((result) => {
-      if (!result.ok) {
-        logUploadStep('ocr_enqueue', 'error', result.message, ctx, { code: result.code });
-        void admin
-          .from('atlas_documents')
-          .update({
-            processing_status: 'failed',
-            metadata: {
-              ...asPlainMetadata(metadata),
-              ocr_error: {
-                step: 'ocr_enqueue',
-                code: result.code,
-                message: result.message,
-              },
-            },
-            updated_at: new Date().toISOString(),
-          })
-          .eq('id', documentId)
-          .eq('user_id', userId);
-      }
-    });
-
-  logUploadStep('register_complete', 'info', 'document_registered', ctx, { compressed });
+  logUploadStep('register_complete', 'info', 'document_registered_ocr_via_api', ctx, {
+    compressed,
+    note: 'Client POST /api/documents/[id]/ocr runs OCR (serverless-safe)',
+  });
 
   return {
     ok: true,
