@@ -155,13 +155,35 @@ type TvaPeriodRow = {
   status: string;
 };
 
+type PayrollRunRow = {
+  period_year: number;
+  period_month: number;
+  status: string;
+  total_gross: number | string;
+  total_cnss_employee: number | string;
+  total_amo_employee: number | string;
+  total_ir: number | string;
+  total_net: number | string;
+};
+
+type IsDraftRow = {
+  fiscal_year: number;
+  revenue_ht: number | string;
+  supplier_expenses_ht: number | string;
+  payroll_total: number | string;
+  taxable_result: number | string;
+  estimated_is: number | string;
+  is_due: number | string;
+  status: string;
+};
+
 async function loadCompanyData(
   db: SupabaseClient,
   companyId: string,
   periodStart: string,
   periodEnd: string,
 ) {
-  const [invRes, supRes, payRes, cliRes, accRes, tvaRes] = await Promise.all([
+  const [invRes, supRes, payRes, cliRes, accRes, tvaRes, payrollRes, isRes] = await Promise.all([
     db.from('atlas_invoices').select('*').eq('company_id', companyId),
     db.from('atlas_supplier_invoices').select('*').eq('company_id', companyId),
     db.from('atlas_payments').select('*').eq('company_id', companyId),
@@ -178,6 +200,14 @@ async function loadCompanyData(
       .eq('company_id', companyId)
       .gte('period_end', periodStart)
       .lte('period_start', periodEnd),
+    db
+      .from('atlas_payroll_runs')
+      .select('period_year, period_month, status, total_gross, total_cnss_employee, total_amo_employee, total_ir, total_net')
+      .eq('company_id', companyId),
+    db
+      .from('atlas_is_drafts')
+      .select('fiscal_year, revenue_ht, supplier_expenses_ht, payroll_total, taxable_result, estimated_is, is_due, status')
+      .eq('company_id', companyId),
   ]);
 
   if (invRes.error) throw new Error(invRes.error.message);
@@ -187,6 +217,8 @@ async function loadCompanyData(
   if (accRes.error) throw new Error(accRes.error.message);
   // tva periods table may not exist yet — tolerate
   const tvaPeriods = tvaRes.error ? [] : ((tvaRes.data ?? []) as TvaPeriodRow[]);
+  const payrollRuns = payrollRes.error ? [] : ((payrollRes.data ?? []) as PayrollRunRow[]);
+  const isDrafts = isRes.error ? [] : ((isRes.data ?? []) as IsDraftRow[]);
 
   return {
     invoices: (invRes.data ?? []) as InvoiceRow[],
@@ -195,6 +227,8 @@ async function loadCompanyData(
     clients: (cliRes.data ?? []) as ClientRow[],
     accounting: (accRes.data ?? []) as AccountingRow[],
     tvaPeriods,
+    payrollRuns,
+    isDrafts,
   };
 }
 
@@ -639,6 +673,145 @@ function buildTvaReport(
   };
 }
 
+function buildIsReport(
+  dashboard: AtlasReportsDashboard,
+  data: Awaited<ReturnType<typeof loadCompanyData>>,
+  period: AtlasReportPeriod,
+): AtlasReportPayload {
+  const year = new Date(period.periodEnd).getFullYear();
+  const drafts = data.isDrafts.filter((d) => Number(d.fiscal_year) === year);
+  const rows = drafts.length
+    ? drafts.map((d) => [
+        String(d.fiscal_year),
+        fmt(Number(d.revenue_ht)),
+        fmt(Number(d.supplier_expenses_ht)),
+        fmt(Number(d.payroll_total)),
+        fmt(Number(d.taxable_result)),
+        fmt(Number(d.estimated_is)),
+        fmt(Number(d.is_due)),
+        String(d.status),
+      ])
+    : [['—', '0,00', '0,00', '0,00', '0,00', '0,00', '0,00', 'Aucun brouillon']];
+
+  return {
+    type: 'is',
+    companyId: dashboard.companyId,
+    companyName: dashboard.companyName,
+    generatedAt: dashboard.generatedAt,
+    period,
+    sections: [
+      {
+        title: `Déclaration IS — exercice ${year}`,
+        headers: ['Exercice', 'CA HT', 'Achats HT', 'Masse salariale', 'Résultat imposable', 'IS estimé', 'IS dû', 'Statut'],
+        rows,
+      },
+    ],
+    summary: { isDue: drafts[0] ? Number(drafts[0].is_due) : 0 },
+  };
+}
+
+function buildCnssReport(
+  dashboard: AtlasReportsDashboard,
+  data: Awaited<ReturnType<typeof loadCompanyData>>,
+  period: AtlasReportPeriod,
+): AtlasReportPayload {
+  const periodRuns = data.payrollRuns.filter((r) => {
+    const runStart = `${r.period_year}-${pad2(r.period_month)}-01`;
+    const runEnd = `${r.period_year}-${pad2(r.period_month)}-${lastDayOfMonth(r.period_year, r.period_month)}`;
+    return runStart <= period.periodEnd && runEnd >= period.periodStart;
+  });
+
+  const rows = periodRuns.map((r) => [
+    `${r.period_month}/${r.period_year}`,
+    fmt(Number(r.total_gross)),
+    fmt(Number(r.total_cnss_employee)),
+    fmt(Number(r.total_amo_employee)),
+    fmt(Number(r.total_ir)),
+    fmt(Number(r.total_net)),
+    String(r.status),
+  ]);
+
+  const totalCnss = periodRuns.reduce((s, r) => s + Number(r.total_cnss_employee), 0);
+  const totalGross = periodRuns.reduce((s, r) => s + Number(r.total_gross), 0);
+
+  return {
+    type: 'cnss',
+    companyId: dashboard.companyId,
+    companyName: dashboard.companyName,
+    generatedAt: dashboard.generatedAt,
+    period,
+    sections: [
+      {
+        title: 'Bordereau CNSS / paie (données atlas_payroll_runs)',
+        headers: ['Période', 'Brut', 'CNSS sal.', 'AMO sal.', 'IR', 'Net', 'Statut'],
+        rows: rows.length ? rows : [['—', '0,00', '0,00', '0,00', '0,00', '0,00', 'Aucune paie']],
+      },
+      {
+        title: 'Totaux période',
+        headers: ['Indicateur', 'Montant (MAD)'],
+        rows: [
+          ['Masse salariale brute', fmt(totalGross)],
+          ['CNSS salarié (total)', fmt(totalCnss)],
+        ],
+      },
+    ],
+  };
+}
+
+function buildBilanReport(
+  dashboard: AtlasReportsDashboard,
+  data: Awaited<ReturnType<typeof loadCompanyData>>,
+  period: AtlasReportPeriod,
+): AtlasReportPayload {
+  let actif = 0;
+  let passif = 0;
+  let charges = 0;
+  let produits = 0;
+
+  for (const row of data.accounting) {
+    const entry = asRecord(row.entry_json);
+    if (!entry) continue;
+    const compte = String(entry.compte ?? '');
+    const debit = Number(entry.debit ?? 0);
+    const credit = Number(entry.credit ?? 0);
+    const cls = compte.charAt(0);
+    if (cls === '2' || cls === '3' || cls === '5') actif += debit - credit;
+    if (cls === '1' || cls === '4') passif += credit - debit;
+    if (cls === '6') charges += debit - credit;
+    if (cls === '7') produits += credit - debit;
+  }
+
+  const situationNette = actif - passif;
+  const resultat = produits - charges;
+
+  return {
+    type: 'bilan',
+    companyId: dashboard.companyId,
+    companyName: dashboard.companyName,
+    generatedAt: dashboard.generatedAt,
+    period,
+    sections: [
+      {
+        title: 'Bilan simplifié (écritures comptables)',
+        headers: ['Poste', 'Montant (MAD)'],
+        rows: [
+          ['Actif (classes 2, 3, 5)', fmt(actif)],
+          ['Passif (classes 1, 4)', fmt(passif)],
+          ['Situation nette', fmt(situationNette)],
+          ['Charges (classe 6)', fmt(charges)],
+          ['Produits (classe 7)', fmt(produits)],
+          ['Résultat (produits − charges)', fmt(resultat)],
+        ],
+      },
+      {
+        title: 'Note',
+        headers: ['Information'],
+        rows: [['Bilan indicatif basé sur atlas_accounting_entries — à valider par expert-comptable']],
+      },
+    ],
+  };
+}
+
 export async function getReportByType(
   db: SupabaseClient,
   userId: string,
@@ -662,6 +835,12 @@ export async function getReportByType(
       return buildClientsReport(dashboard, data, period);
     case 'tva':
       return buildTvaReport(dashboard, data, period);
+    case 'is':
+      return buildIsReport(dashboard, data, period);
+    case 'cnss':
+      return buildCnssReport(dashboard, data, period);
+    case 'bilan':
+      return buildBilanReport(dashboard, data, period);
     default:
       throw new Error('unknown_report_type');
   }
@@ -677,6 +856,6 @@ export function parseReportPeriodParams(searchParams: URLSearchParams): AtlasRep
 }
 
 export function parseReportType(v: string | null): AtlasReportType | null {
-  const types: AtlasReportType[] = ['commercial', 'comptable', 'fiscal', 'fournisseurs', 'clients', 'tva'];
+  const types: AtlasReportType[] = ['commercial', 'comptable', 'fiscal', 'fournisseurs', 'clients', 'tva', 'is', 'cnss', 'bilan'];
   return types.includes(v as AtlasReportType) ? (v as AtlasReportType) : null;
 }

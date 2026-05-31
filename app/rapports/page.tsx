@@ -38,6 +38,9 @@ const REPORT_META: {
   { type: 'fournisseurs', label: 'Fournisseurs', desc: 'Dépenses et factures achats', icon: FileText, color: 'bg-amber-500' },
   { type: 'clients', label: 'Clients', desc: 'Activité et répertoire clients', icon: Users, color: 'bg-green-500' },
   { type: 'tva', label: 'TVA', desc: 'Périodes TVA et net à payer', icon: BarChart3, color: 'bg-indigo-500' },
+  { type: 'is', label: 'Déclaration IS', desc: 'Résultat fiscal et IS dû (brouillons)', icon: Calculator, color: 'bg-purple-600' },
+  { type: 'cnss', label: 'Bordereau CNSS', desc: 'Paie, cotisations et IR par période', icon: Users, color: 'bg-green-600' },
+  { type: 'bilan', label: 'Bilan simplifié', desc: 'Actif, passif et résultat (écritures)', icon: TrendingUp, color: 'bg-amber-600' },
 ];
 
 async function reportsFetch<T>(path: string): Promise<{ ok: boolean; data: T }> {

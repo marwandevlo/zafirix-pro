@@ -8,6 +8,7 @@ import { createAtlasLink } from '@/app/lib/atlas-links-repository';
 import { createDocument } from '@/app/lib/atlas-documents-repository';
 import { AppSidebar } from '@/app/components/shell/AppSidebar';
 import { RhEmployeesPanel } from '@/app/rh/RhEmployeesPanel';
+import { BetaSurfaceBadge } from '@/app/components/safety/BetaSurfaceBadge';
 
 type Company = {
   id: number;
@@ -466,6 +467,11 @@ Genere UNIQUEMENT le document en texte propre, sans commentaires.`,
         </div>
       </AppSidebar>
 
+      <div className="flex-1 flex flex-col overflow-hidden min-w-0">
+        <div className="shrink-0 px-6 pt-4 pb-2 border-b border-gray-200 bg-white">
+          <BetaSurfaceBadge label="Bêta · RH · Documents et paie à valider par expert-comptable / juriste" />
+        </div>
+        <div className="flex-1 flex overflow-hidden min-h-0">
       {rhView === 'employees' ? (
         <RhEmployeesPanel />
       ) : (
@@ -764,6 +770,8 @@ Genere UNIQUEMENT le document en texte propre, sans commentaires.`,
         )}
       </main>
       )}
+        </div>
+      </div>
     </div>
   );
 }

@@ -6,7 +6,10 @@ export type AtlasReportType =
   | 'fiscal'
   | 'fournisseurs'
   | 'clients'
-  | 'tva';
+  | 'tva'
+  | 'is'
+  | 'cnss'
+  | 'bilan';
 
 export const ATLAS_REPORT_TYPES: AtlasReportType[] = [
   'commercial',
@@ -15,6 +18,9 @@ export const ATLAS_REPORT_TYPES: AtlasReportType[] = [
   'fournisseurs',
   'clients',
   'tva',
+  'is',
+  'cnss',
+  'bilan',
 ];
 
 export type AtlasReportPeriod = {

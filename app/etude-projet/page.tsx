@@ -1,9 +1,12 @@
 'use client';
-import { useState, useEffect, useRef } from 'react';
-import { Send, Bot, User, Download, CheckCircle, BarChart2 } from 'lucide-react';
+import { useState, useEffect, useRef, useCallback } from 'react';
+import { Send, Bot, User, Download, CheckCircle, BarChart2, FolderOpen, Plus } from 'lucide-react';
 import { AppSidebar } from '@/app/components/shell/AppSidebar';
-import { ProductionBlockedSurface } from '@/app/components/safety/ProductionBlockedSurface';
-import { isDemoFeatureBlocked } from '@/app/lib/atlas-runtime-guards';
+import { BetaSurfaceBadge } from '@/app/components/safety/BetaSurfaceBadge';
+import { getActiveAtlasCompany, getActiveCompanyDbRowId } from '@/app/lib/atlas-active-company';
+import { isAtlasSupabaseDataEnabled } from '@/app/lib/atlas-data-source';
+import { listAtlasProjects, upsertAtlasProject } from '@/app/lib/atlas-projects-repository';
+import type { AtlasProject } from '@/app/types/atlas-project';
 
 const fmt = (n: number) => Math.round(n).toString().replace(/\B(?=(\d{3})+(?!\d))/g, ' ');
 
@@ -38,14 +41,33 @@ const questions = [
   { key: 'charges', q: "Autres charges mensuelles en MAD (fournitures, transport, communication...)" },
 ];
 
-export default function EtudeProjetPage() {
-  if (isDemoFeatureBlocked('etude_projet_wizard')) {
-    return <ProductionBlockedSurface title="Etude de projet" featureId="etude_projet_wizard" />;
-  }
-  return <EtudeProjetPageContent />;
+const ETUDE_KIND = 'etude_faisabilite';
+
+type EtudeMetadata = {
+  kind: typeof ETUDE_KIND;
+  wizardData: Record<string, string>;
+  financials: Record<string, number>;
+  etudeText: string;
+  step: number;
+  etudeReady: boolean;
+  messages: Message[];
+};
+
+function metadataFromProject(p: AtlasProject): EtudeMetadata | null {
+  const m = p.metadata ?? {};
+  if (m.kind !== ETUDE_KIND) return null;
+  return {
+    kind: ETUDE_KIND,
+    wizardData: (m.wizardData as Record<string, string>) ?? {},
+    financials: (m.financials as Record<string, number>) ?? {},
+    etudeText: String(m.etudeText ?? ''),
+    step: Number(m.step ?? 0),
+    etudeReady: Boolean(m.etudeReady),
+    messages: Array.isArray(m.messages) ? (m.messages as Message[]) : [],
+  };
 }
 
-function EtudeProjetPageContent() {
+export default function EtudeProjetPage() {
   const [messages, setMessages] = useState<Message[]>([
     { role: 'assistant', content: "Bonjour! 👋 Je suis votre expert en création d'entreprise au Maroc.\n\nJe vais créer une étude de faisabilité PROFESSIONNELLE prête à soumettre à une banque, un investisseur ou un programme de soutien (Intelaka, Hassan II...).\n\nRépondez à mes questions et votre dossier sera prêt en quelques minutes!\n\n" + questions[0].q }
   ]);
@@ -57,12 +79,95 @@ function EtudeProjetPageContent() {
   const [etude, setEtude] = useState('');
   const [companyData, setCompanyData] = useState<Record<string, string>>({});
   const [financials, setFinancials] = useState<Record<string, number>>({});
+  const [projectId, setProjectId] = useState<string>(() => crypto.randomUUID());
+  const [savedStudies, setSavedStudies] = useState<AtlasProject[]>([]);
+  const [hydrated, setHydrated] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
-  useEffect(() => {
-    const saved = localStorage.getItem('atlas_company');
-    if (saved) setCompanyData(JSON.parse(saved));
+  const persistStudy = useCallback(async (patch: Partial<EtudeMetadata> & { name?: string }) => {
+    const name = patch.name ?? data.nom_projet ?? 'Étude de faisabilité';
+    const companyId = await getActiveCompanyDbRowId();
+    const metadata: EtudeMetadata = {
+      kind: ETUDE_KIND,
+      wizardData: patch.wizardData ?? data,
+      financials: patch.financials ?? financials,
+      etudeText: patch.etudeText ?? etude,
+      step: patch.step ?? step,
+      etudeReady: patch.etudeReady ?? etudeReady,
+      messages: patch.messages ?? messages,
+    };
+    const now = new Date().toISOString();
+    await upsertAtlasProject({
+      id: projectId,
+      companyId,
+      name: String(name),
+      status: metadata.etudeReady ? 'completed' : 'draft',
+      metadata: metadata as unknown as Record<string, unknown>,
+      createdAt: now,
+      updatedAt: now,
+    });
+  }, [data, etude, etudeReady, financials, messages, projectId, step]);
+
+  const restoreStudy = useCallback((p: AtlasProject) => {
+    const meta = metadataFromProject(p);
+    if (!meta) return;
+    setProjectId(p.id);
+    setData(meta.wizardData);
+    setFinancials(meta.financials);
+    setEtude(meta.etudeText);
+    setEtudeReady(meta.etudeReady);
+    setStep(meta.step);
+    if (meta.messages.length > 0) {
+      setMessages(meta.messages);
+    } else if (meta.step < questions.length) {
+      setMessages([
+        { role: 'assistant', content: "Bonjour! 👋 Je suis votre expert en création d'entreprise au Maroc.\n\nJe vais créer une étude de faisabilité PROFESSIONNELLE prête à soumettre à une banque, un investisseur ou un programme de soutien (Intelaka, Hassan II...).\n\nRépondez à mes questions et votre dossier sera prêt en quelques minutes!\n\n" + questions[meta.step]?.q }
+      ]);
+    }
   }, []);
+
+  const startNewStudy = () => {
+    setProjectId(crypto.randomUUID());
+    setMessages([
+      { role: 'assistant', content: "Bonjour! 👋 Je suis votre expert en création d'entreprise au Maroc.\n\nJe vais créer une étude de faisabilité PROFESSIONNELLE prête à soumettre à une banque, un investisseur ou un programme de soutien (Intelaka, Hassan II...).\n\nRépondez à mes questions et votre dossier sera prêt en quelques minutes!\n\n" + questions[0].q }
+    ]);
+    setInput('');
+    setStep(0);
+    setData({});
+    setEtudeReady(false);
+    setEtude('');
+    setFinancials({});
+  };
+
+  useEffect(() => {
+    void (async () => {
+      if (isAtlasSupabaseDataEnabled()) {
+        const company = await getActiveAtlasCompany();
+        if (company) {
+          setCompanyData({
+            raisonSociale: company.raisonSociale ?? '',
+            if_fiscal: company.if_fiscal ?? '',
+            ice: company.ice ?? '',
+            rc: company.rc ?? '',
+            cnss: company.cnss ?? '',
+            adresse: company.adresse ?? '',
+            ville: company.ville ?? '',
+          });
+        }
+        const projects = await listAtlasProjects();
+        const studies = projects.filter((p) => p.metadata?.kind === ETUDE_KIND);
+        setSavedStudies(studies);
+        const latest = studies[0];
+        if (latest && !hydrated) {
+          restoreStudy(latest);
+        }
+      } else {
+        const saved = localStorage.getItem('atlas_company');
+        if (saved) setCompanyData(JSON.parse(saved));
+      }
+      setHydrated(true);
+    })();
+  }, [hydrated, restoreStudy]);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -82,6 +187,7 @@ function EtudeProjetPageContent() {
       setTimeout(() => {
         setMessages(prev => [...prev, { role: 'assistant', content: questions[nextStep].q }]);
       }, 400);
+      void persistStudy({ wizardData: newData, step: nextStep });
     } else {
       setLoading(true);
       setMessages(prev => [...prev, {
@@ -181,10 +287,22 @@ Genere l'etude avec ces 12 sections detaillees en francais professionnel. Sois t
       const responseData = await response.json();
       setEtude(responseData.response);
       setEtudeReady(true);
-      setMessages(prev => [...prev, {
+      const doneMessages: Message[] = [...messages, {
         role: 'assistant',
         content: `🎉 Votre étude de faisabilité est prête!\n\n${score}\n\n📊 Indicateurs clés:\n• CA visé: ${ca} MAD/mois\n• Charges: ${totalCharges} MAD/mois\n• Résultat net: ${resultatMensuel} MAD/mois\n• Rentabilité: ${rentabilite}%\n• Payback: ${payback} mois\n\n✅ Document prêt pour banque / Intelaka / investisseurs\n\n📄 Téléchargez votre PDF professionnel →`
-      }]);
+      }];
+      setMessages(prev => [...prev, doneMessages[doneMessages.length - 1]]);
+      void persistStudy({
+        wizardData: projectData,
+        financials: { capital, loyer, employes, ca, charges, totalSalaires, cnssPatronal, amoPatronal, totalCharges, resultatMensuel, resultatAnnuel, tva, is, payback, rentabilite: parseFloat(rentabilite) },
+        etudeText: responseData.response,
+        step: questions.length,
+        etudeReady: true,
+        messages: doneMessages,
+        name: projectData.nom_projet,
+      });
+      const refreshed = await listAtlasProjects();
+      setSavedStudies(refreshed.filter((p) => p.metadata?.kind === ETUDE_KIND));
     } catch {
       setMessages(prev => [...prev, { role: 'assistant', content: 'Erreur. Réessayez.' }]);
     }
@@ -636,26 +754,51 @@ Genere l'etude avec ces 12 sections detaillees en francais professionnel. Sois t
                 </div>
               ))}
             </div>
+            {savedStudies.length > 0 && (
+              <div className="pt-2 border-t border-white/10">
+                <p className="text-white/30 text-xs mb-2 flex items-center gap-1"><FolderOpen size={10} /> Études sauvegardées</p>
+                <div className="space-y-1 max-h-32 overflow-y-auto">
+                  {savedStudies.map((s) => (
+                    <button
+                      key={s.id}
+                      type="button"
+                      onClick={() => restoreStudy(s)}
+                      className={`w-full text-left px-2 py-1.5 rounded text-xs truncate ${projectId === s.id ? 'bg-amber-500/20 text-amber-300' : 'text-white/40 hover:text-white/70 hover:bg-white/5'}`}
+                    >
+                      {s.name}
+                    </button>
+                  ))}
+                </div>
+                <button type="button" onClick={startNewStudy} className="mt-2 w-full flex items-center justify-center gap-1 text-xs text-amber-400 hover:text-amber-300">
+                  <Plus size={10} /> Nouvelle étude
+                </button>
+              </div>
+            )}
           </div>
         }
       />
 
       <main className="flex-1 flex flex-col overflow-hidden">
-        <header className="bg-white border-b border-gray-200 px-6 py-4 flex items-center justify-between shrink-0">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 bg-amber-500 rounded-xl flex items-center justify-center">
-              <BarChart2 size={20} className="text-white" />
+        <header className="bg-white border-b border-gray-200 px-6 py-4 shrink-0">
+          <div className="flex items-center justify-between gap-4">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 bg-amber-500 rounded-xl flex items-center justify-center">
+                <BarChart2 size={20} className="text-white" />
+              </div>
+              <div>
+                <h1 className="text-lg font-bold text-gray-800">Etude de Faisabilite du Projet</h1>
+                <p className="text-xs text-gray-400">Hypothèses · coûts · revenus · rentabilité · scénarios · plan généré</p>
+              </div>
             </div>
-            <div>
-              <h1 className="text-lg font-bold text-gray-800">Etude de Faisabilite du Projet</h1>
-              <p className="text-xs text-gray-400">Document professionnel · Pret pour banque / investisseur / Intelaka</p>
-            </div>
+            {etudeReady && (
+              <button onClick={downloadPDF} className="flex items-center gap-2 px-4 py-2 bg-[#1B2A4A] text-white rounded-lg text-sm hover:bg-[#243660] transition-colors">
+                <Download size={16} /> PDF Professionnel (7 pages)
+              </button>
+            )}
           </div>
-          {etudeReady && (
-            <button onClick={downloadPDF} className="flex items-center gap-2 px-4 py-2 bg-[#1B2A4A] text-white rounded-lg text-sm hover:bg-[#243660] transition-colors">
-              <Download size={16} /> PDF Professionnel (7 pages)
-            </button>
-          )}
+          <div className="mt-3">
+            <BetaSurfaceBadge label="Bêta · Étude de projet · Formules indicatives — à valider par expert-comptable" />
+          </div>
         </header>
 
         <div className="flex-1 overflow-hidden flex">

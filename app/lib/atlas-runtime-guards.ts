@@ -14,8 +14,6 @@ const warnedStores = new Set<string>();
 
 export const ATLAS_DEMO_FEATURE_IDS = [
 
-  'etude_projet_wizard',
-
   'client_portal_demo',
 
 ] as const;
