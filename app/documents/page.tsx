@@ -1,6 +1,13 @@
 'use client';
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Upload, FileText, CheckCircle, Clock, Trash2, Sparkles } from 'lucide-react';
+import { Upload, FileText, CheckCircle, Clock, Trash2, Sparkles, ShieldCheck } from 'lucide-react';
+import { ValidationCenter } from '@/app/documents/components/ValidationCenter';
+import {
+  classificationFromDocument,
+  documentTypeFromDocument,
+  validationStatusFromDocument,
+} from '@/app/lib/atlas-documents-repository';
+import { documentTypeLabel } from '@/app/lib/atlas-document-routing';
 import { useRouter } from 'next/navigation';
 import { fetchAi } from '../lib/fetch-ai';
 import { addDaysYmd, todayYmd } from '@/app/lib/atlas-dates';
@@ -276,6 +283,7 @@ export default function DocumentsPage() {
   const ocrPollingIdsRef = useRef<Set<string>>(new Set());
   const ocrRetriggeredRef = useRef<Set<string>>(new Set());
   const [retryingOcrId, setRetryingOcrId] = useState<string | null>(null);
+  const [validationDocId, setValidationDocId] = useState<string | null>(null);
   const uploadQueueRef = useRef(0);
   const [localDocuments, setLocalDocuments] = useState<LocalOcrDocument[]>([]);
   const [ocrDocuments, setOcrDocuments] = useState<AtlasDocument[]>([]);
@@ -791,7 +799,8 @@ export default function DocumentsPage() {
         </button>
       </AppSidebar>
 
-      <main className="flex-1 flex flex-col overflow-hidden">
+      <main className="flex-1 flex overflow-hidden">
+        <div className="flex-1 flex flex-col overflow-hidden min-w-0">
         <header className="bg-white border-b border-gray-200 px-8 py-4">
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 bg-rose-500 rounded-xl flex items-center justify-center">
@@ -1123,13 +1132,46 @@ export default function DocumentsPage() {
                       <td className="px-4 py-3 text-right text-blue-600 text-xs">{showInvoiceRows ? '—' : (d.montant_tva ? d.montant_tva.toLocaleString() + ' MAD' : '-')}</td>
                       <td className="px-4 py-3 text-right font-medium text-xs">{showInvoiceRows ? '—' : (d.montant_ttc ? d.montant_ttc.toLocaleString() + ' MAD' : '-')}</td>
                       <td className="px-4 py-3">
-                        <span className={`flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium w-fit ${d.statut === 'analysé' ? 'bg-green-100 text-green-700' : d.statut === 'en cours' ? 'bg-amber-100 text-amber-700' : 'bg-red-100 text-red-700'}`}>
-                          {d.statut === 'analysé' ? <CheckCircle size={10} /> : <Clock size={10} />}
-                          {d.statut}
-                        </span>
+                        <div className="flex flex-col gap-1">
+                          <span className={`flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium w-fit ${d.statut === 'analysé' ? 'bg-green-100 text-green-700' : d.statut === 'en cours' ? 'bg-amber-100 text-amber-700' : 'bg-red-100 text-red-700'}`}>
+                            {d.statut === 'analysé' ? <CheckCircle size={10} /> : <Clock size={10} />}
+                            {d.statut}
+                          </span>
+                          {supabaseMode && d.supabaseId && (() => {
+                            const doc = ocrDocuments.find(doc => doc.id === d.supabaseId);
+                            if (!doc) return null;
+                            const docType = documentTypeFromDocument(doc);
+                            const valStatus = validationStatusFromDocument(doc);
+                            return (
+                              <div className="flex flex-col gap-0.5">
+                                {docType && docType !== 'unknown' && (
+                                  <span className="text-[10px] text-indigo-600 font-medium">{documentTypeLabel(docType)}</span>
+                                )}
+                                {valStatus === 'validated' && (
+                                  <span className="text-[10px] text-green-600 flex items-center gap-0.5">
+                                    <ShieldCheck size={9} /> Validé
+                                  </span>
+                                )}
+                                {valStatus === 'needs_correction' && (
+                                  <span className="text-[10px] text-amber-600">À corriger</span>
+                                )}
+                              </div>
+                            );
+                          })()}
+                        </div>
                       </td>
                       <td className="px-4 py-3">
                         <div className="flex items-center justify-end gap-3">
+                          {supabaseMode && d.statut === 'analysé' && d.supabaseId && (
+                            <button
+                              onClick={() => setValidationDocId(d.supabaseId!)}
+                              className="flex items-center gap-1 text-xs font-medium text-indigo-700 hover:text-indigo-800 bg-indigo-50 hover:bg-indigo-100 px-2 py-1 rounded-lg transition-colors"
+                              title="Ouvrir le centre de validation"
+                            >
+                              <ShieldCheck size={12} />
+                              Valider
+                            </button>
+                          )}
                           {!supabaseMode && d.statut === 'analysé' && d.fournisseur && d.montant_ttc && d.localDoc && (
                             <button
                               onClick={() => createSupplierInvoice(d.localDoc!)}
@@ -1220,6 +1262,26 @@ export default function DocumentsPage() {
             </>
           )}
         </div>
+        </div>
+
+        {/* Validation Center side panel */}
+        {validationDocId && supabaseMode && (() => {
+          const validationDoc = ocrDocuments.find(d => d.id === validationDocId);
+          if (!validationDoc) return null;
+          return (
+            <div className="w-[420px] shrink-0 overflow-y-auto border-l border-gray-200">
+              <ValidationCenter
+                document={validationDoc}
+                onClose={() => setValidationDocId(null)}
+                onValidated={() => { void refreshOcr(); }}
+                onRetryOcr={(docId) => {
+                  const row = ocrRows.find(r => r.supabaseId === docId);
+                  if (row) void retryOcrRow(row);
+                }}
+              />
+            </div>
+          );
+        })()}
       </main>
     </div>
   );

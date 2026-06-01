@@ -325,6 +325,20 @@ export function mustUseDirectStorageUpload(): boolean {
   return true;
 }
 
+/** Compute SHA-256 of a File using the WebCrypto API (browser-only). */
+export async function computeFileSha256(file: File): Promise<string | null> {
+  try {
+    const buf = await file.arrayBuffer();
+    const hashBuf = await crypto.subtle.digest('SHA-256', buf);
+    const hex = Array.from(new Uint8Array(hashBuf))
+      .map(b => b.toString(16).padStart(2, '0'))
+      .join('');
+    return hex;
+  } catch {
+    return null;
+  }
+}
+
 export async function uploadDocumentForOcr(
   file: File,
   companyId: string,
@@ -347,6 +361,9 @@ export async function uploadDocumentForOcr(
       },
     };
   }
+
+  // Compute SHA256 for deduplication (best-effort, non-blocking)
+  const sha256Hash = await computeFileSha256(file).catch(() => null);
 
   onProgress?.({ phase: 'storage', storagePercent: 0, attempt: 1 });
 
@@ -430,6 +447,7 @@ export async function uploadDocumentForOcr(
         mimeType,
         sizeBytes: file.size,
         storagePath: prepareBody.storagePath,
+        sha256Hash,
       }),
     },
     'register',

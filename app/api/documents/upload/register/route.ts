@@ -20,6 +20,7 @@ type RegisterBody = {
   mimeType?: string;
   sizeBytes?: number;
   storagePath?: string;
+  sha256Hash?: string;
 };
 
 function uploadErrorResponse(
@@ -55,6 +56,7 @@ export async function POST(request: NextRequest) {
   const mimeType = String(body.mimeType ?? '').trim().toLowerCase();
   const sizeBytes = Number(body.sizeBytes ?? 0);
   const storagePath = String(body.storagePath ?? '').trim();
+  const sha256Hash = body.sha256Hash ? String(body.sha256Hash).trim().toLowerCase() : undefined;
 
   logUploadStep('register', 'info', 'upload_register_metadata', {
     userId,
@@ -87,6 +89,7 @@ export async function POST(request: NextRequest) {
     filename,
     mimeType,
     sizeBytes,
+    sha256Hash,
   });
 
   if (!result.ok) {

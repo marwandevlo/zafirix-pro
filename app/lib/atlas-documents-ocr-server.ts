@@ -1,6 +1,11 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 
-import type { AtlasOcrError, AtlasOcrExtraction } from '@/app/types/atlas-document';
+import type {
+  AtlasDocumentClassification,
+  AtlasOcrError,
+  AtlasOcrExtraction,
+  AtlasStructuredExtraction,
+} from '@/app/types/atlas-document';
 
 import type { AtlasOcrPageMeta } from '@/app/lib/atlas-pdf-ocr-multipage';
 
@@ -224,6 +229,8 @@ export type DocumentOcrPdfMeta = {
 export type PersistDocumentOcrInput = {
   processingStatus: 'processed' | 'failed';
   extraction?: AtlasOcrExtraction;
+  structuredExtraction?: AtlasStructuredExtraction;
+  classification?: AtlasDocumentClassification;
   extractedText?: string;
   ocrError?: AtlasOcrError;
   pdfMeta?: DocumentOcrPdfMeta;
@@ -298,13 +305,33 @@ export async function persistDocumentOcrResult(
       processing_status: input.processingStatus,
       extracted_text: extractedText,
       content: extraction,
-      metadata: { ...baseMeta, ocr: ocrMeta },
+      metadata: {
+        ...baseMeta,
+        ocr: ocrMeta,
+        ...(input.classification ? { classification: input.classification } : {}),
+        ...(input.structuredExtraction ? { extraction: input.structuredExtraction } : {}),
+      },
       updated_at: now,
     })
     .eq('id', documentId)
     .eq('user_id', userId);
 
   if (error) return { ok: false, error: error.message };
+
+  // Best-effort: set top-level classification columns (requires migration to have run).
+  // If columns don't exist yet, the error is silently ignored — data is in metadata.
+  if (input.classification && input.processingStatus === 'processed') {
+    await supabase
+      .from('atlas_documents')
+      .update({
+        document_type: input.classification.detected_type,
+        validation_status: input.classification.type_confidence < 0.85 ? 'needs_correction' : 'pending_review',
+      })
+      .eq('id', documentId)
+      .eq('user_id', userId)
+      .then(() => {/* best-effort, ignore errors */});
+  }
+
   return { ok: true };
 }
 

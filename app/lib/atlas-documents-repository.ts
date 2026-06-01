@@ -2,7 +2,17 @@
  * Data-access boundary for documents: library + OCR uploads (Sprint D-alt).
  */
 
-import type { AtlasDocument, AtlasDocumentProcessingStatus, AtlasOcrDetectedInvoice, AtlasOcrError, AtlasOcrExtraction } from '@/app/types/atlas-document';
+import type {
+  AtlasDocument,
+  AtlasDocumentClassification,
+  AtlasDocumentProcessingStatus,
+  AtlasDocumentType,
+  AtlasDocumentValidationStatus,
+  AtlasOcrDetectedInvoice,
+  AtlasOcrError,
+  AtlasOcrExtraction,
+  AtlasStructuredExtraction,
+} from '@/app/types/atlas-document';
 import {
   buildDetectedInvoicesFromExtraction,
   creatableOcrInvoices,
@@ -18,6 +28,10 @@ import { blockCriticalLocalStorageInProduction } from '@/app/lib/atlas-runtime-g
 import { requireOwnedCompany, requireOwnedDocument } from '@/app/lib/atlas-entity-ownership';
 import { ATLAS_DOCUMENTS_BUCKET } from '@/app/lib/atlas-document-storage';
 
+// New columns (document_type, validation_status, sha256_hash, validated_at, validated_by)
+// were added in migration 20260601220000. They are optional in the select — if the migration
+// has not yet run they will be absent from query results (not null, just missing), which the
+// row mapper handles gracefully via null-coalescing.
 const DOCUMENT_SELECT =
   'id, user_id, company_id, type, title, content, kind, source, status, filename, mime_type, size_bytes, storage_path, extracted_text, processing_status, metadata, created_at, updated_at';
 
@@ -40,6 +54,12 @@ type AtlasDocumentRow = {
   metadata: unknown;
   created_at: string;
   updated_at: string;
+  // Optional new columns (post-migration 20260601220000)
+  document_type?: string | null;
+  validation_status?: string | null;
+  sha256_hash?: string | null;
+  validated_at?: string | null;
+  validated_by?: string | null;
 };
 
 export function readDocumentsFromLocalStorage(): AtlasDocument[] {
@@ -78,6 +98,11 @@ function rowToDocument(row: AtlasDocumentRow): AtlasDocument {
     storagePath: row.storage_path ?? undefined,
     extractedText: row.extracted_text ?? undefined,
     processingStatus: (row.processing_status as AtlasDocumentProcessingStatus) ?? 'uploaded',
+    documentType: (row.document_type as AtlasDocumentType) ?? undefined,
+    validationStatus: (row.validation_status as AtlasDocumentValidationStatus) ?? 'pending_review',
+    sha256Hash: row.sha256_hash ?? undefined,
+    validatedAt: row.validated_at ?? undefined,
+    validatedBy: row.validated_by ?? undefined,
     metadata,
     createdAt: row.created_at ?? new Date().toISOString(),
     updatedAt: row.updated_at ?? row.created_at ?? new Date().toISOString(),
@@ -641,6 +666,39 @@ export function ocrPageProgressFromDocument(doc: AtlasDocument): {
     percent: typeof ocr.progress_percent === 'number' ? ocr.progress_percent : undefined,
     phase: typeof ocr.progress_phase === 'string' ? ocr.progress_phase : undefined,
   };
+}
+
+/** Returns the classification stored in document metadata, or null. */
+export function classificationFromDocument(doc: AtlasDocument): AtlasDocumentClassification | null {
+  const c = doc.metadata?.classification;
+  if (!c || typeof c !== 'object') return null;
+  const rec = c as Record<string, unknown>;
+  if (!rec.detected_type) return null;
+  return rec as unknown as AtlasDocumentClassification;
+}
+
+/** Returns the structured extraction stored in document metadata, or null. */
+export function structuredExtractionFromDocument(doc: AtlasDocument): AtlasStructuredExtraction | null {
+  const e = doc.metadata?.extraction;
+  if (!e || typeof e !== 'object') return null;
+  return e as unknown as AtlasStructuredExtraction;
+}
+
+/** Returns the document type for display (column → classification metadata → null). */
+export function documentTypeFromDocument(doc: AtlasDocument): AtlasDocumentType | null {
+  if (doc.documentType) return doc.documentType;
+  const c = classificationFromDocument(doc);
+  if (c?.detected_type) return c.detected_type;
+  return null;
+}
+
+/** Returns user-facing validation status (column or metadata fallback). */
+export function validationStatusFromDocument(doc: AtlasDocument): AtlasDocumentValidationStatus {
+  if (doc.validationStatus) return doc.validationStatus;
+  // Fallback: read from metadata if column not yet in DB
+  const vs = doc.metadata?.validation_status;
+  if (typeof vs === 'string') return vs as AtlasDocumentValidationStatus;
+  return 'pending_review';
 }
 
 export function ocrTextPreviewFromDocument(doc: AtlasDocument, maxLen = 160): string | undefined {

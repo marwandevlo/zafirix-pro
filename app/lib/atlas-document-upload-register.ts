@@ -28,6 +28,7 @@ export type RegisterStoredDocumentInput = {
   filename: string;
   mimeType: string;
   sizeBytes: number;
+  sha256Hash?: string;
 };
 
 export type RegisterStoredDocumentResult =
@@ -74,7 +75,7 @@ export async function registerStoredDocument(
   supabase: SupabaseClient,
   input: RegisterStoredDocumentInput,
 ): Promise<RegisterStoredDocumentResult> {
-  const { userId, companyId, documentId, storagePath, filename, mimeType, sizeBytes } = input;
+  const { userId, companyId, documentId, storagePath, filename, mimeType, sizeBytes, sha256Hash } = input;
   const ctx: UploadLogContext = { userId, companyId, documentId, mimeType, fileSize: sizeBytes, storagePath };
 
   if (!assertStoragePathOwnedByUser(storagePath, userId)) {
@@ -124,29 +125,47 @@ export async function registerStoredDocument(
 
   const safeName = sanitizeDocumentFilename(filename);
 
-  // Idempotency guard: if a processed row already exists for same company+filename+size,
-  // reuse it instead of creating a duplicate that will fail OCR again.
-  // First try exact filename match; if not found, fall back to size+mime_type match
-  // (handles browser-truncated filenames uploading the same physical file).
-  let { data: existingProcessed } = await admin
-    .from('atlas_documents')
-    .select('id, filename, mime_type, size_bytes, storage_path, metadata, processing_status')
-    .eq('company_id', companyId)
-    .eq('user_id', userId)
-    .eq('filename', safeName)
-    .eq('size_bytes', sizeBytes)
-    .eq('processing_status', 'processed')
-    .eq('source', 'ocr')
-    .order('updated_at', { ascending: false })
-    .limit(1)
-    .maybeSingle()
-    .then((r) => r);
+  // ── SHA256 dedup (highest priority) ──────────────────────────────────────
+  // If the same file hash is already processed for this company, reuse it.
+  let existingProcessed: { id: string; storage_path: string | null } | null = null;
+
+  if (sha256Hash && sha256Hash.length === 64) {
+    const { data: hashMatch } = await admin
+      .from('atlas_documents')
+      .select('id, storage_path')
+      .eq('company_id', companyId)
+      .eq('user_id', userId)
+      .eq('sha256_hash', sha256Hash)
+      .eq('processing_status', 'processed')
+      .eq('source', 'ocr')
+      .order('updated_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    existingProcessed = hashMatch;
+  }
+
+  // ── Filename + size dedup (fallback) ─────────────────────────────────────
+  if (!existingProcessed?.id) {
+    const { data: nameMatch } = await admin
+      .from('atlas_documents')
+      .select('id, storage_path')
+      .eq('company_id', companyId)
+      .eq('user_id', userId)
+      .eq('filename', safeName)
+      .eq('size_bytes', sizeBytes)
+      .eq('processing_status', 'processed')
+      .eq('source', 'ocr')
+      .order('updated_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    existingProcessed = nameMatch;
+  }
 
   if (!existingProcessed?.id && isPdfMimeType(mimeType)) {
     // Fallback: same PDF size for this company — likely same file, different browser filename
     const { data: sizeMatch } = await admin
       .from('atlas_documents')
-      .select('id, filename, mime_type, size_bytes, storage_path, metadata, processing_status')
+      .select('id, storage_path')
       .eq('company_id', companyId)
       .eq('user_id', userId)
       .eq('size_bytes', sizeBytes)
@@ -162,7 +181,8 @@ export async function registerStoredDocument(
   if (existingProcessed?.id) {
     logUploadStep('register_dedup', 'info', 'reusing_existing_processed_document', ctx, {
       existingId: existingProcessed.id,
-      note: 'Same company+filename+size already processed — skipping duplicate insert',
+      sha256Used: Boolean(sha256Hash),
+      note: 'Same document already processed — skipping duplicate insert',
     });
     // Remove the orphan storage object that was just uploaded for the new UUID
     await admin.storage.from(ATLAS_DOCUMENTS_BUCKET).remove([storagePath]).catch(() => {});
@@ -175,7 +195,7 @@ export async function registerStoredDocument(
         mimeType,
         sizeBytes,
         storagePath: existingProcessed.storage_path ?? storagePath,
-        processingStatus: 'processing', // caller polls; DB is already processed
+        processingStatus: 'processing',
         compressed: false,
       },
       ocrAccepted: true,
@@ -249,6 +269,7 @@ export async function registerStoredDocument(
     size_bytes: sizeBytes,
     storage_path: storagePath,
     processing_status: 'processing',
+    sha256_hash: sha256Hash ?? null,
     metadata,
   });
 

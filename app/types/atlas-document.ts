@@ -1,5 +1,88 @@
 export type AtlasDocumentProcessingStatus = 'uploading' | 'uploaded' | 'processing' | 'processed' | 'failed';
 
+export type AtlasDocumentValidationStatus = 'pending_review' | 'validated' | 'rejected' | 'needs_correction';
+
+export type AtlasDocumentType =
+  | 'purchase_invoice'
+  | 'sales_invoice'
+  | 'receipt'
+  | 'bank_statement'
+  | 'payroll_slip'
+  | 'cnss_document'
+  | 'tax_declaration'
+  | 'vat_declaration'
+  | 'legal_contract'
+  | 'company_statutes'
+  | 'legal_notice'
+  | 'hr_document'
+  | 'accounting_document'
+  | 'unknown';
+
+export type AtlasDocumentClassification = {
+  detected_type: AtlasDocumentType;
+  type_confidence: number;
+  classification_reason: string;
+  possible_types: AtlasDocumentType[];
+  detected_language: string;
+  detected_country: string;
+  detected_currency: string;
+};
+
+export type AtlasExtractedField = {
+  value: string | number | null;
+  confidence: number;
+  source_page?: number;
+  raw_value?: string;
+  normalized_value?: string;
+  user_verified?: boolean;
+  user_corrected_value?: string;
+};
+
+export type AtlasInvoiceLineItem = {
+  description: string;
+  quantity?: number;
+  unit_price?: number;
+  total_ht?: number;
+  tva_rate?: number;
+};
+
+export type AtlasStructuredExtraction = {
+  // Invoice fields
+  supplier_name?: AtlasExtractedField;
+  supplier_ice?: AtlasExtractedField;
+  supplier_if?: AtlasExtractedField;
+  supplier_rc?: AtlasExtractedField;
+  supplier_address?: AtlasExtractedField;
+  customer_name?: AtlasExtractedField;
+  customer_ice?: AtlasExtractedField;
+  invoice_number?: AtlasExtractedField;
+  invoice_date?: AtlasExtractedField;
+  due_date?: AtlasExtractedField;
+  currency?: AtlasExtractedField;
+  subtotal_ht?: AtlasExtractedField;
+  tva_amount?: AtlasExtractedField;
+  total_ttc?: AtlasExtractedField;
+  tva_rate?: AtlasExtractedField;
+  payment_method?: AtlasExtractedField;
+  line_items?: AtlasInvoiceLineItem[];
+  category_suggestion?: AtlasExtractedField;
+  accounting_account?: AtlasExtractedField;
+  is_purchase?: AtlasExtractedField;
+  // Bank statement fields
+  bank_name?: AtlasExtractedField;
+  account_number?: AtlasExtractedField;
+  statement_period?: AtlasExtractedField;
+  opening_balance?: AtlasExtractedField;
+  closing_balance?: AtlasExtractedField;
+  // Payroll fields
+  employee_name?: AtlasExtractedField;
+  period?: AtlasExtractedField;
+  gross_salary?: AtlasExtractedField;
+  net_salary?: AtlasExtractedField;
+  cnss_amount?: AtlasExtractedField;
+  ir_amount?: AtlasExtractedField;
+};
+
 export type AtlasDocument = {
   id: string;
   companyId?: string | null;
@@ -22,6 +105,13 @@ export type AtlasDocument = {
   storagePath?: string;
   extractedText?: string;
   processingStatus?: AtlasDocumentProcessingStatus;
+
+  /** Documents IA central engine */
+  documentType?: AtlasDocumentType;
+  validationStatus?: AtlasDocumentValidationStatus;
+  sha256Hash?: string;
+  validatedAt?: string;
+  validatedBy?: string;
 
   metadata?: Record<string, unknown>;
 

@@ -136,6 +136,8 @@ export async function runPdfOcrJob(
   const persist = await persistDocumentOcrResult(supabase, userId, documentId, {
     processingStatus: 'processed',
     extraction: ocrResult.merged,
+    structuredExtraction: ocrResult.extraction,
+    classification: ocrResult.classification,
     extractedText: ocrResult.extractedText,
     pdfMeta,
     preserveFileMeta: { filename: row.filename, mimeType, sizeBytes: row.size_bytes, existingMetadata: row.metadata },
