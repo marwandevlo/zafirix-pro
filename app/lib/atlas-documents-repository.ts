@@ -116,9 +116,82 @@ export async function listAtlasDocuments(opts?: ListAtlasDocumentsOptions): Prom
   return (data ?? []).map((row) => rowToDocument(row as AtlasDocumentRow));
 }
 
-/** OCR uploads for the active company (source=ocr). */
+const OCR_ERROR_TEXT_PREFIX = /^Impossible de lire le PDF/i;
+
+/** True when extracted_text is real OCR output, not a stored error string. */
+export function hasMeaningfulExtractedText(doc: AtlasDocument): boolean {
+  const t = doc.extractedText?.trim() ?? '';
+  if (t.length < 80) return false;
+  if (OCR_ERROR_TEXT_PREFIX.test(t)) return false;
+  return true;
+}
+
+function ocrDocDisplayRank(doc: AtlasDocument): number {
+  if (doc.processingStatus === 'processed' || hasMeaningfulExtractedText(doc)) return 300;
+  if (doc.processingStatus === 'processing' || doc.processingStatus === 'uploading') return 200;
+  if (doc.processingStatus === 'failed') return 100;
+  return 0;
+}
+
+/** One row per filename — prefer processed / meaningful text over newer failed duplicates. */
+export function dedupeOcrDocumentsForDisplay(docs: AtlasDocument[]): AtlasDocument[] {
+  const byKey = new Map<string, AtlasDocument>();
+  for (const doc of docs) {
+    const name = (doc.filename ?? doc.title ?? 'document').trim().toLowerCase();
+    const key = `${doc.companyId ?? ''}:${name}`;
+    const prev = byKey.get(key);
+    if (!prev) {
+      byKey.set(key, doc);
+      continue;
+    }
+    const rankDiff = ocrDocDisplayRank(doc) - ocrDocDisplayRank(prev);
+    if (rankDiff > 0) {
+      byKey.set(key, doc);
+      continue;
+    }
+    if (rankDiff === 0 && new Date(doc.updatedAt).getTime() > new Date(prev.updatedAt).getTime()) {
+      byKey.set(key, doc);
+    }
+  }
+  return Array.from(byKey.values()).sort(
+    (a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime(),
+  );
+}
+
+export type OcrDocumentDebugInfo = {
+  documentId: string;
+  processingStatus: string;
+  progressPhase?: string;
+  errorCode?: string;
+  extractedTextLength: number;
+  updatedAt: string;
+};
+
+export function ocrDebugFromDocument(doc: AtlasDocument): OcrDocumentDebugInfo {
+  const ocr =
+    doc.metadata?.ocr && typeof doc.metadata.ocr === 'object'
+      ? (doc.metadata.ocr as Record<string, unknown>)
+      : {};
+  const err = ocr.error;
+  let errorCode: string | undefined;
+  if (err && typeof err === 'object' && !Array.isArray(err)) {
+    const c = (err as Record<string, unknown>).code;
+    if (typeof c === 'string') errorCode = c;
+  }
+  return {
+    documentId: String(doc.id),
+    processingStatus: doc.processingStatus ?? 'unknown',
+    progressPhase: typeof ocr.progress_phase === 'string' ? ocr.progress_phase : undefined,
+    errorCode,
+    extractedTextLength: doc.extractedText?.length ?? 0,
+    updatedAt: doc.updatedAt,
+  };
+}
+
+/** OCR uploads for the active company (source=ocr), deduped for UI. */
 export async function listAtlasOcrDocuments(companyId: string): Promise<AtlasDocument[]> {
-  return listAtlasDocuments({ companyId, source: 'ocr' });
+  const rows = await listAtlasDocuments({ companyId, source: 'ocr' });
+  return dedupeOcrDocumentsForDisplay(rows);
 }
 
 export async function upsertAtlasDocument(doc: AtlasDocument): Promise<{ ok: true } | { ok: false; error: string }> {
@@ -541,7 +614,7 @@ export async function getAtlasDocumentOcrProgress(
 }
 
 export function ocrFailureFromDocument(doc: AtlasDocument): AtlasOcrError | null {
-  if (doc.processingStatus === 'processed') return null;
+  if (doc.processingStatus === 'processed' || hasMeaningfulExtractedText(doc)) return null;
   const raw = doc.metadata?.ocr;
   if (!raw || typeof raw !== 'object') return null;
   const err = (raw as Record<string, unknown>).error;
@@ -586,15 +659,15 @@ export function formatDocumentSizeBytes(bytes?: number | null): string | undefin
 }
 
 export function ocrUiStatus(doc: AtlasDocument): 'analysé' | 'en cours' | 'erreur' {
-  switch (doc.processingStatus) {
-    case 'processed':
-      return 'analysé';
-    case 'processing':
-    case 'uploading':
-    case 'uploaded':
-      return 'en cours';
-    case 'failed':
-    default:
-      return 'erreur';
+  if (doc.processingStatus === 'processed' || hasMeaningfulExtractedText(doc)) {
+    return 'analysé';
   }
+  if (
+    doc.processingStatus === 'processing' ||
+    doc.processingStatus === 'uploading' ||
+    doc.processingStatus === 'uploaded'
+  ) {
+    return 'en cours';
+  }
+  return 'erreur';
 }

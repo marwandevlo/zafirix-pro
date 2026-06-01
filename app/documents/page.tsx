@@ -29,6 +29,8 @@ import {
   ocrExtractionFromDocument,
   ocrInvoicesFromDocument,
   formatDocumentSizeBytes,
+  hasMeaningfulExtractedText,
+  ocrDebugFromDocument,
   ocrFailureFromDocument,
   ocrPageProgressFromDocument,
   ocrProcessedPageCountFromDocument,
@@ -48,7 +50,6 @@ import {
   isAllowedDocumentMime,
   maxUploadBytesForMime,
 } from '@/app/lib/atlas-document-storage';
-import { triggerDocumentOcrJob } from '@/app/lib/atlas-document-ocr-client';
 import { uploadDocumentForOcr } from '@/app/lib/atlas-document-upload-client';
 import { frenchMessageForUploadHttpStatus, sanitizeUploadUserMessage } from '@/app/lib/atlas-upload-http-errors';
 import {
@@ -96,7 +97,19 @@ type OcrDisplayRow = {
   creatableInvoiceCount?: number;
   supplierInvoicesCreatedCount?: number;
   hasAllSupplierInvoices?: boolean;
+  debug?: {
+    documentId: string;
+    processingStatus: string;
+    progressPhase?: string;
+    errorCode?: string;
+    extractedTextLength: number;
+    updatedAt: string;
+  };
 };
+
+/** Temporary production debug — remove after OCR UI verified stable. */
+const SHOW_OCR_ROW_DEBUG =
+  process.env.NEXT_PUBLIC_ATLAS_OCR_DEBUG === 'true' || process.env.NODE_ENV === 'production';
 
 type UploadErrorBody = {
   error?: string;
@@ -375,18 +388,6 @@ export default function DocumentsPage() {
               continue;
             }
 
-            if (
-              live.processingStatus === 'processing' &&
-              (!live.progressPhase || live.progressPhase === 'started') &&
-              !live.progressPage &&
-              !ocrRetriggeredRef.current.has(id)
-            ) {
-              const doc = ocrDocuments.find((d) => String(d.id) === id);
-              const mime = doc?.mimeType ?? 'application/pdf';
-              ocrRetriggeredRef.current.add(id);
-              triggerDocumentOcrJob(id, mime);
-            }
-
             if (live.progressPhase && live.progressPhase !== 'completed' && live.progressPhase !== 'failed') {
               const uiPhase: OcrProgressPhase =
                 live.progressPhase === 'started'
@@ -439,12 +440,7 @@ export default function DocumentsPage() {
     if (!supabaseMode || tab !== 'ocr') return;
     for (const doc of ocrDocuments) {
       if (doc.processingStatus !== 'processing' && doc.processingStatus !== 'uploading') continue;
-      const id = String(doc.id);
-      enqueueOcrProgressPoll(id);
-      if (!ocrRetriggeredRef.current.has(id)) {
-        ocrRetriggeredRef.current.add(id);
-        triggerDocumentOcrJob(id, doc.mimeType ?? 'application/pdf');
-      }
+      enqueueOcrProgressPoll(String(doc.id));
     }
   }, [ocrDocuments, supabaseMode, tab, enqueueOcrProgressPoll]);
 
@@ -509,7 +505,11 @@ export default function DocumentsPage() {
           fileSizeLabel: formatDocumentSizeBytes(doc.sizeBytes),
           pageProgressLabel: doc.processingStatus === 'processing' ? pageLabel : undefined,
           errorDetail: fail?.message,
-          textPreview: doc.processingStatus === 'processed' ? ocrTextPreviewFromDocument(doc) : undefined,
+          textPreview:
+            doc.processingStatus === 'processed' || hasMeaningfulExtractedText(doc)
+              ? ocrTextPreviewFromDocument(doc)
+              : undefined,
+          debug: SHOW_OCR_ROW_DEBUG ? ocrDebugFromDocument(doc) : undefined,
           supabaseId: docId,
           detectedInvoices: allInvoices,
           creatableInvoiceCount: creatable.length,
@@ -1032,6 +1032,11 @@ export default function DocumentsPage() {
 
           {ocrRows.length > 0 && (
             <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
+              {SHOW_OCR_ROW_DEBUG && supabaseMode && (
+                <div className="px-4 py-2 bg-slate-900 text-slate-100 text-[10px] font-mono border-b border-slate-700">
+                  DEBUG OCR (temporaire) — id · status · phase · err · textLen · updated_at
+                </div>
+              )}
               <table className="w-full text-sm">
                 <thead>
                   <tr className="text-left text-xs text-gray-400 border-b border-gray-100 bg-gray-50">
@@ -1079,6 +1084,13 @@ export default function DocumentsPage() {
                             <span className="text-[10px] text-emerald-700 font-medium pl-5">
                               {d.creatableInvoiceCount} factures détectées
                             </span>
+                          )}
+                          {d.debug && (
+                            <pre className="text-[9px] text-slate-600 pl-5 mt-1 whitespace-pre-wrap break-all font-mono leading-tight">
+                              {d.debug.documentId.slice(0, 8)}… · {d.debug.processingStatus} ·{' '}
+                              {d.debug.progressPhase ?? '—'} · err={d.debug.errorCode ?? '—'} · len=
+                              {d.debug.extractedTextLength} · {d.debug.updatedAt.slice(0, 19)}
+                            </pre>
                           )}
                         </div>
                       </td>
