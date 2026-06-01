@@ -2,11 +2,6 @@
  * Multi-page PDF OCR pipeline for Documents IA.
  */
 
-import { ensureAtlasDomPolyfills } from '@/app/lib/atlas-dom-polyfill';
-
-ensureAtlasDomPolyfills();
-
-import { pdf } from 'pdf-to-img';
 import type { AtlasOcrDetectedInvoice, AtlasOcrError, AtlasOcrExtraction } from '@/app/types/atlas-document';
 import { preparePdfPageForOcr } from '@/app/lib/atlas-ocr-image-prep';
 import { runInvoiceOcrExtraction } from '@/app/lib/atlas-ocr-invoice-server';
@@ -16,9 +11,9 @@ import {
 } from '@/app/lib/atlas-ocr-invoices-detect';
 import {
   destroyPdfDocument,
+  openPdfDocument,
   PDF_OCR_MAX_PAGES,
   PDF_OCR_PAGE_TIMEOUT_MS,
-  PDF_OCR_RENDER_SCALE,
   PDF_OCR_ROUTE_TIMEOUT_MS,
 } from '@/app/lib/atlas-pdf-ocr-render';
 
@@ -100,7 +95,7 @@ export async function processMultiPagePdfOcr(
   opts?: { onProgress?: (event: PdfOcrProgressEvent) => void | Promise<void> },
 ): Promise<MultiPagePdfOcrResult> {
   const deadline = Date.now() + PDF_OCR_ROUTE_TIMEOUT_MS;
-  const document = await pdf(pdfBytes, { scale: PDF_OCR_RENDER_SCALE });
+  const document = await openPdfDocument(pdfBytes);
 
   try {
     const totalPages = document.length;

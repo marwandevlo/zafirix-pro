@@ -136,9 +136,12 @@ export async function markDocumentOcrFailed(
   supabase: SupabaseClient,
   userId: string,
   documentId: string,
-  row: { filename: string | null; mime_type: string | null; size_bytes: number | null; metadata: unknown },
+  row: { filename: string | null; mime_type: string | null; size_bytes: number | null; metadata: unknown; processing_status?: string | null },
   ocrError: { code: string; step: string; message: string },
 ): Promise<void> {
+  if (row.processing_status === 'processed') {
+    return;
+  }
   await persistDocumentOcrResult(supabase, userId, documentId, {
     processingStatus: 'failed',
     ocrError: { step: ocrError.step, code: ocrError.code, message: ocrError.message },
@@ -163,6 +166,10 @@ export function shouldRecoverStuckDocumentOcr(row: {
   metadata: unknown;
   updated_at: string | null;
 }): StuckOcrDecision {
+  if (row.processing_status === 'processed') {
+    return { action: 'skip_duplicate' };
+  }
+
   if (row.processing_status !== 'processing') {
     return { action: 'proceed' };
   }
@@ -231,10 +238,22 @@ export async function persistDocumentOcrResult(
   documentId: string,
   input: PersistDocumentOcrInput,
 ): Promise<{ ok: true } | { ok: false; error: string }> {
-  const extraction = input.extraction ?? {};
   const baseMeta = input.preserveFileMeta
     ? asMetaRecord(input.preserveFileMeta.existingMetadata)
     : await fetchDocumentMetadata(supabase, userId, documentId);
+
+  const { data: currentRow } = await supabase
+    .from('atlas_documents')
+    .select('processing_status')
+    .eq('id', documentId)
+    .eq('user_id', userId)
+    .maybeSingle();
+
+  if (currentRow?.processing_status === 'processed' && input.processingStatus === 'failed') {
+    return { ok: true };
+  }
+
+  const extraction = input.extraction ?? {};
   const prevOcr = asMetaRecord(baseMeta.ocr);
   const now = new Date().toISOString();
 
@@ -259,6 +278,7 @@ export async function persistDocumentOcrResult(
     ocrMeta.progress_phase = 'failed';
   } else if (input.processingStatus === 'processed') {
     ocrMeta.progress_phase = 'completed';
+    delete ocrMeta.error;
   }
 
   const extractedText =

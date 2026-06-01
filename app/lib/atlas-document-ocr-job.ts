@@ -117,10 +117,13 @@ export async function runPdfOcrJob(
       },
     });
   } catch (err) {
-    const message = frenchOcrErrorMessage(
-      'pdf_render_failed',
-      err instanceof Error ? err.message : undefined,
-    );
+    const rawMessage = err instanceof Error ? err.message : String(err);
+    const message = frenchOcrErrorMessage('pdf_render_failed', rawMessage);
+    logAtlasServerEvent('documents/ocr', 'error', 'pdf_render_failed', {
+      documentId,
+      userId,
+      rawMessage,
+    });
     await persistDocumentOcrResult(supabase, userId, documentId, {
       processingStatus: 'failed',
       ocrError: { step: 'pdf_render', code: 'pdf_render_failed', message },

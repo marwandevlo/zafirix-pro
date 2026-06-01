@@ -3,6 +3,7 @@
  */
 
 import { logAtlasServerEvent } from '@/app/lib/atlas-server-log';
+import { ensureAtlasDomPolyfills } from '@/app/lib/atlas-dom-polyfill';
 import { runDocumentOcrJob } from '@/app/lib/atlas-document-ocr-job';
 import {
   markDocumentOcrFailed,
@@ -60,11 +61,17 @@ export async function executeDocumentOcrServer(
   documentId: string,
   source: 'register' | 'api_run' | 'retrigger' = 'api_run',
 ): Promise<void> {
+  ensureAtlasDomPolyfills();
   logAtlasServerEvent('documents/ocr', 'info', 'ocr_runner_start', { documentId, userId, source });
 
   const row = await loadDocumentRow(documentId, userId);
   if (!row) {
     logAtlasServerEvent('documents/ocr', 'error', 'ocr_runner_document_missing', { documentId, userId });
+    return;
+  }
+
+  if (row.processing_status === 'processed') {
+    logAtlasServerEvent('documents/ocr', 'info', 'ocr_runner_skip_already_processed', { documentId, userId });
     return;
   }
 

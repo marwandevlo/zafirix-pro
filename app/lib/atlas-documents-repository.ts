@@ -541,6 +541,7 @@ export async function getAtlasDocumentOcrProgress(
 }
 
 export function ocrFailureFromDocument(doc: AtlasDocument): AtlasOcrError | null {
+  if (doc.processingStatus === 'processed') return null;
   const raw = doc.metadata?.ocr;
   if (!raw || typeof raw !== 'object') return null;
   const err = (raw as Record<string, unknown>).error;
