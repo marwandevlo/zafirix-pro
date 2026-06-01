@@ -126,7 +126,9 @@ export async function registerStoredDocument(
 
   // Idempotency guard: if a processed row already exists for same company+filename+size,
   // reuse it instead of creating a duplicate that will fail OCR again.
-  const { data: existingProcessed } = await admin
+  // First try exact filename match; if not found, fall back to size+mime_type match
+  // (handles browser-truncated filenames uploading the same physical file).
+  let { data: existingProcessed } = await admin
     .from('atlas_documents')
     .select('id, filename, mime_type, size_bytes, storage_path, metadata, processing_status')
     .eq('company_id', companyId)
@@ -137,7 +139,25 @@ export async function registerStoredDocument(
     .eq('source', 'ocr')
     .order('updated_at', { ascending: false })
     .limit(1)
-    .maybeSingle();
+    .maybeSingle()
+    .then((r) => r);
+
+  if (!existingProcessed?.id && isPdfMimeType(mimeType)) {
+    // Fallback: same PDF size for this company — likely same file, different browser filename
+    const { data: sizeMatch } = await admin
+      .from('atlas_documents')
+      .select('id, filename, mime_type, size_bytes, storage_path, metadata, processing_status')
+      .eq('company_id', companyId)
+      .eq('user_id', userId)
+      .eq('size_bytes', sizeBytes)
+      .eq('mime_type', mimeType)
+      .eq('processing_status', 'processed')
+      .eq('source', 'ocr')
+      .order('updated_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    existingProcessed = sizeMatch;
+  }
 
   if (existingProcessed?.id) {
     logUploadStep('register_dedup', 'info', 'reusing_existing_processed_document', ctx, {

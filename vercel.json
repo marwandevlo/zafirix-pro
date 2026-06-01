@@ -3,6 +3,10 @@
     {
       "path": "/api/cron/email-lifecycle",
       "schedule": "0 9 * * *"
+    },
+    {
+      "path": "/api/cron/ocr-recovery",
+      "schedule": "*/10 * * * *"
     }
   ]
 }

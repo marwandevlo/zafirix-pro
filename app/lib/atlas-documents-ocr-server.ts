@@ -209,13 +209,16 @@ export function shouldRecoverStuckDocumentOcr(row: {
 export type DocumentOcrPdfMeta = {
   original_mime_type: string;
   total_pages?: number;
+  page_count?: number;
   processed_pages?: number;
   processed_page_count?: number;
+  pages_processed?: number;
   pages?: AtlasOcrPageMeta[];
   invoices?: import('@/app/types/atlas-document').AtlasOcrDetectedInvoice[];
   partial_failure?: boolean;
   processed_page?: number;
   rendered_image_mime_type?: string;
+  raw_error?: string;
 };
 
 export type PersistDocumentOcrInput = {
@@ -268,9 +271,11 @@ export async function persistDocumentOcrResult(
     progress_percent: input.processingStatus === 'processed' ? 100 : prevOcr.progress_percent,
   };
 
-  if (input.pdfMeta?.total_pages != null) {
-    ocrMeta.page_count = input.pdfMeta.total_pages;
-    ocrMeta.pages_processed = input.pdfMeta.processed_pages ?? input.pdfMeta.processed_page_count;
+  const resolvedPageCount = input.pdfMeta?.page_count ?? input.pdfMeta?.total_pages;
+  if (resolvedPageCount != null) {
+    ocrMeta.page_count = resolvedPageCount;
+    ocrMeta.total_pages = resolvedPageCount;
+    ocrMeta.pages_processed = input.pdfMeta?.pages_processed ?? input.pdfMeta?.processed_pages ?? input.pdfMeta?.processed_page_count ?? resolvedPageCount;
   }
 
   if (input.ocrError) {

@@ -11,14 +11,13 @@ import {
   updateDocumentOcrPageCount,
   updateDocumentOcrProgress,
 } from '@/app/lib/atlas-documents-ocr-server';
-import { getPdfPageCount } from '@/app/lib/atlas-pdf-ocr-render';
 import { getSupabaseServiceRoleClient } from '@/app/lib/supabase-admin';
 import { prepareUploadedImageForOcr } from '@/app/lib/atlas-document-image-upload';
 import { isPdfMimeType } from '@/app/lib/atlas-document-storage';
-import { processMultiPagePdfOcr } from '@/app/lib/atlas-pdf-ocr-multipage';
 import { PDF_OCR_RENDERED_MIME } from '@/app/lib/atlas-pdf-ocr-render';
 import { logAtlasServerEvent } from '@/app/lib/atlas-server-log';
 import { runInvoiceOcrExtraction } from '@/app/lib/atlas-ocr-invoice-server';
+import { runDirectPdfOcrExtraction } from '@/app/lib/atlas-pdf-direct-ocr';
 
 type DocumentRow = {
   id: string;
@@ -63,151 +62,95 @@ export async function runPdfOcrJob(
 
   logAtlasServerEvent('documents/ocr', 'info', 'pdf_ocr_start', { documentId, userId });
 
+  // ── 1. Download PDF from storage ──────────────────────────────────────────
   const { data: fileBlob, error: downloadErr } = await supabase.storage
     .from(ATLAS_DOCUMENTS_BUCKET)
     .download(storagePath);
 
   if (downloadErr || !fileBlob) {
+    const msg = frenchOcrErrorMessage('storage_download_failed', downloadErr?.message);
     await persistDocumentOcrResult(supabase, userId, documentId, {
       processingStatus: 'failed',
-      ocrError: {
-        step: 'storage_download',
-        code: 'storage_download_failed',
-        message: frenchOcrErrorMessage('storage_download_failed', downloadErr?.message),
-      },
-      pdfMeta: {
-        original_mime_type: mimeType,
-        processed_page: 1,
-        rendered_image_mime_type: PDF_OCR_RENDERED_MIME,
-      },
-      preserveFileMeta: {
-        filename: row.filename,
-        mimeType,
-        sizeBytes: row.size_bytes,
-        existingMetadata: row.metadata,
-      },
+      ocrError: { step: 'storage_download', code: 'storage_download_failed', message: msg },
+      pdfMeta: { original_mime_type: mimeType, processed_page: 1, rendered_image_mime_type: PDF_OCR_RENDERED_MIME },
+      preserveFileMeta: { filename: row.filename, mimeType, sizeBytes: row.size_bytes, existingMetadata: row.metadata },
     });
-    return {
-      ok: false,
-      status: 500,
-      code: 'storage_download_failed',
-      message: downloadErr?.message ?? 'Download failed',
-    };
+    return { ok: false, status: 500, code: 'storage_download_failed', message: downloadErr?.message ?? 'Download failed' };
   }
 
-  let multiPageResult;
-  try {
-    const pdfBytes = Buffer.from(await fileBlob.arrayBuffer());
-    try {
-      const pageCount = await getPdfPageCount(pdfBytes);
-      if (pageCount > 0) {
-        await updateDocumentOcrPageCount(supabase, userId, documentId, pageCount);
-      }
-    } catch {
-      /* page count best-effort */
-    }
+  const pdfBytes = Buffer.from(await fileBlob.arrayBuffer());
 
-    multiPageResult = await processMultiPagePdfOcr(pdfBytes, {
-      onProgress: async (event) => {
-        await updateDocumentOcrProgress(supabase, userId, documentId, {
-          phase: event.phase,
-          page: event.pageNumber,
-          total: event.totalPages,
-        });
-      },
-    });
-  } catch (err) {
-    const rawMessage = err instanceof Error ? err.message : String(err);
-    const message = frenchOcrErrorMessage('pdf_render_failed', rawMessage);
-    logAtlasServerEvent('documents/ocr', 'error', 'pdf_render_failed', {
+  // ── 2. Best-effort page count (non-blocking) ───────────────────────────────
+  // Attempt quick page count via pdfjs; if it fails, proceed anyway — the
+  // direct Anthropic extraction returns total_pages in its response.
+  try {
+    const { getPdfPageCount } = await import('@/app/lib/atlas-pdf-ocr-render');
+    const pageCount = await getPdfPageCount(pdfBytes);
+    if (pageCount > 0) {
+      await updateDocumentOcrPageCount(supabase, userId, documentId, pageCount);
+    }
+  } catch {
+    /* page count is optional — Anthropic response provides total_pages */
+  }
+
+  // ── 3. Progress: analyzing phase ──────────────────────────────────────────
+  await updateDocumentOcrProgress(supabase, userId, documentId, { phase: 'analyzing', page: 1, total: 1 });
+
+  // ── 4. Send PDF directly to Anthropic (no local rendering) ────────────────
+  const ocrResult = await runDirectPdfOcrExtraction(pdfBytes, row.filename);
+
+  if (!ocrResult.ok) {
+    const msg = frenchOcrErrorMessage(ocrResult.code, ocrResult.message);
+    logAtlasServerEvent('documents/ocr', 'error', 'pdf_direct_ocr_failed', {
       documentId,
       userId,
-      rawMessage,
+      code: ocrResult.code,
+      rawError: ocrResult.rawError,
     });
     await persistDocumentOcrResult(supabase, userId, documentId, {
       processingStatus: 'failed',
-      ocrError: { step: 'pdf_render', code: 'pdf_render_failed', message },
+      ocrError: { step: ocrResult.step, code: ocrResult.code, message: msg, raw_error: ocrResult.rawError },
       pdfMeta: {
         original_mime_type: mimeType,
         processed_page: 1,
         rendered_image_mime_type: PDF_OCR_RENDERED_MIME,
+        raw_error: ocrResult.rawError,
       },
-      preserveFileMeta: {
-        filename: row.filename,
-        mimeType,
-        sizeBytes: row.size_bytes,
-        existingMetadata: row.metadata,
-      },
+      preserveFileMeta: { filename: row.filename, mimeType, sizeBytes: row.size_bytes, existingMetadata: row.metadata },
     });
-    return { ok: false, status: 422, code: 'pdf_render_failed', message };
+    return { ok: false, status: 422, code: ocrResult.code, message: msg };
   }
 
+  // ── 5. Persist success ────────────────────────────────────────────────────
   const pdfMeta = {
     original_mime_type: mimeType,
-    total_pages: multiPageResult.totalPages,
-    processed_pages: multiPageResult.processedPages,
-    processed_page_count: multiPageResult.processedPages,
-    pages: multiPageResult.pageResults,
-    partial_failure: multiPageResult.partialFailure,
-    invoices: multiPageResult.invoices,
-    processed_page: multiPageResult.processedPages,
-    rendered_image_mime_type: multiPageResult.renderedMime,
+    page_count: ocrResult.totalPages,
+    total_pages: ocrResult.totalPages,
+    processed_pages: ocrResult.totalPages,
+    processed_page_count: ocrResult.totalPages,
+    pages_processed: ocrResult.totalPages,
+    invoices: ocrResult.invoices,
+    rendered_image_mime_type: PDF_OCR_RENDERED_MIME,
   };
-
-  if (multiPageResult.processingStatus === 'failed') {
-    const firstErr = multiPageResult.pageResults.find((p) => !p.success)?.error;
-    await persistDocumentOcrResult(supabase, userId, documentId, {
-      processingStatus: 'failed',
-      extraction: multiPageResult.merged,
-      extractedText: JSON.stringify({ pages: multiPageResult.pageResults }, null, 2),
-      ocrError: firstErr
-        ? {
-            ...firstErr,
-            message: frenchOcrErrorMessage(firstErr.code, firstErr.message),
-          }
-        : {
-            step: 'ai_provider',
-            code: 'ocr_failed',
-            message: frenchOcrErrorMessage('ocr_failed'),
-          },
-      pdfMeta,
-      preserveFileMeta: {
-        filename: row.filename,
-        mimeType,
-        sizeBytes: row.size_bytes,
-        existingMetadata: row.metadata,
-      },
-    });
-    return {
-      ok: false,
-      status: 422,
-      code: firstErr?.code ?? 'ocr_failed',
-      message: firstErr?.message ?? 'All PDF pages failed OCR',
-    };
-  }
 
   const persist = await persistDocumentOcrResult(supabase, userId, documentId, {
     processingStatus: 'processed',
-    extraction: multiPageResult.merged,
-    extractedText: JSON.stringify(
-      { merged: multiPageResult.merged, pages: multiPageResult.pageResults, invoices: multiPageResult.invoices },
-      null,
-      2,
-    ),
+    extraction: ocrResult.merged,
+    extractedText: ocrResult.extractedText,
     pdfMeta,
-    preserveFileMeta: {
-      filename: row.filename,
-      mimeType,
-      sizeBytes: row.size_bytes,
-      existingMetadata: row.metadata,
-    },
+    preserveFileMeta: { filename: row.filename, mimeType, sizeBytes: row.size_bytes, existingMetadata: row.metadata },
   });
 
   if (!persist.ok) {
     return { ok: false, status: 500, code: 'db_update_failed', message: persist.error };
   }
 
-  logAtlasServerEvent('documents/ocr', 'info', 'pdf_ocr_complete', { documentId, userId });
+  logAtlasServerEvent('documents/ocr', 'info', 'pdf_ocr_complete', {
+    documentId,
+    userId,
+    totalPages: ocrResult.totalPages,
+    invoiceCount: ocrResult.invoices.length,
+  });
   return { ok: true };
 }
 

@@ -5,7 +5,7 @@ const nextConfig: NextConfig = {
   experimental: {
     proxyClientMaxBodySize: "55mb",
   },
-  serverExternalPackages: ["pdf-to-img", "pdfjs-dist", "sharp"],
+  serverExternalPackages: ["pdf-to-img", "pdfjs-dist", "sharp", "@napi-rs/canvas"],
 };
 
 export default nextConfig;

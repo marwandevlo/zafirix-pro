@@ -33,6 +33,8 @@ export type AtlasOcrError = {
   step: string;
   message: string;
   code: string;
+  /** Raw JS error message for server-side diagnostics (not shown in UI). */
+  raw_error?: string;
 };
 
 export type AtlasOcrExtraction = {
