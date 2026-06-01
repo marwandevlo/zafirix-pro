@@ -110,15 +110,19 @@ export async function POST(request: NextRequest) {
     fileSize: sizeBytes,
   });
 
-  scheduleVercelBackground(async () => {
-    const { executeDocumentOcrServer } = await import('@/app/lib/atlas-document-ocr-runner');
-    await executeDocumentOcrServer(userId, documentId, 'register');
-  });
+  // If an existing processed document was reused, skip OCR — it's already done.
+  if (!result.existingDocumentReused) {
+    scheduleVercelBackground(async () => {
+      const { executeDocumentOcrServer } = await import('@/app/lib/atlas-document-ocr-runner');
+      await executeDocumentOcrServer(userId, result.document.id, 'register');
+    });
+  }
 
   return NextResponse.json({
     document: result.document,
     ocrAccepted: result.ocrAccepted,
+    existingDocumentReused: result.existingDocumentReused ?? false,
     processingStatus: 'processing',
-    message: 'OCR en arrière-plan',
+    message: result.existingDocumentReused ? 'Document déjà analysé, résultat réutilisé.' : 'OCR en arrière-plan',
   });
 }

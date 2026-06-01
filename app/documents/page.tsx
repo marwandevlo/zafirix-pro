@@ -275,6 +275,7 @@ export default function DocumentsPage() {
   const ocrPollInFlightRef = useRef(false);
   const ocrPollingIdsRef = useRef<Set<string>>(new Set());
   const ocrRetriggeredRef = useRef<Set<string>>(new Set());
+  const [retryingOcrId, setRetryingOcrId] = useState<string | null>(null);
   const uploadQueueRef = useRef(0);
   const [localDocuments, setLocalDocuments] = useState<LocalOcrDocument[]>([]);
   const [ocrDocuments, setOcrDocuments] = useState<AtlasDocument[]>([]);
@@ -725,6 +726,28 @@ export default function DocumentsPage() {
     else await analyzeImageLocal(file);
   };
 
+  const retryOcrRow = async (row: OcrDisplayRow) => {
+    if (!row.supabaseId) return;
+    setRetryingOcrId(row.supabaseId);
+    setOcrError('');
+    try {
+      const res = await fetch(`/api/documents/${encodeURIComponent(row.supabaseId)}/ocr/run`, {
+        method: 'POST',
+        credentials: 'include',
+      });
+      if (!res.ok) {
+        const body = (await res.json().catch(() => ({}))) as { message?: string; code?: string };
+        setOcrError(body.message ?? "Erreur lors du relancement de l'analyse.");
+        return;
+      }
+      ocrRetriggeredRef.current.add(row.supabaseId);
+      enqueueOcrProgressPoll(row.supabaseId);
+      setOcrPageInfo('Analyse relancée…');
+    } finally {
+      setRetryingOcrId(null);
+    }
+  };
+
   const removeOcrRow = async (row: OcrDisplayRow) => {
     if (supabaseMode && row.supabaseId) {
       const res = await deleteAtlasDocument(row.supabaseId);
@@ -1113,6 +1136,15 @@ export default function DocumentsPage() {
                               className="text-xs font-medium text-emerald-700 hover:text-emerald-800"
                             >
                               Créer facture fournisseur
+                            </button>
+                          )}
+                          {supabaseMode && d.statut === 'erreur' && d.supabaseId && (
+                            <button
+                              onClick={() => void retryOcrRow(d)}
+                              disabled={retryingOcrId === d.supabaseId}
+                              className="text-xs font-medium text-rose-700 hover:text-rose-800 disabled:opacity-50"
+                            >
+                              {retryingOcrId === d.supabaseId ? 'Relancement\u2026' : "R\u00e9essayer l'analyse"}
                             </button>
                           )}
                           {supabaseMode && d.statut === 'analysé' && d.supabaseId && (d.creatableInvoiceCount ?? 0) > 0 && (

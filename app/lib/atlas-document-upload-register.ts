@@ -44,8 +44,10 @@ export type RegisterStoredDocumentResult =
         compressed: boolean;
       };
       ocrAccepted: true;
+      existingDocumentReused?: boolean;
     }
   | { ok: false; code: string; message: string; httpStatus: number };
+
 
 function registerFailure(
   code: string,
@@ -121,6 +123,46 @@ export async function registerStoredDocument(
   }
 
   const safeName = sanitizeDocumentFilename(filename);
+
+  // Idempotency guard: if a processed row already exists for same company+filename+size,
+  // reuse it instead of creating a duplicate that will fail OCR again.
+  const { data: existingProcessed } = await admin
+    .from('atlas_documents')
+    .select('id, filename, mime_type, size_bytes, storage_path, metadata, processing_status')
+    .eq('company_id', companyId)
+    .eq('user_id', userId)
+    .eq('filename', safeName)
+    .eq('size_bytes', sizeBytes)
+    .eq('processing_status', 'processed')
+    .eq('source', 'ocr')
+    .order('updated_at', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (existingProcessed?.id) {
+    logUploadStep('register_dedup', 'info', 'reusing_existing_processed_document', ctx, {
+      existingId: existingProcessed.id,
+      note: 'Same company+filename+size already processed — skipping duplicate insert',
+    });
+    // Remove the orphan storage object that was just uploaded for the new UUID
+    await admin.storage.from(ATLAS_DOCUMENTS_BUCKET).remove([storagePath]).catch(() => {});
+    return {
+      ok: true,
+      document: {
+        id: existingProcessed.id,
+        companyId,
+        filename: safeName,
+        mimeType,
+        sizeBytes,
+        storagePath: existingProcessed.storage_path ?? storagePath,
+        processingStatus: 'processing', // caller polls; DB is already processed
+        compressed: false,
+      },
+      ocrAccepted: true,
+      existingDocumentReused: true,
+    };
+  }
+
   let metadata: Record<string, unknown> = {
     storage: { original_storage_path: storagePath },
   };
