@@ -12,6 +12,9 @@ import {
   X,
   RotateCcw,
   Archive,
+  BookOpen,
+  Receipt,
+  ExternalLink,
 } from 'lucide-react';
 import type { AtlasDocument, AtlasExtractedField, AtlasStructuredExtraction } from '@/app/types/atlas-document';
 import {
@@ -27,6 +30,14 @@ import {
 } from '@/app/lib/atlas-document-routing';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
+
+type RoutingResult = {
+  module: string;
+  invoiceId?: string;
+  journalLineCount?: number;
+  tvaAmount?: number | null;
+  tvaSuggestionId?: string | null;
+};
 
 type ValidationCenterProps = {
   document: AtlasDocument;
@@ -187,6 +198,7 @@ export function ValidationCenter({ document, onClose, onValidated, onRetryOcr }:
   const [correction, setCorrection] = useState<CorrectionState | null>(null);
   const [validating, setValidating] = useState(false);
   const [routing, setRouting] = useState<string | null>(null);
+  const [routingResult, setRoutingResult] = useState<RoutingResult | null>(null);
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
   const [showLineItems, setShowLineItems] = useState(false);
 
@@ -260,7 +272,14 @@ export function ValidationCenter({ document, onClose, onValidated, onRetryOcr }:
         showMessage('error', b.message ?? `Échec de l'envoi vers ${label}.`);
         return;
       }
-      showMessage('success', `Document envoyé vers ${label}.`);
+      const data = await res.json().catch(() => ({})) as RoutingResult & { ok?: boolean };
+      setRoutingResult(data);
+      const journalCount = data.journalLineCount ?? 0;
+      const tvaAmt = data.tvaAmount;
+      let successMsg = `Document envoyé vers ${label}.`;
+      if (journalCount > 0) successMsg += ` ${journalCount} écritures créées.`;
+      if (tvaAmt != null && tvaAmt > 0) successMsg += ` TVA: ${tvaAmt.toLocaleString('fr-MA', { minimumFractionDigits: 2 })} MAD.`;
+      showMessage('success', successMsg);
       onValidated();
     } catch {
       showMessage('error', 'Erreur réseau. Réessayez.');
@@ -466,8 +485,55 @@ export function ValidationCenter({ document, onClose, onValidated, onRetryOcr }:
             </section>
           )}
 
+          {/* Post-routing confirmation */}
+          {routingResult && (
+            <section>
+              <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-3">Résultat de l'envoi</h3>
+              <div className="space-y-2">
+                {routingResult.invoiceId && (
+                  <div className="flex items-center gap-3 px-4 py-3 bg-green-50 border border-green-200 rounded-xl">
+                    <Receipt size={16} className="text-green-600 shrink-0" />
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-medium text-green-800">Facture fournisseur créée</p>
+                      <p className="text-xs text-green-600 font-mono truncate">#{routingResult.invoiceId.slice(0, 12)}…</p>
+                    </div>
+                    <a href="/comptabilite" className="text-green-600 hover:text-green-700 shrink-0">
+                      <ExternalLink size={14} />
+                    </a>
+                  </div>
+                )}
+                {(routingResult.journalLineCount ?? 0) > 0 && (
+                  <div className="flex items-center gap-3 px-4 py-3 bg-blue-50 border border-blue-200 rounded-xl">
+                    <BookOpen size={16} className="text-blue-600 shrink-0" />
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-medium text-blue-800">{routingResult.journalLineCount} écritures comptables (brouillon)</p>
+                      <p className="text-xs text-blue-600">Débit charges + TVA déductible · Crédit fournisseur</p>
+                    </div>
+                    <a href="/comptabilite" className="text-blue-600 hover:text-blue-700 shrink-0">
+                      <ExternalLink size={14} />
+                    </a>
+                  </div>
+                )}
+                {routingResult.tvaAmount != null && routingResult.tvaAmount > 0 && (
+                  <div className="flex items-center gap-3 px-4 py-3 bg-indigo-50 border border-indigo-200 rounded-xl">
+                    <Receipt size={16} className="text-indigo-600 shrink-0" />
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-medium text-indigo-800">TVA déductible enregistrée</p>
+                      <p className="text-xs text-indigo-600 font-medium">
+                        {routingResult.tvaAmount.toLocaleString('fr-MA', { minimumFractionDigits: 2 })} MAD
+                      </p>
+                    </div>
+                    <a href="/tva" className="text-indigo-600 hover:text-indigo-700 shrink-0">
+                      <ExternalLink size={14} />
+                    </a>
+                  </div>
+                )}
+              </div>
+            </section>
+          )}
+
           {/* Routing suggestions */}
-          {routingSuggestions.length > 0 && (
+          {routingSuggestions.length > 0 && !routingResult && (
             <section>
               <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-3">Actions recommandées</h3>
               <div className="space-y-2">
@@ -492,6 +558,19 @@ export function ValidationCenter({ document, onClose, onValidated, onRetryOcr }:
                   </button>
                 ))}
               </div>
+            </section>
+          )}
+
+          {/* Re-route option after first routing */}
+          {routingResult && routingSuggestions.length > 0 && (
+            <section>
+              <button
+                type="button"
+                onClick={() => setRoutingResult(null)}
+                className="text-xs text-gray-400 hover:text-gray-600 underline"
+              >
+                Envoyer vers un autre module
+              </button>
             </section>
           )}
         </div>
