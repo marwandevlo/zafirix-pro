@@ -1,6 +1,8 @@
 'use client';
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Upload, FileText, CheckCircle, Clock, Trash2, Sparkles, ShieldCheck } from 'lucide-react';
+import { Upload, FileText, CheckCircle, Clock, Trash2, Sparkles, ShieldCheck, Archive, History, Eye, Download, Share2, Wrench } from 'lucide-react';
+import { EntityActionMenu, ConfirmDeleteDialog, EntityHistoryDrawer } from '@/app/components/actions';
+import type { ActionItem } from '@/app/components/actions';
 import { ValidationCenter } from '@/app/documents/components/ValidationCenter';
 import {
   classificationFromDocument,
@@ -298,6 +300,8 @@ export default function DocumentsPage() {
   const [dragging, setDragging] = useState(false);
   const [analyzing, setAnalyzing] = useState(false);
   const [tab, setTab] = useState<'ocr' | 'library'>('ocr');
+  const [confirmDeleteRow, setConfirmDeleteRow] = useState<OcrDisplayRow | null>(null);
+  const [historyDocId, setHistoryDocId] = useState<string | null>(null);
 
   // Library state
   const [library, setLibrary] = useState<AtlasDocument[]>([]);
@@ -771,6 +775,19 @@ export default function DocumentsPage() {
     }
   };
 
+  const archiveDocument = async (row: OcrDisplayRow) => {
+    if (!supabaseMode || !row.supabaseId) return;
+    const res = await fetch(`/api/documents/${row.supabaseId}/archive`, {
+      method: 'PATCH',
+      credentials: 'include',
+    });
+    if (res.ok) {
+      await refreshOcr();
+    } else {
+      setOcrError('Archivage échoué. Réessayez.');
+    }
+  };
+
   const handleFiles = (fileList: FileList | File[]) => {
     const files = Array.from(fileList).slice(0, ATLAS_DOCUMENT_MAX_FILES_PER_BATCH);
     for (const file of files) {
@@ -1161,7 +1178,7 @@ export default function DocumentsPage() {
                         </div>
                       </td>
                       <td className="px-4 py-3">
-                        <div className="flex items-center justify-end gap-3">
+                        <div className="flex items-center justify-end gap-2">
                           {supabaseMode && d.statut === 'analysé' && d.supabaseId && (
                             <button
                               onClick={() => setValidationDocId(d.supabaseId!)}
@@ -1210,9 +1227,72 @@ export default function DocumentsPage() {
                               </button>
                             )
                           )}
-                          <button onClick={() => void removeOcrRow(d)} className="text-gray-300 hover:text-red-500 transition-colors">
-                            <Trash2 size={14} />
-                          </button>
+                          {/* Three-dot action menu */}
+                          <EntityActionMenu
+                            entityLabel={d.nom}
+                            actions={[
+                              {
+                                id: 'view',
+                                label: 'Consulter',
+                                Icon: Eye,
+                                onClick: () => {
+                                  if (supabaseMode && d.supabaseId) setValidationDocId(d.supabaseId);
+                                },
+                                hidden: !supabaseMode || !d.supabaseId,
+                              },
+                              {
+                                id: 'correct',
+                                label: 'Corriger',
+                                Icon: Wrench,
+                                onClick: () => {
+                                  if (supabaseMode && d.supabaseId) setValidationDocId(d.supabaseId);
+                                },
+                                hidden: !supabaseMode || d.statut !== 'analysé',
+                              },
+                              {
+                                id: 'download',
+                                label: 'Télécharger',
+                                Icon: Download,
+                                onClick: () => {},
+                                disabled: true,
+                                disabledReason: 'Téléchargement bientôt disponible',
+                                dividerAfter: true,
+                              },
+                              {
+                                id: 'share',
+                                label: 'Partager',
+                                Icon: Share2,
+                                onClick: () => {},
+                                disabled: true,
+                                disabledReason: 'Partage bientôt disponible',
+                              },
+                              {
+                                id: 'history',
+                                label: 'Historique',
+                                Icon: History,
+                                onClick: () => {
+                                  if (d.supabaseId) setHistoryDocId(d.supabaseId);
+                                },
+                                hidden: !supabaseMode || !d.supabaseId,
+                                dividerAfter: true,
+                              },
+                              {
+                                id: 'archive',
+                                label: 'Archiver',
+                                Icon: Archive,
+                                onClick: () => void archiveDocument(d),
+                                variant: 'warning',
+                                hidden: !supabaseMode || !d.supabaseId,
+                              },
+                              {
+                                id: 'delete',
+                                label: 'Supprimer',
+                                Icon: Trash2,
+                                onClick: () => setConfirmDeleteRow(d),
+                                variant: 'danger',
+                              },
+                            ] satisfies ActionItem[]}
+                          />
                         </div>
                       </td>
                     </tr>
@@ -1283,6 +1363,32 @@ export default function DocumentsPage() {
           );
         })()}
       </main>
+
+      {/* Confirm delete dialog */}
+      <ConfirmDeleteDialog
+        open={confirmDeleteRow !== null}
+        entityName={confirmDeleteRow?.nom ?? ''}
+        entityType="ce document"
+        showArchiveOption={supabaseMode && !!confirmDeleteRow?.supabaseId}
+        onConfirmDelete={() => {
+          if (confirmDeleteRow) void removeOcrRow(confirmDeleteRow);
+          setConfirmDeleteRow(null);
+        }}
+        onConfirmArchive={supabaseMode && confirmDeleteRow?.supabaseId ? () => {
+          if (confirmDeleteRow) void archiveDocument(confirmDeleteRow);
+          setConfirmDeleteRow(null);
+        } : undefined}
+        onCancel={() => setConfirmDeleteRow(null)}
+      />
+
+      {/* History drawer */}
+      <EntityHistoryDrawer
+        open={historyDocId !== null}
+        entityId={historyDocId ?? ''}
+        entityType="document"
+        entityLabel={ocrRows.find(r => r.supabaseId === historyDocId)?.nom ?? 'Document'}
+        onClose={() => setHistoryDocId(null)}
+      />
     </div>
   );
 }

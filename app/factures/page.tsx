@@ -1,6 +1,8 @@
 'use client';
 import { useEffect, useMemo, useState } from 'react';
-import { Plus, Trash2, Download, Send, ReceiptText, CheckCircle2, Wallet, AlertTriangle } from 'lucide-react';
+import { Plus, Trash2, Download, Send, ReceiptText, CheckCircle2, Wallet, AlertTriangle, Archive, History, Eye, Share2, Edit3 } from 'lucide-react';
+import { EntityActionMenu, ConfirmDeleteDialog, EntityHistoryDrawer } from '@/app/components/actions';
+import type { ActionItem } from '@/app/components/actions';
 import { useRouter } from 'next/navigation';
 import { addDaysYmd, isOverdue, todayYmd } from '@/app/lib/atlas-dates';
 import { deleteAtlasInvoice, atlasInvoiceErrorMessage, listAtlasInvoices, upsertAtlasInvoice } from '@/app/lib/atlas-invoices-repository';
@@ -398,11 +400,29 @@ export default function FacturesPage() {
     setPaymentForm({ openFor: null, amount: '', paidAt: todayYmd() });
   };
 
+  const [confirmDeleteId, setConfirmDeleteId] = useState<AtlasInvoice['id'] | null>(null);
+  const [historyInvoiceId, setHistoryInvoiceId] = useState<string | null>(null);
+
   const removeInvoice = (id: AtlasInvoice['id']) => {
     const updated = invoices.filter((inv) => inv.id !== id);
     setInvoices(updated);
     void deleteAtlasInvoice(id);
     syncInvoiceUsageCount(updated.length);
+  };
+
+  const archiveInvoice = async (id: AtlasInvoice['id']) => {
+    if (!isAtlasSupabaseDataEnabled()) {
+      removeInvoice(id);
+      return;
+    }
+    const res = await fetch(`/api/invoices/${String(id)}/archive`, {
+      method: 'PATCH',
+      credentials: 'include',
+    });
+    if (res.ok) {
+      setInvoices(prev => prev.filter(inv => inv.id !== id));
+      syncInvoiceUsageCount(invoices.length - 1);
+    }
   };
 
   return (
@@ -740,21 +760,72 @@ export default function FacturesPage() {
                             Relancer
                           </button>
                         )}
-                        <button
-                          onClick={() => downloadPdf(f)}
-                          className="text-gray-300 hover:text-blue-500 transition-colors"
-                          title="Télécharger le PDF"
-                        >
-                          <Download size={14} />
-                        </button>
-                        <button
-                          onClick={() => void sendInvoiceEmail(f)}
-                          className="text-gray-300 hover:text-emerald-600 transition-colors"
-                          title="Envoyer la facture (email pré-rempli)"
-                        >
-                          <Send size={14} />
-                        </button>
-                        <button onClick={() => removeInvoice(f.id)} className="text-gray-300 hover:text-red-500 transition-colors"><Trash2 size={14} /></button>
+                        <EntityActionMenu
+                          entityLabel={`Facture ${f.numero} · ${f.client}`}
+                          actions={[
+                            {
+                              id: 'view',
+                              label: 'Consulter',
+                              Icon: Eye,
+                              onClick: () => {},
+                              disabled: true,
+                              disabledReason: 'Aperçu bientôt disponible',
+                            },
+                            {
+                              id: 'edit',
+                              label: 'Modifier',
+                              Icon: Edit3,
+                              onClick: () => {},
+                              disabled: true,
+                              disabledReason: 'Modification bientôt disponible',
+                            },
+                            {
+                              id: 'download',
+                              label: 'Télécharger PDF',
+                              Icon: Download,
+                              onClick: () => downloadPdf(f),
+                              dividerAfter: true,
+                            },
+                            {
+                              id: 'send',
+                              label: 'Envoyer par email',
+                              Icon: Send,
+                              onClick: () => void sendInvoiceEmail(f),
+                            },
+                            {
+                              id: 'share',
+                              label: 'Partager',
+                              Icon: Share2,
+                              onClick: () => {},
+                              disabled: true,
+                              disabledReason: 'Partage bientôt disponible',
+                              dividerAfter: true,
+                            },
+                            {
+                              id: 'history',
+                              label: 'Historique',
+                              Icon: History,
+                              onClick: () => setHistoryInvoiceId(String(f.id)),
+                              hidden: !isAtlasSupabaseDataEnabled(),
+                              dividerAfter: true,
+                            },
+                            {
+                              id: 'archive',
+                              label: 'Archiver',
+                              Icon: Archive,
+                              onClick: () => void archiveInvoice(f.id),
+                              variant: 'warning',
+                              hidden: !isAtlasSupabaseDataEnabled(),
+                            },
+                            {
+                              id: 'delete',
+                              label: 'Supprimer',
+                              Icon: Trash2,
+                              onClick: () => setConfirmDeleteId(f.id),
+                              variant: 'danger',
+                            },
+                          ] satisfies ActionItem[]}
+                        />
                       </div>
                     </td>
                   </tr>
@@ -797,6 +868,38 @@ export default function FacturesPage() {
           )}
         </div>
       </main>
+
+      {/* Confirm delete/archive dialog */}
+      <ConfirmDeleteDialog
+        open={confirmDeleteId !== null}
+        entityName={(() => {
+          const inv = invoices.find(i => i.id === confirmDeleteId);
+          return inv ? `Facture ${inv.number} · ${inv.clientName}` : 'cette facture';
+        })()}
+        entityType="cette facture"
+        showArchiveOption={isAtlasSupabaseDataEnabled()}
+        onConfirmDelete={() => {
+          if (confirmDeleteId !== null) removeInvoice(confirmDeleteId);
+          setConfirmDeleteId(null);
+        }}
+        onConfirmArchive={isAtlasSupabaseDataEnabled() ? () => {
+          if (confirmDeleteId !== null) void archiveInvoice(confirmDeleteId);
+          setConfirmDeleteId(null);
+        } : undefined}
+        onCancel={() => setConfirmDeleteId(null)}
+      />
+
+      {/* History drawer */}
+      <EntityHistoryDrawer
+        open={historyInvoiceId !== null}
+        entityId={historyInvoiceId ?? ''}
+        entityType="invoice"
+        entityLabel={(() => {
+          const inv = invoices.find(i => String(i.id) === historyInvoiceId);
+          return inv ? `Facture ${inv.number} · ${inv.clientName}` : 'Facture';
+        })()}
+        onClose={() => setHistoryInvoiceId(null)}
+      />
     </div>
   );
 }
