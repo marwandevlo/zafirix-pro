@@ -1,6 +1,6 @@
 'use client';
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Upload, FileText, CheckCircle, Clock, Trash2, Sparkles, ShieldCheck, Archive, History, Eye, Download, Share2, Wrench, Mail, Link2, FileJson, FileSpreadsheet, FileCode2, Package } from 'lucide-react';
+import { Upload, FileText, CheckCircle, Clock, Trash2, Sparkles, ShieldCheck, Archive, History, Eye, Download, Share2, Wrench, Mail, Link2, FileJson, FileSpreadsheet, FileCode2, Package, CloudUpload, Loader2 as DriveLoader } from 'lucide-react';
 import { EntityActionMenu, ConfirmDeleteDialog, EntityHistoryDrawer } from '@/app/components/actions';
 import type { ActionItem } from '@/app/components/actions';
 import { SendEmailModal } from '@/app/documents/components/SendEmailModal';
@@ -305,6 +305,7 @@ export default function DocumentsPage() {
   const [historyDocId, setHistoryDocId] = useState<string | null>(null);
   const [emailModalDocId, setEmailModalDocId] = useState<string | null>(null);
   const [shareToast, setShareToast] = useState<string | null>(null);
+  const [driveBackingUpId, setDriveBackingUpId] = useState<string | null>(null);
 
   // Library state
   const [library, setLibrary] = useState<AtlasDocument[]>([]);
@@ -797,6 +798,31 @@ export default function DocumentsPage() {
     a.href = url;
     a.download = '';
     a.click();
+  };
+
+  const backupToGoogleDrive = async (documentId: string) => {
+    setDriveBackingUpId(documentId);
+    try {
+      const res = await fetch(`/api/documents/${documentId}/backup-to-drive`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ format: 'pdf' }),
+      });
+      const data = await res.json() as { ok?: boolean; error?: string; message?: string; driveUrl?: string };
+      if (data.ok && data.driveUrl) {
+        setShareToast('Sauvegardé sur Google Drive !');
+        setTimeout(() => setShareToast(null), 4000);
+      } else if (data.error === 'google_drive_not_connected') {
+        setOcrError('Google Drive non connecté. Configurez-le dans le Centre de sauvegarde (/backup).');
+      } else {
+        setOcrError(data.message ?? data.error ?? 'Sauvegarde échouée.');
+      }
+    } catch {
+      setOcrError('Erreur réseau lors de la sauvegarde Google Drive.');
+    } finally {
+      setDriveBackingUpId(null);
+    }
   };
 
   const shareDocumentLink = async (documentId: string) => {
@@ -1332,6 +1358,14 @@ export default function DocumentsPage() {
                                 Icon: Mail,
                                 onClick: () => { if (d.supabaseId) setEmailModalDocId(d.supabaseId); },
                                 hidden: !supabaseMode || !d.supabaseId || d.statut !== 'analysé',
+                              },
+                              {
+                                id: 'backup-drive',
+                                label: driveBackingUpId === d.supabaseId ? 'Sauvegarde…' : 'Sauvegarder Google Drive',
+                                Icon: driveBackingUpId === d.supabaseId ? DriveLoader : CloudUpload,
+                                onClick: () => { if (d.supabaseId && driveBackingUpId !== d.supabaseId) void backupToGoogleDrive(d.supabaseId); },
+                                hidden: !supabaseMode || !d.supabaseId || d.statut !== 'analysé',
+                                disabled: driveBackingUpId === d.supabaseId,
                               },
                               {
                                 id: 'history',
