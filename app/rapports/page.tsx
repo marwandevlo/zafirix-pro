@@ -15,6 +15,8 @@ import {
 } from 'lucide-react';
 import { AppSidebar } from '@/app/components/shell/AppSidebar';
 import { BetaSurfaceBadge } from '@/app/components/safety/BetaSurfaceBadge';
+import { ValidationQueueTable } from '@/app/components/validation/ValidationQueueTable';
+import { ValidationKpiCards } from '@/app/components/validation/ValidationKpiCards';
 import { getActiveCompanyDbRowId } from '@/app/lib/atlas-active-company';
 import { isAtlasSupabaseDataEnabled } from '@/app/lib/atlas-data-source';
 import { downloadCsvReport, downloadPdfReport } from '@/app/lib/atlas-reports-export';
@@ -66,6 +68,16 @@ function periodQuery(
   return base;
 }
 
+type ValidationStatusFilter = 'all' | 'draft' | 'reviewed' | 'validated' | 'rejected';
+
+const VALIDATION_FILTER_OPTS: { value: ValidationStatusFilter; label: string }[] = [
+  { value: 'all', label: 'Tous' },
+  { value: 'draft', label: 'Brouillons' },
+  { value: 'reviewed', label: 'Révisés' },
+  { value: 'validated', label: 'Validés' },
+  { value: 'rejected', label: 'Rejetés' },
+];
+
 export default function RapportsPage() {
   const supabaseEnabled = isAtlasSupabaseDataEnabled();
   const [companyId, setCompanyId] = useState<string | null>(null);
@@ -76,6 +88,7 @@ export default function RapportsPage() {
   const [customFrom, setCustomFrom] = useState('');
   const [customTo, setCustomTo] = useState('');
   const [exporting, setExporting] = useState<string | null>(null);
+  const [validationFilter, setValidationFilter] = useState<ValidationStatusFilter>('all');
 
   const reload = useCallback(async () => {
     setError('');
@@ -206,7 +219,46 @@ export default function RapportsPage() {
           </div>
         </header>
 
+        {/* Validation status filter chips */}
+        <div className="bg-white border-b border-gray-100 px-8 py-3 shrink-0 flex items-center gap-2 flex-wrap">
+          <span className="text-xs font-medium text-gray-400 mr-1">Statut Documents IA :</span>
+          {VALIDATION_FILTER_OPTS.map(opt => (
+            <button
+              key={opt.value}
+              type="button"
+              onClick={() => setValidationFilter(opt.value)}
+              className={`text-xs px-2.5 py-1 rounded-full border font-medium transition-colors ${
+                validationFilter === opt.value
+                  ? opt.value === 'draft' ? 'bg-amber-500 text-white border-amber-500'
+                    : opt.value === 'reviewed' ? 'bg-purple-600 text-white border-purple-600'
+                    : opt.value === 'validated' ? 'bg-green-600 text-white border-green-600'
+                    : opt.value === 'rejected' ? 'bg-red-600 text-white border-red-600'
+                    : 'bg-gray-900 text-white border-gray-900'
+                  : 'bg-white text-gray-600 border-gray-200 hover:bg-gray-50'
+              }`}
+            >
+              {opt.label}
+            </button>
+          ))}
+          <a href="/validation" className="ml-auto text-xs text-rose-600 hover:text-rose-700 font-medium border border-rose-200 px-2.5 py-1 rounded-full hover:bg-rose-50">
+            Centre de validation →
+          </a>
+        </div>
+
         <div className="flex-1 overflow-y-auto px-8 py-6 space-y-6">
+
+          {/* Validation KPIs — shown when filtering by status */}
+          {validationFilter !== 'all' && (
+            <div className="bg-white rounded-xl border border-gray-100 shadow-sm p-5 space-y-4">
+              <h2 className="text-sm font-bold text-gray-700">Métriques de validation Documents IA</h2>
+              <ValidationKpiCards />
+              <div className="mt-4">
+                <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-3">File d'attente par module</h3>
+                <ValidationQueueTable />
+              </div>
+            </div>
+          )}
+
           {loading && (
             <div className="flex items-center justify-center py-16 text-gray-400 gap-2">
               <Loader2 className="animate-spin" size={20} />

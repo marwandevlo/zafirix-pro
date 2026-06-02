@@ -33,6 +33,8 @@ import {
   isConfidentEnoughToRoute,
   STRICT_CONFIDENCE_MODULES,
 } from '@/app/lib/atlas-document-routing';
+import { RoutingCompletenessAlert } from '@/app/components/validation/RoutingCompletenessAlert';
+import { TvaConsistencyAlert } from '@/app/components/validation/TvaConsistencyAlert';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -578,6 +580,41 @@ export function ValidationCenter({ document, onClose, onValidated, onRetryOcr }:
                 )}
               </div>
             </section>
+          )}
+
+          {/* TVA Consistency Alert — shown when HT × rate ≠ detected TVA */}
+          {extraction && (
+            <TvaConsistencyAlert
+              amountHt={
+                extraction.subtotal_ht?.user_corrected_value != null
+                  ? parseFloat(String(extraction.subtotal_ht.user_corrected_value).replace(',', '.'))
+                  : typeof extraction.subtotal_ht?.value === 'number' ? extraction.subtotal_ht.value
+                  : extraction.subtotal_ht?.value != null ? parseFloat(String(extraction.subtotal_ht.value).replace(',', '.'))
+                  : null
+              }
+              vatRate={
+                extraction.tva_rate?.user_corrected_value != null
+                  ? parseFloat(String(extraction.tva_rate.user_corrected_value).replace(',', '.'))
+                  : typeof extraction.tva_rate?.value === 'number' ? extraction.tva_rate.value
+                  : extraction.tva_rate?.value != null ? parseFloat(String(extraction.tva_rate.value).replace(',', '.'))
+                  : null
+              }
+              vatAmount={
+                extraction.tva_amount?.user_corrected_value != null
+                  ? parseFloat(String(extraction.tva_amount.user_corrected_value).replace(',', '.'))
+                  : typeof extraction.tva_amount?.value === 'number' ? extraction.tva_amount.value
+                  : extraction.tva_amount?.value != null ? parseFloat(String(extraction.tva_amount.value).replace(',', '.'))
+                  : null
+              }
+            />
+          )}
+
+          {/* Routing Completeness Alert — shown when routed partially */}
+          {document.id && routedModules.length > 0 && (
+            <RoutingCompletenessAlert
+              documentId={document.id}
+              onRoute={module => void handleRouteTo(module, module)}
+            />
           )}
 
           {/* Duplicate warning */}

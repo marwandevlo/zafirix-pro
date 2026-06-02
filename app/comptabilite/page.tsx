@@ -12,6 +12,8 @@ import type { AtlasPayment } from '@/app/types/atlas-payment';
 import { fetchAi } from '@/app/lib/fetch-ai';
 import { AppSidebar } from '@/app/components/shell/AppSidebar';
 import { formatMadAmountLabel } from '@/app/lib/atlas-format';
+import { SourceDocumentBadge } from '@/app/components/SourceDocumentBadge';
+import { ValidationStatusBadge } from '@/app/components/validation/ValidationStatusBadge';
 import {
   listAtlasAccountingEntries,
   upsertAtlasAccountingEntry,
@@ -376,9 +378,19 @@ export default function ComptabilitePage() {
                   </tr>
                 ) : (
                   ecritures.map(e => (
-                    <tr key={e.id} className="border-b border-gray-50 hover:bg-gray-50">
+                    <tr key={e.id} className={`border-b border-gray-50 hover:bg-gray-50 ${e.sourceDocumentId ? 'border-l-2 border-l-blue-200' : ''}`}>
                       <td className="px-4 py-3 text-gray-500">{e.date}</td>
-                      <td className="px-4 py-3 text-gray-700">{e.libelle}</td>
+                      <td className="px-4 py-3 text-gray-700">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span>{e.libelle}</span>
+                          {e.sourceDocumentId && (
+                            <SourceDocumentBadge sourceDocumentId={e.sourceDocumentId} sourceDocumentType={e.sourceDocumentType} variant="compact" />
+                          )}
+                          {e.validationStatus && e.validationStatus !== 'draft' && (
+                            <ValidationStatusBadge status={e.validationStatus} size="xs" />
+                          )}
+                        </div>
+                      </td>
                       <td className="px-4 py-3 font-mono text-gray-600">{e.compte}</td>
                       <td className="px-4 py-3 text-right text-blue-600">{e.debit > 0 ? formatMadAmountLabel(e.debit) : '-'}</td>
                       <td className="px-4 py-3 text-right text-green-600">{e.credit > 0 ? formatMadAmountLabel(e.credit) : '-'}</td>

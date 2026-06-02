@@ -16,6 +16,7 @@ import {
   CreditCard,
   Shield,
   Tags,
+  ClipboardList,
 } from 'lucide-react';
 
 export type AtlasNavItemId =
@@ -25,6 +26,7 @@ export type AtlasNavItemId =
   | 'consultant'
   | 'agents'
   | 'documents'
+  | 'validation'
   | 'comptabilite'
   | 'factures'
   | 'juridique'
@@ -57,6 +59,7 @@ export const ATLAS_APP_NAV_ITEMS: AtlasAppNavItem[] = [
   { id: 'consultant', label: 'Assistant IA', labelAr: 'المساعد الذكي', icon: Brain, href: '/consultant' },
   { id: 'agents', label: 'Agents IA', labelAr: 'الوكلاء الذكيون', icon: Zap, href: '/agents' },
   { id: 'documents', label: 'Documents IA', labelAr: 'وثائق ذكية', icon: Upload, href: '/documents' },
+  { id: 'validation', label: 'Validation', labelAr: 'التحقق', icon: ClipboardList, href: '/validation' },
   { id: 'comptabilite', label: 'Comptabilité', labelAr: 'المحاسبة', icon: LayoutDashboard, href: '/comptabilite' },
   { id: 'factures', label: 'Factures', labelAr: 'الفواتير', icon: FileText, href: '/factures' },
   { id: 'juridique', label: 'Juridique', labelAr: 'القانونية', icon: Scale, href: '/juridique' },

@@ -8,4 +8,10 @@ export type AtlasAccountingEntry = {
   compte: string;
   debit: number;
   credit: number;
+  /** Traceability: DB row ID (uuid) — distinct from the JSON id field */
+  rowId?: string;
+  /** Set when this entry was created from Documents IA */
+  sourceDocumentId?: string | null;
+  sourceDocumentType?: string | null;
+  validationStatus?: string | null;
 };

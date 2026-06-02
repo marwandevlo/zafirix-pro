@@ -35,7 +35,7 @@ export async function listAtlasAccountingEntries(): Promise<AtlasAccountingEntry
 
   const { data, error } = await supabase
     .from('atlas_accounting_entries')
-    .select('entry_json')
+    .select('id, entry_json, source_document_id, validation_status')
     .order('entry_date', { ascending: true });
 
   if (error) {
@@ -44,9 +44,15 @@ export async function listAtlasAccountingEntries(): Promise<AtlasAccountingEntry
   }
 
   return (data ?? [])
-    .map((row: { entry_json: unknown }) => {
+    .map((row: { id: unknown; entry_json: unknown; source_document_id: unknown; validation_status: unknown }) => {
       const j = row.entry_json as AtlasAccountingEntry | null;
-      return j && typeof j === 'object' ? j : null;
+      if (!j || typeof j !== 'object') return null;
+      return {
+        ...j,
+        rowId: String(row.id ?? ''),
+        sourceDocumentId: (row.source_document_id as string | null) ?? null,
+        validationStatus: (row.validation_status as string | null) ?? 'draft',
+      } as AtlasAccountingEntry;
     })
     .filter((e): e is AtlasAccountingEntry => e !== null);
 }
