@@ -22,6 +22,10 @@ import { DashboardFunnelInsights } from '@/app/components/conversion/DashboardFu
 import { AppSidebar, AppSidebarMobileOverlay } from '@/app/components/shell/AppSidebar';
 import { ReferralDashboardCard } from '@/app/components/referral/ReferralDashboardCard';
 import { formatMadAmountLabel } from '@/app/lib/atlas-format';
+import { DashboardIaSection } from '@/app/components/dashboard/DashboardIaSection';
+import { LegalContractsWidget } from '@/app/components/dashboard/LegalContractsWidget';
+import { AuditStatsWidget } from '@/app/components/dashboard/AuditStatsWidget';
+import { AlertCenterWidget } from '@/app/components/dashboard/AlertCenterWidget';
 
 const ReferralPostOnboardingModal = dynamic(
   () =>
@@ -274,11 +278,27 @@ export default function Home() {
             </div>
           </div>
 
+          {/* ── Alert Center + Legal + Audit ────────────────────────────── */}
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 lg:gap-6">
+            <div className="lg:col-span-2">
+              <AlertCenterWidget />
+            </div>
+            <div className="lg:col-span-1">
+              <LegalContractsWidget />
+            </div>
+          </div>
+
+          {/* ── Documents IA — Validation KPIs + Queue ───────────────────── */}
+          <DashboardIaSection />
+
+          {/* ── Audit Activity + Usage ─────────────────────────────────── */}
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 lg:gap-6">
             <div className="lg:col-span-1">
               <UsageWidget />
             </div>
-            <div className="lg:col-span-2" />
+            <div className="lg:col-span-2">
+              <AuditStatsWidget />
+            </div>
           </div>
         </div>
       </main>

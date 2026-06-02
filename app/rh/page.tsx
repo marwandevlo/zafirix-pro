@@ -9,6 +9,7 @@ import { createDocument } from '@/app/lib/atlas-documents-repository';
 import { AppSidebar } from '@/app/components/shell/AppSidebar';
 import { RhEmployeesPanel } from '@/app/rh/RhEmployeesPanel';
 import { BetaSurfaceBadge } from '@/app/components/safety/BetaSurfaceBadge';
+import { EntityAuditTable } from '@/app/components/history/EntityAuditTable';
 
 type Company = {
   id: number;
@@ -156,7 +157,7 @@ export default function RHPage() {
   const [linking, setLinking] = useState(false);
   const [linkCompanyId, setLinkCompanyId] = useState<number | ''>('');
   const [linkStatus, setLinkStatus] = useState<string>('');
-  const [rhView, setRhView] = useState<'documents' | 'employees'>('documents');
+  const [rhView, setRhView] = useState<'documents' | 'employees' | 'historique'>('documents');
 
   useEffect(() => {
     void (async () => {
@@ -449,6 +450,13 @@ Genere UNIQUEMENT le document en texte propre, sans commentaires.`,
           >
             <FileText size={12} /> Documents RH
           </button>
+          <button
+            type="button"
+            onClick={() => setRhView('historique')}
+            className={`w-full flex items-center gap-2 px-3 py-2 rounded-lg text-xs transition-all mb-2 ${rhView === 'historique' ? 'bg-white/10 text-white' : 'text-white/30 hover:text-white/60'}`}
+          >
+            <FileCheck size={12} /> Historique
+          </button>
           {rhView === 'documents' && categories.map((cat) => {
             const Icon = categoryIcons[cat];
             return (
@@ -472,7 +480,11 @@ Genere UNIQUEMENT le document en texte propre, sans commentaires.`,
           <BetaSurfaceBadge label="Bêta · RH · Documents et paie à valider par expert-comptable / juriste" />
         </div>
         <div className="flex-1 flex overflow-hidden min-h-0">
-      {rhView === 'employees' ? (
+      {rhView === 'historique' ? (
+        <div className="flex-1 overflow-y-auto p-6">
+          <EntityAuditTable entityType="payroll_record" title="Historique — Activité RH" />
+        </div>
+      ) : rhView === 'employees' ? (
         <RhEmployeesPanel />
       ) : (
       <main className="flex-1 flex overflow-hidden">

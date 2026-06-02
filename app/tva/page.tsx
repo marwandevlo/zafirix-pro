@@ -16,6 +16,7 @@ import { AppSidebar } from '@/app/components/shell/AppSidebar';
 import { BetaSurfaceBadge } from '@/app/components/safety/BetaSurfaceBadge';
 import { ExportMenu } from '@/app/components/ExportMenu';
 import type { ExportColumn } from '@/app/components/ExportMenu';
+import { EntityAuditTable } from '@/app/components/history/EntityAuditTable';
 
 const TVA_LINE_EXPORT_COLUMNS: ExportColumn[] = [
   { key: 'reference', label: 'Référence' },
@@ -32,7 +33,7 @@ import { isAtlasSupabaseDataEnabled } from '@/app/lib/atlas-data-source';
 import { generateTvaDeclarationXml } from '@/app/lib/atlas-tva-xml';
 import type { AtlasTvaDashboard, AtlasTvaPeriodRecord } from '@/app/types/atlas-tva';
 
-type Tab = 'dashboard' | 'ventes' | 'achats' | 'historique';
+type Tab = 'dashboard' | 'ventes' | 'achats' | 'historique' | 'audit';
 
 async function tvaFetch<T>(path: string, init?: RequestInit): Promise<{ ok: boolean; data: T }> {
   const res = await fetch(path, {
@@ -163,6 +164,7 @@ export default function TVAPage() {
     { id: 'ventes', label: 'Ventes', icon: Receipt },
     { id: 'achats', label: 'Achats', icon: ShoppingCart },
     { id: 'historique', label: 'Historique', icon: History },
+    { id: 'audit', label: 'Activité IA', icon: History },
   ];
 
   if (!supabaseEnabled) {
@@ -343,6 +345,10 @@ export default function TVAPage() {
 
           {!loading && current && tab === 'achats' && (
             <InvoiceTable title="Factures achats (TVA déductible)" lines={purchaseLines} counterpartyLabel="Fournisseur" />
+          )}
+
+          {!loading && tab === 'audit' && (
+            <EntityAuditTable entityType="tva_suggestion" title="Activité IA — Suggestions TVA" />
           )}
 
           {!loading && tab === 'historique' && (

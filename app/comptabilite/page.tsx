@@ -16,6 +16,7 @@ import { SourceDocumentBadge } from '@/app/components/SourceDocumentBadge';
 import { ValidationStatusBadge } from '@/app/components/validation/ValidationStatusBadge';
 import { ExportMenu } from '@/app/components/ExportMenu';
 import type { ExportColumn } from '@/app/components/ExportMenu';
+import { EntityAuditTable } from '@/app/components/history/EntityAuditTable';
 
 const ECRITURE_EXPORT_COLUMNS: ExportColumn[] = [
   { key: 'date', label: 'Date' },
@@ -37,7 +38,7 @@ import type { AtlasAccountingEntry } from '@/app/types/atlas-accounting';
 type Ecriture = AtlasAccountingEntry;
 
 export default function ComptabilitePage() {
-  const [activeTab, setActiveTab] = useState<'journal' | 'grandlivre' | 'bilan'>('journal');
+  const [activeTab, setActiveTab] = useState<'journal' | 'grandlivre' | 'bilan' | 'historique'>('journal');
   const [invoices, setInvoices] = useState<AtlasInvoice[]>([]);
   const [supplierInvoices, setSupplierInvoices] = useState<AtlasSupplierInvoice[]>([]);
   const [payments, setPayments] = useState<AtlasPayment[]>([]);
@@ -184,7 +185,7 @@ export default function ComptabilitePage() {
   return (
     <div className="flex h-screen bg-gray-50">
       <AppSidebar variant="module">
-        {(['journal', 'grandlivre', 'bilan'] as const).map((tab) => (
+        {(['journal', 'grandlivre', 'bilan', 'historique'] as const).map((tab) => (
           <button
             key={tab}
             type="button"
@@ -192,7 +193,7 @@ export default function ComptabilitePage() {
             className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-all ${activeTab === tab ? 'bg-white/15 text-white' : 'text-white/50 hover:bg-white/10 hover:text-white'}`}
           >
             <BookOpen size={16} />
-            {tab === 'journal' ? 'Journal' : tab === 'grandlivre' ? 'Grand-livre' : 'Bilan'}
+            {tab === 'journal' ? 'Journal' : tab === 'grandlivre' ? 'Grand-livre' : tab === 'bilan' ? 'Bilan' : 'Historique'}
           </button>
         ))}
       </AppSidebar>
@@ -371,12 +372,15 @@ export default function ComptabilitePage() {
             </div>
           )}
 
-          <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
+          {activeTab === 'historique' && (
+            <EntityAuditTable entityType="accounting_entry" title="Historique — Écritures comptables" />
+          )}
+          <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden" style={{ display: activeTab === 'historique' ? 'none' : undefined }}>
             <div className="flex border-b border-gray-100">
-              {(['journal', 'grandlivre', 'bilan'] as const).map(tab => (
+              {(['journal', 'grandlivre', 'bilan', 'historique'] as const).map(tab => (
                 <button key={tab} onClick={() => setActiveTab(tab)}
                   className={`px-6 py-3 text-sm font-medium transition-all ${activeTab === tab ? 'border-b-2 border-blue-500 text-blue-600' : 'text-gray-400 hover:text-gray-600'}`}>
-                  {tab === 'journal' ? 'Journal' : tab === 'grandlivre' ? 'Grand-livre' : 'Bilan'}
+                  {tab === 'journal' ? 'Journal' : tab === 'grandlivre' ? 'Grand-livre' : tab === 'bilan' ? 'Bilan' : 'Historique'}
                 </button>
               ))}
             </div>

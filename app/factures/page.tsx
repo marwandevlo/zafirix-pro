@@ -30,6 +30,7 @@ import { trackOnboardingMilestoneOnce } from '@/app/lib/atlas-onboarding-milesto
 import { SourceDocumentBadge } from '@/app/components/SourceDocumentBadge';
 import { ExportMenu } from '@/app/components/ExportMenu';
 import type { ExportColumn } from '@/app/components/ExportMenu';
+import { EntityAuditTable } from '@/app/components/history/EntityAuditTable';
 
 const FACTURE_EXPORT_COLUMNS: ExportColumn[] = [
   { key: 'numero', label: 'Numéro' },
@@ -66,6 +67,7 @@ export default function FacturesPage() {
   const [invoices, setInvoices] = useState<AtlasInvoice[]>([]);
   const [payments, setPayments] = useState<AtlasPayment[]>([]);
   const [filter, setFilter] = useState<'all' | 'paid' | 'pending' | 'overdue'>('all');
+  const [activeTab, setActiveTab] = useState<'liste' | 'historique'>('liste');
   const [insight, setInsight] = useState<{ loading: boolean; text: string }>({ loading: false, text: '' });
   const [limitNotice, setLimitNotice] = useState('');
   const [limitModal, setLimitModal] = useState<{ open: boolean; variant: 'warning' | 'blocked'; title: string; desc: string }>({
@@ -699,9 +701,23 @@ export default function FacturesPage() {
               onPrimary={() => setShowForm(true)}
             />
           ) : (
-          <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
+          <>
+          {activeTab === 'historique' && (
+            <EntityAuditTable entityType="invoice" title="Historique — Factures clients" />
+          )}
+          <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden" style={{ display: activeTab === 'historique' ? 'none' : undefined }}>
             <div className="px-4 py-3 border-b border-gray-100 flex items-center justify-between gap-3">
-              <p className="text-sm font-semibold text-gray-700">Liste des factures</p>
+              <div className="flex items-center gap-3">
+                <p className="text-sm font-semibold text-gray-700">Liste des factures</p>
+                <div className="flex items-center bg-gray-100 rounded-lg p-0.5">
+                  {(['liste', 'historique'] as const).map(t => (
+                    <button key={t} type="button" onClick={() => setActiveTab(t)}
+                      className={`px-3 py-1 text-xs font-medium rounded-md transition-all ${activeTab === t ? 'bg-white text-gray-800 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>
+                      {t === 'liste' ? 'Liste' : 'Historique'}
+                    </button>
+                  ))}
+                </div>
+              </div>
               <div className="flex items-center gap-2">
                 <ExportMenu
                   data={filteredRows as unknown as Record<string, unknown>[]}
@@ -863,6 +879,7 @@ export default function FacturesPage() {
               </tbody>
             </table>
           </div>
+          </>
           )}
 
           {paymentForm.openFor !== null && (

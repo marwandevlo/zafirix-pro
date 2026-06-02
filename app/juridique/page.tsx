@@ -12,6 +12,7 @@ import { BetaSurfaceBadge } from '@/app/components/safety/BetaSurfaceBadge';
 import { JuridiqueDocumentsPanel } from '@/app/juridique/JuridiqueDocumentsPanel';
 import { JuridiqueFormalitesPanel } from '@/app/juridique/JuridiqueFormalitesPanel';
 import { JuridiqueModuleTabs, type JuridiqueTabId } from '@/app/juridique/JuridiqueModuleTabs';
+import { EntityAuditTable } from '@/app/components/history/EntityAuditTable';
 import { persistLegalDocument } from '@/app/juridique/juridique-persist';
 
 type Company = {
@@ -1266,6 +1267,10 @@ export default function JuridiquePage() {
           <ModificationsForm companies={companies} />
         ) : activeTab === 'formalites' ? (
           <JuridiqueFormalitesPanel companies={companies} />
+        ) : activeTab === 'historique' ? (
+          <div className="p-4 lg:p-6">
+            <EntityAuditTable entityType="legal_document" title="Historique — Contrats et documents juridiques" />
+          </div>
         ) : (
           <JuridiqueDocumentsPanel companies={companies} />
         )}

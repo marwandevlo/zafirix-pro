@@ -1,15 +1,16 @@
 'use client';
 
 import type { LucideIcon } from 'lucide-react';
-import { Building2, FileText, Landmark, RefreshCw, Scale } from 'lucide-react';
+import { Building2, History, Landmark, RefreshCw, Scale } from 'lucide-react';
 
-export type JuridiqueTabId = 'creation' | 'modifications' | 'formalites' | 'documents';
+export type JuridiqueTabId = 'creation' | 'modifications' | 'formalites' | 'documents' | 'historique';
 
 const TABS: { id: JuridiqueTabId; label: string; icon: LucideIcon }[] = [
   { id: 'creation', label: 'Création', icon: Building2 },
   { id: 'modifications', label: 'Modifications', icon: RefreshCw },
   { id: 'formalites', label: 'Formalités juridiques', icon: Landmark },
   { id: 'documents', label: 'Documents juridiques', icon: Scale },
+  { id: 'historique', label: 'Historique', icon: History },
 ];
 
 type Props = {
