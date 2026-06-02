@@ -44,7 +44,11 @@ export async function GET(request: NextRequest) {
   const oneHourAgo = new Date();
   oneHourAgo.setHours(oneHourAgo.getHours() - 1);
 
-  const [rejected, expiring, expired, stuck] = await Promise.all([
+  const fiscalYear = new Date().getFullYear();
+  const yearStart = `${fiscalYear}-01-01`;
+  const yearEnd = `${fiscalYear}-12-31`;
+
+  const [rejected, expiring, expired, stuck, bankTxRes, payslipRes, liasseRes, salesInvRes] = await Promise.all([
     // Rejected routing records
     admin.from('zafirix_routing_records')
       .select('id, source_document_id, target_module, target_entity_type, updated_at')
@@ -77,6 +81,34 @@ export async function GET(request: NextRequest) {
       .eq('processing_status', 'processing')
       .lt('created_at', oneHourAgo.toISOString())
       .limit(5),
+
+    // Phase 12 — unreconciled bank transactions (fiscal year)
+    admin.from('zafirix_bank_transactions')
+      .select('id, transaction_date, description, amount')
+      .eq('user_id', userId)
+      .gte('transaction_date', yearStart)
+      .lte('transaction_date', yearEnd)
+      .limit(100),
+
+    // Payroll drafts
+    admin.from('atlas_payslip_extractions')
+      .select('id, period_year, validation_status, employee_name')
+      .eq('user_id', userId)
+      .eq('validation_status', 'draft')
+      .limit(20),
+
+    // Liasse for current year
+    admin.from('zafirix_liasse_fiscale')
+      .select('id, fiscal_year, status, readiness_score')
+      .eq('user_id', userId)
+      .eq('fiscal_year', fiscalYear)
+      .maybeSingle(),
+
+    // TVA inconsistencies (sales invoices)
+    admin.from('atlas_invoices')
+      .select('id, amount_ht, vat_rate, vat_amount')
+      .eq('user_id', userId)
+      .limit(200),
   ]);
 
   const alerts: Alert[] = [];
@@ -125,6 +157,117 @@ export async function GET(request: NextRequest) {
       entity_id: String(c.id),
       entity_type: 'legal_document',
       created_at: c.expiry_date as string,
+    });
+  }
+
+  // ── Phase 12 Liasse alerts ─────────────────────────────────────────────────
+  const bankTx = bankTxRes.data ?? [];
+  const bankTxIds = bankTx.map(t => String(t.id));
+  let unreconciledBank = 0;
+  if (bankTxIds.length) {
+    const { data: recons } = await admin
+      .from('atlas_bank_reconciliation')
+      .select('transaction_id, status')
+      .in('transaction_id', bankTxIds);
+    const matched = new Set(
+      (recons ?? []).filter(r => r.status === 'matched').map(r => String(r.transaction_id)),
+    );
+    unreconciledBank = bankTx.filter(t => !matched.has(String(t.id))).length;
+  }
+  if (unreconciledBank > 0) {
+    alerts.push({
+      id: 'liasse-bank-unreconciled',
+      severity: unreconciledBank > 5 ? 'red' : 'orange',
+      category: 'Clôture fiscale',
+      title: 'Opérations bancaires non rapprochées',
+      description: `${unreconciledBank} opération(s) avant clôture fiscale`,
+      href: '/banque',
+      entity_type: 'bank_transaction',
+      created_at: new Date().toISOString(),
+    });
+  }
+
+  const draftPayslips = (payslipRes.data ?? []).filter(
+    p => Number(p.period_year) === fiscalYear,
+  );
+  if (draftPayslips.length > 0) {
+    alerts.push({
+      id: 'liasse-payroll-draft',
+      severity: 'red',
+      category: 'Clôture fiscale',
+      title: 'Bulletins de paie non validés',
+      description: `${draftPayslips.length} bulletin(s) en brouillon`,
+      href: '/rh',
+      entity_type: 'payslip',
+      created_at: new Date().toISOString(),
+    });
+  }
+
+  const { data: cnssPayslips } = await admin
+    .from('atlas_payslip_extractions')
+    .select('id, cnss_amount, cnss_number, period_year')
+    .eq('user_id', userId)
+    .eq('period_year', fiscalYear)
+    .limit(50);
+  const missingCnss = (cnssPayslips ?? []).filter(
+    p => !p.cnss_amount && !p.cnss_number,
+  ).length;
+  if (missingCnss > 0) {
+    alerts.push({
+      id: 'liasse-cnss-missing',
+      severity: 'red',
+      category: 'Clôture fiscale',
+      title: 'CNSS manquant avant clôture',
+      description: `${missingCnss} bulletin(s) sans données CNSS`,
+      href: '/rh',
+      entity_type: 'payslip',
+      created_at: new Date().toISOString(),
+    });
+  }
+
+  let tvaInconsistencies = 0;
+  for (const inv of salesInvRes.data ?? []) {
+    const ht = Number(inv.amount_ht ?? 0);
+    const rate = Number(inv.vat_rate ?? 20);
+    const expected = ht * (rate / 100);
+    const detected = Number(inv.vat_amount ?? 0);
+    if (ht > 0 && Math.abs(expected - detected) / ht > 0.05) tvaInconsistencies++;
+  }
+  if (tvaInconsistencies > 0) {
+    alerts.push({
+      id: 'liasse-tva-inconsistency',
+      severity: 'orange',
+      category: 'Clôture fiscale',
+      title: 'Incohérences TVA avant clôture',
+      description: `${tvaInconsistencies} facture(s) avec écart TVA`,
+      href: '/tva',
+      entity_type: 'invoice',
+      created_at: new Date().toISOString(),
+    });
+  }
+
+  if (!liasseRes.data) {
+    alerts.push({
+      id: 'liasse-not-generated',
+      severity: 'yellow',
+      category: 'Clôture fiscale',
+      title: `Liasse non générée pour ${fiscalYear}`,
+      description: 'Générez la liasse fiscale avant la clôture',
+      href: '/liasse',
+      entity_type: 'liasse_fiscale',
+      created_at: new Date().toISOString(),
+    });
+  } else if (Number(liasseRes.data.readiness_score ?? 0) < 50) {
+    alerts.push({
+      id: 'liasse-low-readiness',
+      severity: 'orange',
+      category: 'Clôture fiscale',
+      title: 'Score de clôture faible',
+      description: `Prêt pour clôture : ${liasseRes.data.readiness_score}%`,
+      href: '/liasse',
+      entity_id: String(liasseRes.data.id),
+      entity_type: 'liasse_fiscale',
+      created_at: new Date().toISOString(),
     });
   }
 

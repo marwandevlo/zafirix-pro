@@ -1,27 +1,29 @@
-feat: add PDF + ZIP export with company branding
+feat(phase-11): banking automation and payroll engine
 
-PDF export (app/lib/atlas-document-pdf-export.ts):
-- Full branded A4 PDF via jsPDF (Node.js server-side)
-- Red brand header with company name + ICE
-- Document metadata block
-- Classification section with confidence pill
-- Extracted fields tables (supplier + financial) with confidence dots
-- Line items table
-- Corrections log with amber highlights
-- Validation status block
-- Company identity footer block
-- Multi-page support with automatic page breaks and footers
+PHASE 11 ? Banking Automation & Payroll Engine
 
-ZIP export (app/lib/atlas-document-export.ts):
-- Bundles JSON + CSV + XML + XLSX into a single archive
-- Includes README.txt with document metadata
-- jszip installed, DEFLATE compression
+Module A ? Bank Statement Intelligence:
+- Migration: zafirix_bank_statements, zafirix_bank_transactions,
+  atlas_bank_reconciliation with indexes and RLS
+- Transaction extraction from OCR metadata + structured fields
+- route-to creates real statements + transactions (replaces stub)
+- Automatic reconciliation: sales invoices + supplier invoices
+- /banque page with filters, export, validation badges
+- APIs: /api/bank/transactions, reconciliation, alerts, dashboard
+- ReconciliationWidget + BankAlertCenter components
 
-Export API (app/api/documents/[id]/export/route.ts):
-- Now supports: json, csv, xml, xlsx, pdf, zip (6 formats)
-- PDF fetches company data for branding
-- All formats log to atlas_entity_events + zafirix_exports
+Module B ? Payroll Automation:
+- Migration: atlas_payslip_extractions linked to employees/payroll runs
+- Payslip extraction + confidence-based employee matching (75% threshold)
+- route-to creates payslip extractions (replaces stub)
+- RhPayrollPanel: bulletins, CNSS summary, IR summary + validation
+- APIs: /api/payroll/payslips, dashboard, alerts
+- PayrollDashboardSection on main dashboard
 
-Documents IA action menu:
-- Added: Telecharger PDF (real jsPDF)
-- Added: Telecharger ZIP (all formats bundled)
+Integration:
+- Validation cascade for bank_statement and payroll_record
+- atlas_audit_logs entity types: bank_statement, bank_transaction
+- Nav item /banque, validation queue links to /banque
+- Dashboard KPIs extended with bank + payroll metrics
+- docs/PHASE11_SCHEMA_ANALYSIS.md (Feature 9 report)
+- scripts/verify-phase11.mjs ? 153 PASS / 0 FAIL

@@ -29,6 +29,7 @@ import { AlertCenterWidget } from '@/app/components/dashboard/AlertCenterWidget'
 import { ReconciliationWidget } from '@/app/components/bank/ReconciliationWidget';
 import { BankAlertCenter } from '@/app/components/bank/BankAlertCenter';
 import { PayrollDashboardSection } from '@/app/components/payroll/PayrollDashboardSection';
+import { LiasseReadinessWidget } from '@/app/components/dashboard/LiasseReadinessWidget';
 
 const ReferralPostOnboardingModal = dynamic(
   () =>
@@ -292,9 +293,10 @@ export default function Home() {
           </div>
 
           {/* ── Banking & Payroll ─────────────────────────────────────────── */}
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 lg:gap-6">
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 lg:gap-6">
             <ReconciliationWidget />
             <BankAlertCenter compact />
+            <LiasseReadinessWidget />
           </div>
           <PayrollDashboardSection />
 

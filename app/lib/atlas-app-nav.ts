@@ -37,6 +37,7 @@ export type AtlasNavItemId =
   | 'rapports'
   | 'tva'
   | 'is'
+  | 'liasse'
   | 'ir'
   | 'subscription'
   | 'pricing'
@@ -71,6 +72,7 @@ export const ATLAS_APP_NAV_ITEMS: AtlasAppNavItem[] = [
   { id: 'rapports', label: 'Rapports', labelAr: 'التقارير', icon: FileText, href: '/rapports' },
   { id: 'tva', label: 'TVA', labelAr: 'الضريبة TVA', icon: Receipt, href: '/tva' },
   { id: 'is', label: 'IS Fiscal', labelAr: 'ضريبة الشركات', icon: Calculator, href: '/is' },
+  { id: 'liasse', label: 'Liasse fiscale', labelAr: 'الحزمة الضريبية', icon: ClipboardList, href: '/liasse' },
   { id: 'ir', label: 'IR / Salaires', labelAr: 'الرواتب والضرائب', icon: TrendingUp, href: '/ir' },
   { id: 'subscription', label: 'Abonnement', labelAr: 'الاشتراك', icon: CreditCard, href: '/subscription' },
   { id: 'pricing', label: 'Tarifs', labelAr: 'الأسعار', icon: Tags, href: '/pricing' },

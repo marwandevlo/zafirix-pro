@@ -32,6 +32,7 @@ export type AuditEntityType =
   | 'payroll_record'
   | 'bank_statement'
   | 'bank_transaction'
+  | 'liasse_fiscale'
   | 'routing_record'
   | 'export'
   | 'backup';
