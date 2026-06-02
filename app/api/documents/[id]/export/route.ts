@@ -1,5 +1,5 @@
 /**
- * GET /api/documents/[id]/export?format=json|csv|xml|xlsx
+ * GET /api/documents/[id]/export?format=json|csv|xml|xlsx|pdf|zip
  * Returns a downloadable file for the document.
  * Logs export to atlas_entity_events + zafirix_exports.
  */
@@ -11,14 +11,16 @@ import {
   exportToCsv,
   exportToXml,
   exportToXlsx,
+  exportToZip,
   exportFilename,
 } from '@/app/lib/atlas-document-export';
+import { generateDocumentPdf, documentPdfFilename } from '@/app/lib/atlas-document-pdf-export';
 import type { AtlasDocument } from '@/app/types/atlas-document';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
-const SUPPORTED_FORMATS = ['json', 'csv', 'xml', 'xlsx'] as const;
+const SUPPORTED_FORMATS = ['json', 'csv', 'xml', 'xlsx', 'pdf', 'zip'] as const;
 type ExportFormat = (typeof SUPPORTED_FORMATS)[number];
 
 const CONTENT_TYPES: Record<ExportFormat, string> = {
@@ -26,7 +28,18 @@ const CONTENT_TYPES: Record<ExportFormat, string> = {
   csv: 'text/csv; charset=utf-8',
   xml: 'application/xml; charset=utf-8',
   xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  pdf: 'application/pdf',
+  zip: 'application/zip',
 };
+
+function toArrayBuffer(body: string | Buffer | ArrayBuffer): ArrayBuffer {
+  if (body instanceof ArrayBuffer) return body;
+  if (typeof body === 'string') return new TextEncoder().encode(body).buffer as ArrayBuffer;
+  return (body as Buffer).buffer.slice(
+    (body as Buffer).byteOffset,
+    (body as Buffer).byteOffset + (body as Buffer).byteLength,
+  ) as ArrayBuffer;
+}
 
 export async function GET(
   request: NextRequest,
@@ -49,6 +62,7 @@ export async function GET(
 
   const admin = getSupabaseServiceRoleClient();
 
+  // Fetch document + company (for PDF branding)
   const { data: doc, error: fetchErr } = await admin
     .from('atlas_documents')
     .select('*')
@@ -60,36 +74,49 @@ export async function GET(
     return NextResponse.json({ error: 'document_not_found' }, { status: 404 });
   }
 
+  // Fetch company for branding (best-effort)
+  const docRecord = doc as Record<string, unknown>;
+  let company = null;
+  if (docRecord.company_id) {
+    const { data: co } = await admin
+      .from('atlas_companies')
+      .select('raisonSociale, ice, if_fiscal, rc, adresse, ville, telephone, email')
+      .eq('id', String(docRecord.company_id))
+      .maybeSingle();
+    company = co;
+  }
+
   // Build the export
-  let body: string | Buffer;
+  let body: string | Buffer | ArrayBuffer;
+  let filename: string;
+
   try {
-    if (format === 'json') body = exportToJson(doc as AtlasDocument);
-    else if (format === 'csv') body = exportToCsv(doc as AtlasDocument);
-    else if (format === 'xml') body = exportToXml(doc as AtlasDocument);
-    else body = await exportToXlsx(doc as AtlasDocument);
+    switch (format) {
+      case 'json': body = exportToJson(doc as AtlasDocument); break;
+      case 'csv':  body = exportToCsv(doc as AtlasDocument);  break;
+      case 'xml':  body = exportToXml(doc as AtlasDocument);  break;
+      case 'xlsx': body = await exportToXlsx(doc as AtlasDocument); break;
+      case 'pdf':  body = generateDocumentPdf(doc as AtlasDocument, company); break;
+      case 'zip':  body = await exportToZip(doc as AtlasDocument); break;
+    }
+    filename = format === 'pdf'
+      ? documentPdfFilename(doc as AtlasDocument)
+      : exportFilename(doc as AtlasDocument, format);
   } catch (err) {
     const msg = err instanceof Error ? err.message : 'export_failed';
     return NextResponse.json({ error: msg }, { status: 500 });
   }
 
-  const filename = exportFilename(doc as AtlasDocument, format);
+  const arrayBuffer = toArrayBuffer(body);
+  const sizeBytes = arrayBuffer.byteLength;
   const contentType = CONTENT_TYPES[format];
 
-  // Convert to ArrayBuffer for NextResponse compatibility
-  const arrayBuffer: ArrayBuffer = typeof body === 'string'
-    ? new TextEncoder().encode(body).buffer as ArrayBuffer
-    : (body as Buffer).buffer.slice(
-        (body as Buffer).byteOffset,
-        (body as Buffer).byteOffset + (body as Buffer).byteLength,
-      ) as ArrayBuffer;
-
-  const sizeBytes = arrayBuffer.byteLength;
-
   // Audit log (best-effort)
+  // zafirix_exports constraint allows: json|csv|xml|xlsx|pdf|zip|edi
   void Promise.all([
     admin.from('atlas_entity_events').insert({
       user_id: userId,
-      company_id: (doc as Record<string, unknown>).company_id ?? null,
+      company_id: docRecord.company_id ?? null,
       entity_type: 'document',
       entity_id: documentId,
       event_type: `exported_${format}`,
@@ -97,7 +124,7 @@ export async function GET(
     }),
     admin.from('zafirix_exports').insert({
       user_id: userId,
-      company_id: (doc as Record<string, unknown>).company_id ?? null,
+      company_id: docRecord.company_id ?? null,
       entity_type: 'document',
       entity_id: documentId,
       format,

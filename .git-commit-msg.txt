@@ -1,57 +1,27 @@
-﻿feat: Global Actions System -- EntityActionMenu, ConfirmDeleteDialog, EntityHistoryDrawer
+feat: add PDF + ZIP export with company branding
 
-## New reusable components (app/components/actions/)
+PDF export (app/lib/atlas-document-pdf-export.ts):
+- Full branded A4 PDF via jsPDF (Node.js server-side)
+- Red brand header with company name + ICE
+- Document metadata block
+- Classification section with confidence pill
+- Extracted fields tables (supplier + financial) with confidence dots
+- Line items table
+- Corrections log with amber highlights
+- Validation status block
+- Company identity footer block
+- Multi-page support with automatic page breaks and footers
 
-### EntityActionMenu
-- Three-dot (MoreHorizontal) trigger button
-- Desktop: absolute dropdown with click-outside close
-- Mobile (<640px): slides up from bottom as a portal-rendered sheet
-- Item variants: default / danger / warning / success
-- Disabled items show 'Bientôt disponible' tooltip
+ZIP export (app/lib/atlas-document-export.ts):
+- Bundles JSON + CSV + XML + XLSX into a single archive
+- Includes README.txt with document metadata
+- jszip installed, DEFLATE compression
 
-### ConfirmDeleteDialog
-- Portal-rendered modal with overlay
-- Offers 'Archiver' as a softer alternative to delete
-- Keyboard: Esc cancels; Cancel/Archive/Supprimer buttons
-- Business-critical data protection by default
+Export API (app/api/documents/[id]/export/route.ts):
+- Now supports: json, csv, xml, xlsx, pdf, zip (6 formats)
+- PDF fetches company data for branding
+- All formats log to atlas_entity_events + zafirix_exports
 
-### EntityHistoryDrawer
-- Right-side panel portal showing event timeline
-- Fetches from /api/entities/[type]/[id]/history (generic + zafirix_document_events)
-- Event icons + labels for 20+ event types
-- Supports propEvents (pre-loaded) or onFetchEvents callback
-
-### ShareExportMenu
-- Small Share2 trigger dropdown
-- Download PDF / Send email / Copy link actions
-
-### PermissionGuard
-- Permission-aware wrapper (owner / admin / viewer / any)
-- Forward-compatible with future RBAC system
-
-## New API routes
-- PATCH /api/documents/[id]/archive   -- soft-delete with audit log
-- PATCH /api/invoices/[id]/archive    -- soft-delete with audit log
-- GET  /api/entities/[type]/[id]/history  -- generic audit history
-
-## Migration: 20260602000000_global_actions_system.sql
-- atlas_entity_events: generic audit log table with RLS
-- archived_at columns on atlas_invoices, atlas_documents, atlas_supplier_invoices
-- Partial indexes for active (non-archived) rows
-
-## Documents IA integration
-- Three-dot EntityActionMenu per OCR row
-- Actions: Consulter, Corriger, Télécharger (disabled), Partager (disabled), Historique, Archiver, Supprimer
-- Primary contextual buttons (Valider, Réessayer, Créer facture) preserved
-- ConfirmDeleteDialog before hard delete; archive available in Supabase mode
-- EntityHistoryDrawer loads from /api/entities/document/[id]/history
-
-## Factures integration
-- Three-dot EntityActionMenu per invoice row
-- Actions: Consulter (disabled), Modifier (disabled), Télécharger PDF, Envoyer email, Partager (disabled), Historique, Archiver, Supprimer
-- Existing + Paiement and Relancer buttons preserved
-- archiveInvoice(): calls PATCH /api/invoices/[id]/archive then removes from local state
-- ConfirmDeleteDialog with archive option
-- EntityHistoryDrawer per invoice
-
-## Zero TypeScript errors
+Documents IA action menu:
+- Added: Telecharger PDF (real jsPDF)
+- Added: Telecharger ZIP (all formats bundled)

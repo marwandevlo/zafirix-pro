@@ -1,6 +1,6 @@
 'use client';
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Upload, FileText, CheckCircle, Clock, Trash2, Sparkles, ShieldCheck, Archive, History, Eye, Download, Share2, Wrench, Mail, Link2, FileJson, FileSpreadsheet, FileCode2 } from 'lucide-react';
+import { Upload, FileText, CheckCircle, Clock, Trash2, Sparkles, ShieldCheck, Archive, History, Eye, Download, Share2, Wrench, Mail, Link2, FileJson, FileSpreadsheet, FileCode2, Package } from 'lucide-react';
 import { EntityActionMenu, ConfirmDeleteDialog, EntityHistoryDrawer } from '@/app/components/actions';
 import type { ActionItem } from '@/app/components/actions';
 import { SendEmailModal } from '@/app/documents/components/SendEmailModal';
@@ -791,7 +791,7 @@ export default function DocumentsPage() {
     }
   };
 
-  const downloadDocumentExport = (documentId: string, format: 'json' | 'csv' | 'xml' | 'xlsx') => {
+  const downloadDocumentExport = (documentId: string, format: 'json' | 'csv' | 'xml' | 'xlsx' | 'pdf' | 'zip') => {
     const url = `/api/documents/${documentId}/export?format=${format}`;
     const a = window.document.createElement('a');
     a.href = url;
@@ -1302,6 +1302,20 @@ export default function DocumentsPage() {
                                 label: 'Télécharger Excel',
                                 Icon: FileSpreadsheet,
                                 onClick: () => { if (d.supabaseId) downloadDocumentExport(d.supabaseId, 'xlsx'); },
+                                hidden: !supabaseMode || !d.supabaseId || d.statut !== 'analysé',
+                              },
+                              {
+                                id: 'export-pdf',
+                                label: 'Télécharger PDF',
+                                Icon: Download,
+                                onClick: () => { if (d.supabaseId) downloadDocumentExport(d.supabaseId, 'pdf'); },
+                                hidden: !supabaseMode || !d.supabaseId || d.statut !== 'analysé',
+                              },
+                              {
+                                id: 'export-zip',
+                                label: 'Télécharger ZIP (tous formats)',
+                                Icon: Package,
+                                onClick: () => { if (d.supabaseId) downloadDocumentExport(d.supabaseId, 'zip'); },
                                 hidden: !supabaseMode || !d.supabaseId || d.statut !== 'analysé',
                                 dividerAfter: true,
                               },

@@ -300,11 +300,57 @@ export async function exportToXlsx(doc: AtlasDocument): Promise<Buffer> {
   return buffer;
 }
 
+// ── ZIP export ────────────────────────────────────────────────────────────────
+
+export async function exportToZip(doc: AtlasDocument): Promise<Buffer> {
+  const JSZip = (await import('jszip')).default;
+  const zip = new JSZip();
+
+  const base = (doc.filename ?? 'document').replace(/\.[^.]+$/, '').replace(/[^\w.-]+/g, '_').slice(0, 40);
+  const date = new Date().toISOString().slice(0, 10);
+
+  // Gather all formats
+  const [jsonStr, csvStr, xmlStr, xlsxBuf] = await Promise.all([
+    exportToJson(doc),
+    exportToCsv(doc),
+    exportToXml(doc),
+    exportToXlsx(doc),
+  ]);
+
+  zip.file(`${base}_${date}.json`, jsonStr);
+  zip.file(`${base}_${date}.csv`, csvStr);
+  zip.file(`${base}_${date}.xml`, xmlStr);
+  zip.file(`${base}_${date}.xlsx`, xlsxBuf);
+
+  // README
+  const payload = buildDocumentExportPayload(doc);
+  const readme = [
+    `Zafirix Pro — Documents IA Export`,
+    ``,
+    `Document  : ${payload.meta.filename}`,
+    `ID        : ${payload.meta.source_document_id}`,
+    `Type      : ${payload.meta.document_type}`,
+    `Statut    : ${payload.meta.validation_status}`,
+    `Exporté le: ${payload.meta.exported_at}`,
+    ``,
+    `Contenu de ce ZIP :`,
+    `  *.json  — données complètes (classification, extraction, corrections)`,
+    `  *.csv   — champs extraits tabulaires`,
+    `  *.xml   — format structuré XML (ZafirixDocument v1)`,
+    `  *.xlsx  — classeur Excel multi-feuilles`,
+    ``,
+    `Généré par Zafirix Pro — Documents IA`,
+  ].join('\n');
+  zip.file('README.txt', readme);
+
+  return zip.generateAsync({ type: 'nodebuffer', compression: 'DEFLATE' }) as Promise<Buffer>;
+}
+
 // ── Filename helpers ──────────────────────────────────────────────────────────
 
 export function exportFilename(doc: AtlasDocument, format: string): string {
   const base = (doc.filename ?? 'document').replace(/\.[^.]+$/, '').replace(/[^\w.-]+/g, '_').slice(0, 40);
   const dateStr = new Date().toISOString().slice(0, 10);
-  const ext = format === 'xlsx' ? 'xlsx' : format === 'json' ? 'json' : format === 'csv' ? 'csv' : format === 'xml' ? 'xml' : format;
+  const ext = format === 'xlsx' ? 'xlsx' : format === 'json' ? 'json' : format === 'csv' ? 'csv' : format === 'xml' ? 'xml' : format === 'zip' ? 'zip' : format === 'pdf' ? 'pdf' : format;
   return `zafirix_${base}_${dateStr}.${ext}`;
 }
