@@ -20,6 +20,15 @@ export type AtlasInvoice = {
   paidAt?: string;
   paidAmount?: number;
 
+  /** Traceability: set when invoice was created from Documents IA */
+  sourceDocumentId?: string | null;
+  sourceDocumentType?: string | null;
+  generatedBy?: string | null;
+  validationStatus?: string | null;
+
+  /** Raw DB row metadata (JSON column) */
+  metadata?: Record<string, unknown>;
+
   createdAt: string;
   updatedAt: string;
 };

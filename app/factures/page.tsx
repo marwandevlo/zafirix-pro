@@ -27,6 +27,7 @@ import { TrialLimitNudgeModal } from '@/app/components/trial/TrialLimitNudgeModa
 import { AppSidebar } from '@/app/components/shell/AppSidebar';
 import { EmptyStateCta } from '@/app/components/ui/EmptyStateCta';
 import { trackOnboardingMilestoneOnce } from '@/app/lib/atlas-onboarding-milestones';
+import { SourceDocumentBadge } from '@/app/components/SourceDocumentBadge';
 
 type FactureRow = {
   id: AtlasInvoice['id'];
@@ -41,6 +42,7 @@ type FactureRow = {
   paye: number;
   reste: number;
   statut: 'payée' | 'en attente' | 'en retard';
+  sourceDocumentId?: string | null;
 };
 
 export default function FacturesPage() {
@@ -214,6 +216,7 @@ export default function FacturesPage() {
         paye: paidAmount,
         reste: remaining,
         statut,
+        sourceDocumentId: inv.sourceDocumentId ?? null,
       };
     });
   }, [invoices, paymentsByInvoiceId]);
@@ -719,12 +722,15 @@ export default function FacturesPage() {
                 {filteredRows.map(f => (
                   <tr key={f.id} className={`border-b border-gray-50 hover:bg-gray-50 ${f.statut === 'en retard' ? 'bg-red-50/30' : ''}`}>
                     <td className="px-4 py-3 font-medium text-gray-700">
-                      <div className="flex items-center gap-2">
+                      <div className="flex items-center gap-2 flex-wrap">
                         <span>{f.numero}</span>
                         {f.statut === 'en retard' && (
                           <span className="text-[10px] uppercase tracking-wide bg-red-100 text-red-700 border border-red-200 px-2 py-0.5 rounded-full font-semibold">
                             Action requise
                           </span>
+                        )}
+                        {f.sourceDocumentId && (
+                          <SourceDocumentBadge sourceDocumentId={f.sourceDocumentId} sourceDocumentType="sales_invoice" variant="compact" />
                         )}
                       </div>
                     </td>

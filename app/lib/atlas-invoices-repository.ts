@@ -34,6 +34,7 @@ export function writeInvoicesToLocalStorage(invoices: AtlasInvoice[]): void {
 
 function rowToInvoice(row: Record<string, unknown>): AtlasInvoice {
   const metadata = asRecord(row.metadata);
+  const sourceDocId = (row.source_document_id as string | undefined) ?? (metadata?.source_document_id as string | undefined) ?? null;
   return {
     id: String(row.id),
     number: String(row.number ?? ''),
@@ -46,10 +47,14 @@ function rowToInvoice(row: Record<string, unknown>): AtlasInvoice {
     vatRate: Number(row.vat_rate ?? 0),
     vatAmount: Number(row.vat_amount ?? 0),
     totalTTC: Number(row.total_ttc ?? 0),
+    sourceDocumentId: sourceDocId,
+    sourceDocumentType: (row.source_document_type as string | undefined) ?? null,
+    generatedBy: (row.generated_by as string | undefined) ?? null,
+    validationStatus: (row.validation_status as string | undefined) ?? null,
+    metadata: metadata ?? undefined,
     createdAt: String(row.created_at ?? new Date().toISOString()),
     updatedAt: String(row.updated_at ?? row.created_at ?? new Date().toISOString()),
-    ...(metadata ? ({ metadata } as Record<string, unknown>) : {}),
-  } as AtlasInvoice;
+  };
 }
 
 export type ListAtlasInvoicesOptions = {

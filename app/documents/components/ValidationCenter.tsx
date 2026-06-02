@@ -15,6 +15,9 @@ import {
   BookOpen,
   Receipt,
   ExternalLink,
+  Zap,
+  CheckCheck,
+  Ban,
 } from 'lucide-react';
 import type { AtlasDocument, AtlasExtractedField, AtlasStructuredExtraction } from '@/app/types/atlas-document';
 import {
@@ -27,6 +30,8 @@ import {
   confidenceLabel,
   documentTypeLabel,
   getRoutingSuggestions,
+  isConfidentEnoughToRoute,
+  STRICT_CONFIDENCE_MODULES,
 } from '@/app/lib/atlas-document-routing';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -34,9 +39,19 @@ import {
 type RoutingResult = {
   module: string;
   invoiceId?: string;
+  legalDocId?: string;
   journalLineCount?: number;
   tvaAmount?: number | null;
   tvaSuggestionId?: string | null;
+  note?: string;
+  amountTtc?: number | null;
+};
+
+type DuplicateWarning = {
+  module: string;
+  label: string;
+  existingEntityId: string | null;
+  routedAt: string | null;
 };
 
 type ValidationCenterProps = {
@@ -198,7 +213,15 @@ export function ValidationCenter({ document, onClose, onValidated, onRetryOcr }:
   const [correction, setCorrection] = useState<CorrectionState | null>(null);
   const [validating, setValidating] = useState(false);
   const [routing, setRouting] = useState<string | null>(null);
+  const [routingAll, setRoutingAll] = useState(false);
   const [routingResult, setRoutingResult] = useState<RoutingResult | null>(null);
+  const [duplicateWarning, setDuplicateWarning] = useState<DuplicateWarning | null>(null);
+  const [routedModules, setRoutedModules] = useState<string[]>(() => {
+    const meta = (document as unknown as Record<string, unknown>).metadata;
+    if (!meta || typeof meta !== 'object') return [];
+    const routed = (meta as Record<string, unknown>).routed_to;
+    return Array.isArray(routed) ? (routed as string[]) : [];
+  });
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
   const [showLineItems, setShowLineItems] = useState(false);
 
@@ -258,8 +281,9 @@ export function ValidationCenter({ document, onClose, onValidated, onRetryOcr }:
     }
   }, [document.id, onValidated]);
 
-  const handleRouteTo = useCallback(async (module: string, label: string) => {
+  const handleRouteTo = useCallback(async (module: string, label: string): Promise<boolean> => {
     setRouting(module);
+    setDuplicateWarning(null);
     try {
       const res = await fetch(`/api/documents/${document.id}/route-to`, {
         method: 'POST',
@@ -267,26 +291,50 @@ export function ValidationCenter({ document, onClose, onValidated, onRetryOcr }:
         credentials: 'include',
         body: JSON.stringify({ module }),
       });
-      if (!res.ok) {
-        const b = await res.json().catch(() => ({})) as { message?: string };
-        showMessage('error', b.message ?? `Échec de l'envoi vers ${label}.`);
-        return;
+      const data = await res.json().catch(() => ({})) as RoutingResult & { ok?: boolean; duplicate?: boolean; existingEntityId?: string | null; routedAt?: string | null; message?: string };
+
+      if (data.duplicate) {
+        setDuplicateWarning({ module, label, existingEntityId: data.existingEntityId ?? null, routedAt: data.routedAt ?? null });
+        return false;
       }
-      const data = await res.json().catch(() => ({})) as RoutingResult & { ok?: boolean };
+
+      if (!res.ok) {
+        showMessage('error', data.message ?? `Échec de l'envoi vers ${label}.`);
+        return false;
+      }
+
       setRoutingResult(data);
+      setRoutedModules(prev => [...new Set([...prev, module])]);
+
       const journalCount = data.journalLineCount ?? 0;
       const tvaAmt = data.tvaAmount;
-      let successMsg = `Document envoyé vers ${label}.`;
+      let successMsg = `Envoyé vers ${label}.`;
       if (journalCount > 0) successMsg += ` ${journalCount} écritures créées.`;
       if (tvaAmt != null && tvaAmt > 0) successMsg += ` TVA: ${tvaAmt.toLocaleString('fr-MA', { minimumFractionDigits: 2 })} MAD.`;
       showMessage('success', successMsg);
       onValidated();
+      return true;
     } catch {
       showMessage('error', 'Erreur réseau. Réessayez.');
+      return false;
     } finally {
       setRouting(null);
     }
   }, [document.id, onValidated]);
+
+  const handleRouteAll = useCallback(async () => {
+    setRoutingAll(true);
+    let sent = 0;
+    for (const suggestion of routingSuggestions) {
+      if (routedModules.includes(suggestion.module)) continue;
+      if (suggestion.action === 'view_only') continue;
+      await handleRouteTo(suggestion.module, suggestion.label);
+      sent++;
+    }
+    if (sent === 0) showMessage('error', 'Tous les modules ont déjà reçu ce document.');
+    setRoutingAll(false);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [routingSuggestions, routedModules, handleRouteTo]);
 
   const visibleFields = extraction
     ? Object.entries(extraction).filter(([key, field]) => {
@@ -488,7 +536,7 @@ export function ValidationCenter({ document, onClose, onValidated, onRetryOcr }:
           {/* Post-routing confirmation */}
           {routingResult && (
             <section>
-              <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-3">Résultat de l'envoi</h3>
+              <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-3">Dernier envoi</h3>
               <div className="space-y-2">
                 {routingResult.invoiceId && (
                   <div className="flex items-center gap-3 px-4 py-3 bg-green-50 border border-green-200 rounded-xl">
@@ -532,45 +580,131 @@ export function ValidationCenter({ document, onClose, onValidated, onRetryOcr }:
             </section>
           )}
 
-          {/* Routing suggestions */}
-          {routingSuggestions.length > 0 && !routingResult && (
+          {/* Duplicate warning */}
+          {duplicateWarning && (
             <section>
-              <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-3">Actions recommandées</h3>
-              <div className="space-y-2">
-                {routingSuggestions.map(suggestion => (
-                  <button
-                    key={suggestion.module}
-                    type="button"
-                    onClick={() => void handleRouteTo(suggestion.module, suggestion.label)}
-                    disabled={routing !== null}
-                    className="w-full flex items-center gap-3 px-4 py-3 bg-white border border-gray-200 rounded-xl text-left hover:border-rose-300 hover:bg-rose-50 transition-colors disabled:opacity-50 group"
-                  >
-                    <span className="text-lg shrink-0">{suggestion.icon}</span>
-                    <div className="flex-1 min-w-0">
-                      <div className="text-sm font-medium text-gray-900 group-hover:text-rose-700">{suggestion.label}</div>
-                      <div className="text-xs text-gray-400">{suggestion.description}</div>
-                    </div>
-                    {routing === suggestion.module ? (
-                      <span className="text-xs text-rose-600">Envoi…</span>
-                    ) : (
-                      <Send size={14} className="text-gray-300 group-hover:text-rose-500 shrink-0" />
-                    )}
-                  </button>
-                ))}
+              <div className="flex items-start gap-3 px-4 py-3 bg-amber-50 border border-amber-200 rounded-xl">
+                <Ban size={16} className="text-amber-600 shrink-0 mt-0.5" />
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-semibold text-amber-800">Déjà envoyé vers {duplicateWarning.label}</p>
+                  {duplicateWarning.routedAt && (
+                    <p className="text-xs text-amber-600 mt-0.5">
+                      Envoyé le {new Date(duplicateWarning.routedAt).toLocaleDateString('fr-FR')}
+                      {duplicateWarning.existingEntityId ? ` · ID: #${duplicateWarning.existingEntityId.slice(0, 8)}` : ''}
+                    </p>
+                  )}
+                  <div className="flex gap-2 mt-2">
+                    <a
+                      href="/documents"
+                      className="text-xs px-2 py-1 border border-amber-300 text-amber-700 rounded-lg hover:bg-amber-100"
+                    >
+                      Voir l'enregistrement
+                    </a>
+                    <button
+                      type="button"
+                      onClick={() => setDuplicateWarning(null)}
+                      className="text-xs px-2 py-1 border border-amber-200 text-amber-600 rounded-lg hover:bg-amber-50"
+                    >
+                      Fermer
+                    </button>
+                  </div>
+                </div>
               </div>
             </section>
           )}
 
-          {/* Re-route option after first routing */}
-          {routingResult && routingSuggestions.length > 0 && (
+          {/* Routing suggestions — Actions recommandées */}
+          {routingSuggestions.length > 0 && (
             <section>
-              <button
-                type="button"
-                onClick={() => setRoutingResult(null)}
-                className="text-xs text-gray-400 hover:text-gray-600 underline"
-              >
-                Envoyer vers un autre module
-              </button>
+              <div className="flex items-center justify-between mb-3">
+                <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Actions recommandées</h3>
+                {routingSuggestions.filter(s => s.action !== 'view_only' && !routedModules.includes(s.module)).length > 1 && (
+                  <button
+                    type="button"
+                    onClick={() => void handleRouteAll()}
+                    disabled={routingAll || routing !== null}
+                    className="flex items-center gap-1.5 text-xs px-2.5 py-1 bg-rose-600 text-white rounded-lg hover:bg-rose-700 disabled:opacity-50 font-medium"
+                  >
+                    <Zap size={11} />
+                    {routingAll ? 'Envoi en cours…' : 'Tout envoyer'}
+                  </button>
+                )}
+              </div>
+
+              {/* Confidence gate warning */}
+              {classification && !isConfidentEnoughToRoute(classification.type_confidence) && (
+                <div className="flex items-start gap-2 px-3 py-2.5 bg-amber-50 border border-amber-200 rounded-xl mb-3">
+                  <AlertTriangle size={14} className="text-amber-600 shrink-0 mt-0.5" />
+                  <p className="text-xs text-amber-700">
+                    Confiance IA {Math.round(classification.type_confidence * 100)}% — sous le seuil de 90%.
+                    Vérifiez le type détecté avant d'envoyer vers les modules financiers.
+                  </p>
+                </div>
+              )}
+
+              <div className="space-y-2">
+                {routingSuggestions.map(suggestion => {
+                  const alreadyRouted = routedModules.includes(suggestion.module);
+                  const isViewOnly = suggestion.action === 'view_only';
+                  const needsConfirmation = !isConfidentEnoughToRoute(classification?.type_confidence ?? 1) && STRICT_CONFIDENCE_MODULES.has(suggestion.module);
+                  const isInProgress = routing === suggestion.module;
+
+                  if (alreadyRouted) {
+                    return (
+                      <div
+                        key={suggestion.module}
+                        className="flex items-center gap-3 px-4 py-3 bg-green-50 border border-green-200 rounded-xl"
+                      >
+                        <span className="text-lg shrink-0">{suggestion.icon}</span>
+                        <div className="flex-1 min-w-0">
+                          <div className="text-sm font-medium text-green-800">{suggestion.label}</div>
+                          <div className="text-xs text-green-600">{suggestion.description}</div>
+                        </div>
+                        <div className="flex items-center gap-1 shrink-0">
+                          <CheckCheck size={14} className="text-green-500" />
+                          <a href={suggestion.href} className="text-green-500 hover:text-green-600">
+                            <ExternalLink size={12} />
+                          </a>
+                        </div>
+                      </div>
+                    );
+                  }
+
+                  return (
+                    <button
+                      key={suggestion.module}
+                      type="button"
+                      onClick={() => {
+                        if (!isViewOnly) void handleRouteTo(suggestion.module, suggestion.label);
+                      }}
+                      disabled={routing !== null || routingAll || isViewOnly}
+                      title={isViewOnly ? 'Mis à jour automatiquement' : needsConfirmation ? 'Confiance faible — vérifiez avant envoi' : undefined}
+                      className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl text-left transition-colors group ${
+                        isViewOnly
+                          ? 'bg-gray-50 border border-gray-100 opacity-60 cursor-default'
+                          : needsConfirmation
+                          ? 'bg-amber-50 border border-amber-200 hover:border-amber-400 disabled:opacity-50'
+                          : 'bg-white border border-gray-200 hover:border-rose-300 hover:bg-rose-50 disabled:opacity-50'
+                      }`}
+                    >
+                      <span className="text-lg shrink-0">{suggestion.icon}</span>
+                      <div className="flex-1 min-w-0">
+                        <div className={`text-sm font-medium ${isViewOnly ? 'text-gray-500' : needsConfirmation ? 'text-amber-800 group-hover:text-amber-900' : 'text-gray-900 group-hover:text-rose-700'}`}>
+                          {suggestion.label}
+                          {isViewOnly && <span className="ml-1.5 text-xs text-gray-400 font-normal">(automatique)</span>}
+                          {needsConfirmation && <span className="ml-1.5 text-xs text-amber-600 font-normal">⚠ confiance faible</span>}
+                        </div>
+                        <div className="text-xs text-gray-400">{suggestion.description}</div>
+                      </div>
+                      {isInProgress ? (
+                        <span className="text-xs text-rose-600 shrink-0">Envoi…</span>
+                      ) : !isViewOnly ? (
+                        <Send size={14} className={`shrink-0 ${needsConfirmation ? 'text-amber-400' : 'text-gray-300 group-hover:text-rose-500'}`} />
+                      ) : null}
+                    </button>
+                  );
+                })}
+              </div>
             </section>
           )}
         </div>

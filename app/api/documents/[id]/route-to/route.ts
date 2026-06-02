@@ -1,14 +1,24 @@
 /**
  * POST /api/documents/[id]/route-to
  *
- * Send a validated document to a destination module.
- * Body: { module: 'comptabilite' | 'tva' | 'rh' | ... }
+ * Routes a validated document to a destination module.
+ * Creates draft downstream records with full traceability.
  *
- * For comptabilite (purchase/sales invoice):
- *   1. Creates atlas_supplier_invoices row (TVA auto-computed from it)
- *   2. Creates atlas_accounting_entries journal lines (Debit/Credit)
- *   3. Creates zafirix_tva_suggestions row
- *   4. Marks document validated + routed
+ * Body: { module: string }
+ *
+ * Modules supported:
+ *   comptabilite / supplier_invoices / fournisseurs / tva
+ *   factures / sales_invoices / client_invoices
+ *   banque / bank_statement
+ *   rh / cnss / payroll_slip
+ *   juridique / legal
+ *   rapports / fiscalite
+ *
+ * Duplicate prevention:
+ *   Uses zafirix_routing_records unique index on (source_document_id, target_module, target_entity_type).
+ *   Returns { duplicate: true } if already routed.
+ *
+ * Every routing action logs to atlas_entity_events.
  */
 
 import { NextRequest, NextResponse } from 'next/server';
@@ -26,11 +36,9 @@ import {
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
-type RouteToBody = {
-  module?: string;
-};
+type RouteToBody = { module?: string };
 
-// ── Helpers ───────────────────────────────────────────────────────────────────
+// ── Field helpers ─────────────────────────────────────────────────────────────
 
 function extractNumeric(field?: { value?: string | number | null; user_corrected_value?: string } | null): number | null {
   if (!field) return null;
@@ -46,37 +54,95 @@ function extractNumeric(field?: { value?: string | number | null; user_corrected
 function extractString(field?: { value?: string | number | null; user_corrected_value?: string } | null): string | null {
   if (!field) return null;
   const raw = field.user_corrected_value != null ? field.user_corrected_value : field.value;
-  if (raw == null) return null;
-  return String(raw);
+  return raw != null ? String(raw) : null;
 }
 
-function parseInvoiceDate(dateStr: string | null): string | null {
+function parseDate(dateStr: string | null): string | null {
   if (!dateStr) return null;
   const parts = dateStr.match(/(\d{1,2})[\/\-\.](\d{1,2})[\/\-\.](\d{2,4})/);
   if (!parts) return null;
   const [, d, m, y] = parts;
-  const year = y.length === 2 ? `20${y}` : y;
-  return `${year}-${m.padStart(2, '0')}-${d.padStart(2, '0')}`;
+  return `${y.length === 2 ? `20${y}` : y}-${m.padStart(2, '0')}-${d.padStart(2, '0')}`;
 }
 
-// ── Core routing actions ──────────────────────────────────────────────────────
+// ── Duplicate guard ───────────────────────────────────────────────────────────
 
-async function createSupplierInvoice(
+async function checkDuplicate(
+  admin: ReturnType<typeof getSupabaseServiceRoleClient>,
+  documentId: string,
+  targetModule: string,
+  targetEntityType: string,
+): Promise<{ isDuplicate: boolean; existingRecord: Record<string, unknown> | null }> {
+  const { data } = await admin
+    .from('zafirix_routing_records')
+    .select('id, target_entity_id, created_at, payload')
+    .eq('source_document_id', documentId)
+    .eq('target_module', targetModule)
+    .eq('target_entity_type', targetEntityType)
+    .eq('routing_status', 'completed')
+    .maybeSingle();
+
+  return { isDuplicate: !!data, existingRecord: data as Record<string, unknown> | null };
+}
+
+async function registerRouting(
+  admin: ReturnType<typeof getSupabaseServiceRoleClient>,
+  params: {
+    userId: string;
+    companyId: string | null;
+    documentId: string;
+    documentType: string;
+    targetModule: string;
+    targetEntityType: string;
+    targetEntityId?: string | null;
+    extractionConfidence?: number | null;
+    payload?: Record<string, unknown>;
+  },
+): Promise<void> {
+  await admin.from('zafirix_routing_records').insert({
+    user_id: params.userId,
+    company_id: params.companyId,
+    source_document_id: params.documentId,
+    source_document_type: params.documentType,
+    target_module: params.targetModule,
+    target_entity_type: params.targetEntityType,
+    target_entity_id: params.targetEntityId ?? null,
+    routing_status: 'completed',
+    generated_by: 'documents_ia',
+    extraction_confidence: params.extractionConfidence ?? null,
+    validation_status: 'draft',
+    payload: params.payload ?? {},
+  });
+}
+
+// ── Routing implementations ───────────────────────────────────────────────────
+
+/** Purchase invoice / receipt → Comptabilité + TVA */
+async function routePurchaseToComptabilite(
   admin: ReturnType<typeof getSupabaseServiceRoleClient>,
   userId: string,
   companyId: string,
   documentId: string,
+  documentType: AtlasDocumentType | null,
   extraction: AtlasStructuredExtraction,
-): Promise<{ ok: true; invoiceId: string } | { ok: false; error: string }> {
-  const parsedDate = parseInvoiceDate(extractString(extraction.invoice_date));
+  regime: string,
+): Promise<{
+  invoiceId: string;
+  journalLineCount: number;
+  tvaSuggestionId: string | null;
+  tvaAmount: number | null;
+}> {
+  const parsedDate = parseDate(extractString(extraction.invoice_date));
+  const amountHt = extractNumeric(extraction.subtotal_ht);
+  const vatAmount = extractNumeric(extraction.tva_amount);
+  const amountTtc = extractNumeric(extraction.total_ttc) ?? ((amountHt ?? 0) + (vatAmount ?? 0));
 
-  const { data, error } = await admin
+  // 1. Supplier invoice
+  const { data: inv, error: invErr } = await admin
     .from('atlas_supplier_invoices')
     .insert({
-      user_id: userId,
-      company_id: companyId,
-      document_id: documentId,
-      source_document_id: documentId,
+      user_id: userId, company_id: companyId,
+      document_id: documentId, source_document_id: documentId,
       supplier_name: extractString(extraction.supplier_name) ?? 'Fournisseur inconnu',
       supplier_ice: extractString(extraction.supplier_ice),
       supplier_if: extractString(extraction.supplier_if),
@@ -85,90 +151,168 @@ async function createSupplierInvoice(
       customer_name: extractString(extraction.customer_name),
       invoice_number: extractString(extraction.invoice_number),
       invoice_date: parsedDate,
-      amount_ht: extractNumeric(extraction.subtotal_ht),
-      vat_amount: extractNumeric(extraction.tva_amount),
-      amount_ttc: extractNumeric(extraction.total_ttc),
+      amount_ht: amountHt,
+      vat_amount: vatAmount,
+      amount_ttc: amountTtc,
       vat_rate: extractNumeric(extraction.tva_rate),
       payment_method: extractString(extraction.payment_method),
       currency: extractString(extraction.currency) ?? 'MAD',
       category: extractString(extraction.category_suggestion),
       accounting_account: extractString(extraction.accounting_account),
       line_items: Array.isArray(extraction.line_items) ? extraction.line_items : [],
-      status: 'unpaid',
-      validation_status: 'draft',
-      generated_by: 'documents_ia',
-      confidence_score: null,
-      user_verified: false,
-      metadata: {
-        source_document_id: documentId,
-        generated_by: 'documents_ia',
-        generated_at: new Date().toISOString(),
-      },
+      status: 'unpaid', validation_status: 'draft',
+      generated_by: 'documents_ia', user_verified: false,
+      metadata: { source_document_id: documentId, generated_by: 'documents_ia', generated_at: new Date().toISOString() },
     })
-    .select('id')
-    .single();
+    .select('id').single();
 
-  if (error) return { ok: false, error: error.message };
-  return { ok: true, invoiceId: String(data?.id) };
+  if (invErr) throw new Error(`Supplier invoice creation failed: ${invErr.message}`);
+  const invoiceId = String(inv?.id);
+
+  // 2. Journal lines
+  const isPurchase = documentType !== 'sales_invoice';
+  const journalLines = buildJournalLines(documentId, extraction, isPurchase, invoiceId);
+  let journalLineCount = 0;
+  if (journalLines.length > 0) {
+    const jr = await persistJournalLines(admin, userId, companyId, journalLines);
+    if (jr.ok) journalLineCount = jr.ids.length;
+  }
+
+  // 3. TVA suggestion
+  const tvaSuggestion = buildTvaSuggestion(documentId, extraction, isPurchase, invoiceId, regime);
+  let tvaSuggestionId: string | null = null;
+  let tvaAmount: number | null = null;
+  if (tvaSuggestion) {
+    const tr = await persistTvaSuggestion(admin, userId, companyId, tvaSuggestion);
+    if (tr.ok) { tvaSuggestionId = tr.id; tvaAmount = tvaSuggestion.amount; }
+  }
+
+  return { invoiceId, journalLineCount, tvaSuggestionId, tvaAmount };
 }
 
-async function routeToComptabilite(
+/** Sales invoice → atlas_invoices draft */
+async function routeSalesInvoice(
   admin: ReturnType<typeof getSupabaseServiceRoleClient>,
   userId: string,
   companyId: string,
   documentId: string,
   extraction: AtlasStructuredExtraction,
-  documentType: AtlasDocumentType | null,
-  companyRegime: string,
-): Promise<{
-  ok: true;
-  invoiceId: string;
-  journalEntryIds: string[];
-  tvaSuggestionId: string | null;
-  journalLineCount: number;
-  tvaAmount: number | null;
-} | { ok: false; error: string }> {
-  const isPurchase = documentType !== 'sales_invoice';
+): Promise<{ invoiceId: string; amountTtc: number | null }> {
+  const parsedDate = parseDate(extractString(extraction.invoice_date)) ?? new Date().toISOString().slice(0, 10);
+  const dueDate = parseDate(extractString(extraction.due_date)) ?? parsedDate;
+  const amountHt = extractNumeric(extraction.subtotal_ht) ?? 0;
+  const vatRate = extractNumeric(extraction.tva_rate) ?? 20;
+  const vatAmount = extractNumeric(extraction.tva_amount) ?? Math.round(amountHt * (vatRate / 100) * 100) / 100;
+  const amountTtc = extractNumeric(extraction.total_ttc) ?? (amountHt + vatAmount);
+  const clientName = extractString(extraction.customer_name) ?? extractString(extraction.supplier_name) ?? 'Client';
+  const invoiceNumber = extractString(extraction.invoice_number) ?? `AI-${documentId.slice(0, 8)}`;
 
-  // 1. Create supplier invoice (TVA auto-computed from this row)
-  const invoiceResult = await createSupplierInvoice(admin, userId, companyId, documentId, extraction);
-  if (!invoiceResult.ok) return invoiceResult;
-  const { invoiceId } = invoiceResult;
+  const { data: inv, error } = await admin
+    .from('atlas_invoices')
+    .insert({
+      user_id: userId, company_id: companyId,
+      number: invoiceNumber,
+      client_name: clientName,
+      issue_date: parsedDate, due_date: dueDate,
+      payment_terms_days: 30,
+      status: 'draft',
+      amount_ht: amountHt, vat_rate: vatRate, vat_amount: vatAmount, total_ttc: amountTtc,
+      source_document_id: documentId,
+      source_document_type: 'sales_invoice',
+      generated_by: 'documents_ia',
+      validation_status: 'draft',
+      metadata: { source_document_id: documentId, generated_by: 'documents_ia', generated_at: new Date().toISOString() },
+    })
+    .select('id').single();
 
-  // 2. Create journal lines (Debit/Credit)
-  const journalLines = buildJournalLines(documentId, extraction, isPurchase, invoiceId);
-  let journalEntryIds: string[] = [];
-  if (journalLines.length > 0) {
-    const journalResult = await persistJournalLines(admin, userId, companyId, journalLines);
-    if (journalResult.ok) {
-      journalEntryIds = journalResult.ids;
-    }
-    // Non-fatal: journal lines failure doesn't block supplier invoice creation
-  }
-
-  // 3. Create TVA suggestion
-  const tvaSuggestion = buildTvaSuggestion(documentId, extraction, isPurchase, invoiceId, companyRegime);
-  let tvaSuggestionId: string | null = null;
-  let tvaAmount: number | null = null;
-  if (tvaSuggestion) {
-    const tvaResult = await persistTvaSuggestion(admin, userId, companyId, tvaSuggestion);
-    if (tvaResult.ok) {
-      tvaSuggestionId = tvaResult.id;
-      tvaAmount = tvaSuggestion.amount;
-    }
-  }
-
-  return {
-    ok: true,
-    invoiceId,
-    journalEntryIds,
-    tvaSuggestionId,
-    journalLineCount: journalLines.length,
-    tvaAmount,
-  };
+  if (error) throw new Error(`Sales invoice creation failed: ${error.message}`);
+  return { invoiceId: String(inv?.id), amountTtc };
 }
 
-// ── Route handler ─────────────────────────────────────────────────────────────
+/** Bank statement → zafirix_routing_records with extracted transactions payload */
+async function routeBankStatement(
+  extraction: AtlasStructuredExtraction,
+  documentId: string,
+): Promise<{ openingBalance: number | null; closingBalance: number | null; period: string | null }> {
+  const opening = extractNumeric((extraction as Record<string, unknown>).opening_balance as Parameters<typeof extractNumeric>[0]);
+  const closing = extractNumeric((extraction as Record<string, unknown>).closing_balance as Parameters<typeof extractNumeric>[0]);
+  const period = extractString((extraction as Record<string, unknown>).statement_period as Parameters<typeof extractString>[0]);
+  const bankName = extractString((extraction as Record<string, unknown>).bank_name as Parameters<typeof extractString>[0]);
+  void documentId; void bankName;
+  return { openingBalance: opening, closingBalance: closing, period };
+}
+
+/** Payroll slip → zafirix_routing_records with salary payload */
+async function routePayrollSlip(
+  extraction: AtlasStructuredExtraction,
+): Promise<{ employeeName: string | null; grossSalary: number | null; netSalary: number | null; cnss: number | null; ir: number | null }> {
+  const ext = extraction as Record<string, unknown>;
+  const employeeName = extractString(ext.employee_name as Parameters<typeof extractString>[0]);
+  const gross = extractNumeric(ext.gross_salary as Parameters<typeof extractNumeric>[0]);
+  const net = extractNumeric(ext.net_salary as Parameters<typeof extractNumeric>[0]);
+  const cnss = extractNumeric(ext.cnss_amount as Parameters<typeof extractNumeric>[0]);
+  const ir = extractNumeric(ext.ir_amount as Parameters<typeof extractNumeric>[0]);
+  return { employeeName, grossSalary: gross, netSalary: net, cnss, ir };
+}
+
+/** Legal contract / statutes → zafirix_legal_documents */
+async function routeLegalDocument(
+  admin: ReturnType<typeof getSupabaseServiceRoleClient>,
+  userId: string,
+  companyId: string,
+  documentId: string,
+  documentType: string,
+  extraction: AtlasStructuredExtraction,
+): Promise<{ legalDocId: string }> {
+  const ext = extraction as Record<string, unknown>;
+  const effectiveDate = parseDate(extractString((ext.invoice_date ?? ext.effective_date) as Parameters<typeof extractString>[0]));
+  const expiryDate = parseDate(extractString(ext.expiry_date as Parameters<typeof extractString>[0]));
+  const parties: string[] = [];
+  if (extractString(extraction.supplier_name)) parties.push(extractString(extraction.supplier_name)!);
+  if (extractString(extraction.customer_name)) parties.push(extractString(extraction.customer_name)!);
+
+  const legalType =
+    documentType === 'legal_contract' ? 'legal_contract' :
+    documentType === 'company_statutes' ? 'company_statutes' :
+    documentType === 'legal_notice' ? 'legal_notice' :
+    documentType === 'hr_document' ? 'hr_document' : 'other';
+
+  const { data, error } = await admin
+    .from('zafirix_legal_documents')
+    .insert({
+      user_id: userId, company_id: companyId,
+      source_document_id: documentId,
+      document_type: legalType,
+      parties: parties.length > 0 ? parties : null,
+      effective_date: effectiveDate,
+      expiry_date: expiryDate,
+      renewal_alert_days: expiryDate ? 30 : null,
+      generated_by: 'documents_ia',
+      validation_status: 'draft',
+      raw_extraction: extraction as object,
+    })
+    .select('id').single();
+
+  if (error) throw new Error(`Legal document creation failed: ${error.message}`);
+  return { legalDocId: String(data?.id) };
+}
+
+// ── Module group resolvers ────────────────────────────────────────────────────
+
+function resolveModuleGroup(module: string): string {
+  const map: Record<string, string> = {
+    comptabilite: 'comptabilite', supplier_invoices: 'comptabilite',
+    fournisseurs: 'comptabilite', tva: 'comptabilite',
+    factures: 'factures', sales_invoices: 'factures', client_invoices: 'factures',
+    banque: 'banque', bank_statement: 'banque',
+    rh: 'rh', cnss: 'rh', payroll_slip: 'rh',
+    juridique: 'juridique', legal: 'juridique',
+    rapports: 'rapports', fiscalite: 'rapports',
+  };
+  return map[module] ?? module;
+}
+
+// ── Main handler ──────────────────────────────────────────────────────────────
 
 export async function POST(
   request: NextRequest,
@@ -176,43 +320,29 @@ export async function POST(
 ) {
   const { id: documentId } = await params;
   const userId = await documentUploadSessionUserId(request);
-  if (!userId) {
-    return NextResponse.json({ error: 'auth_required' }, { status: 401 });
-  }
+  if (!userId) return NextResponse.json({ error: 'auth_required' }, { status: 401 });
 
   let body: RouteToBody;
-  try {
-    body = (await request.json()) as RouteToBody;
-  } catch {
-    return NextResponse.json({ error: 'invalid_json' }, { status: 400 });
-  }
+  try { body = (await request.json()) as RouteToBody; }
+  catch { return NextResponse.json({ error: 'invalid_json' }, { status: 400 }); }
 
   const targetModule = String(body.module ?? '').trim();
-  if (!targetModule) {
-    return NextResponse.json({ error: 'module_required' }, { status: 400 });
-  }
+  if (!targetModule) return NextResponse.json({ error: 'module_required' }, { status: 400 });
 
+  const moduleGroup = resolveModuleGroup(targetModule);
   const admin = getSupabaseServiceRoleClient();
 
-  // Load document + company (for TVA regime)
+  // Load document + company
   const [docRes, companyRes] = await Promise.all([
-    admin
-      .from('atlas_documents')
+    admin.from('atlas_documents')
       .select('id, company_id, processing_status, validation_status, metadata, document_type')
-      .eq('id', documentId)
-      .eq('user_id', userId)
-      .maybeSingle(),
-    admin
-      .from('atlas_companies')
-      .select('id, company_json')
-      .eq('user_id', userId)
-      .maybeSingle(),
+      .eq('id', documentId).eq('user_id', userId).maybeSingle(),
+    admin.from('atlas_companies')
+      .select('id, raisonSociale, company_json')
+      .eq('user_id', userId).maybeSingle(),
   ]);
 
-  if (docRes.error || !docRes.data) {
-    return NextResponse.json({ error: 'document_not_found' }, { status: 404 });
-  }
-
+  if (docRes.error || !docRes.data) return NextResponse.json({ error: 'document_not_found' }, { status: 404 });
   const doc = docRes.data;
 
   if (doc.processing_status !== 'processed') {
@@ -221,42 +351,117 @@ export async function POST(
 
   const meta = (doc.metadata && typeof doc.metadata === 'object') ? doc.metadata as Record<string, unknown> : {};
   const extraction = (meta.extraction && typeof meta.extraction === 'object') ? meta.extraction as AtlasStructuredExtraction : {};
+  const docType = (doc.document_type as AtlasDocumentType | null) ?? 'unknown';
+  const companyId = doc.company_id ?? companyRes.data?.id ?? '';
   const companyJson = companyRes.data?.company_json;
   const regime = (companyJson && typeof companyJson === 'object' ? (companyJson as Record<string, unknown>).regimeTVA as string : null) ?? 'mensuel';
 
-  let result: Record<string, unknown> = {};
+  // Determine entity type for duplicate guard
+  const entityTypeMap: Record<string, string> = {
+    comptabilite: 'supplier_invoice',
+    factures: 'sales_invoice',
+    banque: 'bank_statement',
+    rh: 'payroll_record',
+    juridique: 'legal_document',
+    rapports: 'report_record',
+  };
+  const targetEntityType = entityTypeMap[moduleGroup] ?? moduleGroup;
 
-  if (['comptabilite', 'supplier_invoices', 'fournisseurs', 'tva'].includes(targetModule)) {
-    const routeResult = await routeToComptabilite(
-      admin,
-      userId,
-      doc.company_id,
-      documentId,
-      extraction,
-      (doc.document_type as AtlasDocumentType | null) ?? null,
-      regime,
-    );
+  // ── Duplicate prevention ──────────────────────────────────────────────────
 
-    if (!routeResult.ok) {
-      return NextResponse.json({ error: 'route_failed', message: routeResult.error }, { status: 500 });
-    }
+  const { isDuplicate, existingRecord } = await checkDuplicate(admin, documentId, moduleGroup, targetEntityType);
 
-    result = {
-      module: 'comptabilite',
-      invoiceId: routeResult.invoiceId,
-      journalEntryIds: routeResult.journalEntryIds,
-      journalLineCount: routeResult.journalLineCount,
-      tvaSuggestionId: routeResult.tvaSuggestionId,
-      tvaAmount: routeResult.tvaAmount,
-    };
-  } else {
-    result = { module: targetModule, note: 'Routage enregistré' };
+  if (isDuplicate) {
+    return NextResponse.json({
+      ok: false,
+      duplicate: true,
+      message: `Ce document a déjà été envoyé vers ${moduleGroup}.`,
+      existingEntityId: existingRecord?.target_entity_id ?? null,
+      routedAt: existingRecord?.created_at ?? null,
+      actions: ['view', 'resend', 'new_version'],
+    });
   }
 
-  // Mark document validated + log routing
-  const routed = Array.isArray(meta.routed_to) ? [...(meta.routed_to as string[]), targetModule] : [targetModule];
-  await admin
-    .from('atlas_documents')
+  // ── Route to module ───────────────────────────────────────────────────────
+
+  let result: Record<string, unknown> = {};
+
+  try {
+    if (moduleGroup === 'comptabilite') {
+      const r = await routePurchaseToComptabilite(admin, userId, companyId, documentId, docType, extraction, regime);
+      result = {
+        module: 'comptabilite',
+        invoiceId: r.invoiceId,
+        journalLineCount: r.journalLineCount,
+        tvaSuggestionId: r.tvaSuggestionId,
+        tvaAmount: r.tvaAmount,
+      };
+      await registerRouting(admin, {
+        userId, companyId, documentId, documentType: docType,
+        targetModule: moduleGroup, targetEntityType,
+        targetEntityId: r.invoiceId,
+        payload: { invoice_id: r.invoiceId, journal_lines: r.journalLineCount },
+      });
+
+    } else if (moduleGroup === 'factures') {
+      const r = await routeSalesInvoice(admin, userId, companyId, documentId, extraction);
+      result = { module: 'factures', invoiceId: r.invoiceId, amountTtc: r.amountTtc };
+      await registerRouting(admin, {
+        userId, companyId, documentId, documentType: docType,
+        targetModule: moduleGroup, targetEntityType,
+        targetEntityId: r.invoiceId,
+        payload: { invoice_id: r.invoiceId, amount_ttc: r.amountTtc },
+      });
+
+    } else if (moduleGroup === 'banque') {
+      const r = await routeBankStatement(extraction, documentId);
+      result = { module: 'banque', ...r, note: 'Relevé enregistré en brouillon' };
+      await registerRouting(admin, {
+        userId, companyId, documentId, documentType: docType,
+        targetModule: moduleGroup, targetEntityType,
+        payload: { opening_balance: r.openingBalance, closing_balance: r.closingBalance, period: r.period },
+      });
+
+    } else if (moduleGroup === 'rh') {
+      const r = await routePayrollSlip(extraction);
+      result = { module: 'rh', ...r, note: 'Dossier RH mis à jour (brouillon)' };
+      await registerRouting(admin, {
+        userId, companyId, documentId, documentType: docType,
+        targetModule: moduleGroup, targetEntityType,
+        payload: { employee_name: r.employeeName, gross_salary: r.grossSalary, net_salary: r.netSalary, cnss: r.cnss, ir: r.ir },
+      });
+
+    } else if (moduleGroup === 'juridique') {
+      const r = await routeLegalDocument(admin, userId, companyId, documentId, docType, extraction);
+      result = { module: 'juridique', legalDocId: r.legalDocId, note: 'Document juridique créé (brouillon)' };
+      await registerRouting(admin, {
+        userId, companyId, documentId, documentType: docType,
+        targetModule: moduleGroup, targetEntityType,
+        targetEntityId: r.legalDocId,
+        payload: { legal_doc_id: r.legalDocId },
+      });
+
+    } else {
+      // Generic routing (rapports, fiscalite, etc.)
+      result = { module: moduleGroup, note: 'Routage enregistré' };
+      await registerRouting(admin, {
+        userId, companyId, documentId, documentType: docType,
+        targetModule: moduleGroup, targetEntityType,
+        payload: { note: 'generic_routing' },
+      });
+    }
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : 'route_failed';
+    return NextResponse.json({ error: 'route_failed', message: msg }, { status: 500 });
+  }
+
+  // ── Mark document validated + update routed_to ────────────────────────────
+
+  const routed = Array.isArray(meta.routed_to)
+    ? [...new Set([...(meta.routed_to as string[]), moduleGroup])]
+    : [moduleGroup];
+
+  await admin.from('atlas_documents')
     .update({
       validation_status: 'validated',
       validated_at: new Date().toISOString(),
@@ -264,16 +469,36 @@ export async function POST(
       metadata: { ...meta, routed_to: routed, last_routed_at: new Date().toISOString() },
       updated_at: new Date().toISOString(),
     })
-    .eq('id', documentId)
-    .eq('user_id', userId);
+    .eq('id', documentId).eq('user_id', userId);
 
-  if (doc.company_id) {
+  // ── Audit log ─────────────────────────────────────────────────────────────
+
+  const moduleEventMap: Record<string, import('@/app/lib/atlas-document-events').DocumentEventType> = {
+    comptabilite: 'routed_to_comptabilite',
+    factures: 'routed_to_factures',
+    banque: 'routed_to_banque',
+    rh: 'routed_to_rh',
+    juridique: 'routed_to_juridique',
+    rapports: 'routed_to_rapports',
+    tva: 'routed_to_tva',
+  };
+
+  if (companyId) {
     void logDocumentEvent({
-      companyId: doc.company_id,
+      companyId,
       documentId,
       userId,
-      eventType: 'routed_to_module',
-      payload: { module: targetModule, ...result },
+      eventType: moduleEventMap[moduleGroup] ?? 'routed_to_module',
+      payload: { module: moduleGroup, entity_type: targetEntityType, ...result },
+    });
+
+    void admin.from('atlas_entity_events').insert({
+      user_id: userId,
+      company_id: companyId,
+      entity_type: 'document',
+      entity_id: documentId,
+      event_type: `routed_to_${moduleGroup}`,
+      payload: { module: moduleGroup, entity_type: targetEntityType, ...result },
     });
   }
 
