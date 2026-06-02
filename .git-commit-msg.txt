@@ -1,39 +1,57 @@
-﻿feat: Documents IA accounting engine -- Phases 3-6
+﻿feat: Global Actions System -- EntityActionMenu, ConfirmDeleteDialog, EntityHistoryDrawer
 
-Implements the full Documents IA → Comptabilité → TVA workflow.
+## New reusable components (app/components/actions/)
 
-## Accounting Engine (Phase 5)
-- New lib: atlas-documents-accounting-engine.ts
-  - buildJournalLines(): Moroccan PCGE Debit/Credit entries
-    * Purchase: Debit 61xxxx (charges HT) + Debit 34551 (TVA déductible) + Credit 44100 (fournisseur)
-    * Sales:    Debit 34210 (client TTC)   + Credit 71100 (CA HT) + Credit 44550 (TVA collectée)
-    * Account codes resolved from category/AI suggestion, fallback to 61200
-  - persistJournalLines(): bulk insert to atlas_accounting_entries with source_document_id
-  - buildTvaSuggestion(): per-invoice TVA draft with rate, period_key, base_ht, source linkage
-  - persistTvaSuggestion(): inserts to zafirix_tva_suggestions
+### EntityActionMenu
+- Three-dot (MoreHorizontal) trigger button
+- Desktop: absolute dropdown with click-outside close
+- Mobile (<640px): slides up from bottom as a portal-rendered sheet
+- Item variants: default / danger / warning / success
+- Disabled items show 'Bientôt disponible' tooltip
 
-## TVA Engine (Phase 6)
-- zafirix_tva_suggestions table: per-invoice TVA draft with status tracking
-- TVA collectée/déductible auto-computed by existing computeTvaPeriod() from atlas_supplier_invoices
-- New TVA suggestion persisted alongside supplier invoice for explicit audit trail
+### ConfirmDeleteDialog
+- Portal-rendered modal with overlay
+- Offers 'Archiver' as a softer alternative to delete
+- Keyboard: Esc cancels; Cancel/Archive/Supprimer buttons
+- Business-critical data protection by default
 
-## Traceability (Phase 7)
-- Every atlas_accounting_entries row now carries source_document_id + source_invoice_id
-- Every zafirix_tva_suggestions row linked to source_document_id + source_invoice_id
-- route-to creates: supplier_invoice → journal_lines → tva_suggestion atomically
+### EntityHistoryDrawer
+- Right-side panel portal showing event timeline
+- Fetches from /api/entities/[type]/[id]/history (generic + zafirix_document_events)
+- Event icons + labels for 20+ event types
+- Supports propEvents (pre-loaded) or onFetchEvents callback
 
-## Route-to API rewrite
-- Loads company TVA regime (mensuel/trimestriel) for correct period_key
-- All accounting modules (comptabilite, supplier_invoices, fournisseurs, tva) → full flow
-- Returns: { invoiceId, journalLineCount, journalEntryIds, tvaSuggestionId, tvaAmount }
+### ShareExportMenu
+- Small Share2 trigger dropdown
+- Download PDF / Send email / Copy link actions
 
-## Validation Center (Phase 5 UI)
-- Post-routing confirmation panel:
-  * Green: Facture fournisseur créée (with link to /comptabilite)
-  * Blue:  N écritures comptables créées (Debit/Credit)
-  * Indigo: TVA déductible XXX MAD (with link to /tva)
-- Routing suggestions hidden after first routing; "Envoyer vers autre module" toggle
+### PermissionGuard
+- Permission-aware wrapper (owner / admin / viewer / any)
+- Forward-compatible with future RBAC system
 
-## Migration: 20260601230000_documents_ia_accounting_engine.sql
-- atlas_accounting_entries: + source_document_id, source_invoice_id, generated_by, validation_status
-- zafirix_tva_suggestions table with RLS (select/insert own + service role insert)
+## New API routes
+- PATCH /api/documents/[id]/archive   -- soft-delete with audit log
+- PATCH /api/invoices/[id]/archive    -- soft-delete with audit log
+- GET  /api/entities/[type]/[id]/history  -- generic audit history
+
+## Migration: 20260602000000_global_actions_system.sql
+- atlas_entity_events: generic audit log table with RLS
+- archived_at columns on atlas_invoices, atlas_documents, atlas_supplier_invoices
+- Partial indexes for active (non-archived) rows
+
+## Documents IA integration
+- Three-dot EntityActionMenu per OCR row
+- Actions: Consulter, Corriger, Télécharger (disabled), Partager (disabled), Historique, Archiver, Supprimer
+- Primary contextual buttons (Valider, Réessayer, Créer facture) preserved
+- ConfirmDeleteDialog before hard delete; archive available in Supabase mode
+- EntityHistoryDrawer loads from /api/entities/document/[id]/history
+
+## Factures integration
+- Three-dot EntityActionMenu per invoice row
+- Actions: Consulter (disabled), Modifier (disabled), Télécharger PDF, Envoyer email, Partager (disabled), Historique, Archiver, Supprimer
+- Existing + Paiement and Relancer buttons preserved
+- archiveInvoice(): calls PATCH /api/invoices/[id]/archive then removes from local state
+- ConfirmDeleteDialog with archive option
+- EntityHistoryDrawer per invoice
+
+## Zero TypeScript errors

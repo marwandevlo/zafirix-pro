@@ -1,8 +1,9 @@
 'use client';
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Upload, FileText, CheckCircle, Clock, Trash2, Sparkles, ShieldCheck, Archive, History, Eye, Download, Share2, Wrench } from 'lucide-react';
+import { Upload, FileText, CheckCircle, Clock, Trash2, Sparkles, ShieldCheck, Archive, History, Eye, Download, Share2, Wrench, Mail, Link2, FileJson, FileSpreadsheet, FileCode2 } from 'lucide-react';
 import { EntityActionMenu, ConfirmDeleteDialog, EntityHistoryDrawer } from '@/app/components/actions';
 import type { ActionItem } from '@/app/components/actions';
+import { SendEmailModal } from '@/app/documents/components/SendEmailModal';
 import { ValidationCenter } from '@/app/documents/components/ValidationCenter';
 import {
   classificationFromDocument,
@@ -116,9 +117,9 @@ type OcrDisplayRow = {
   };
 };
 
-/** Temporary production debug — remove after OCR UI verified stable. */
+/** Shows per-row debug info only when explicitly enabled via env var. Never in production. */
 const SHOW_OCR_ROW_DEBUG =
-  process.env.NEXT_PUBLIC_ATLAS_OCR_DEBUG === 'true' || process.env.NODE_ENV === 'production';
+  process.env.NEXT_PUBLIC_ATLAS_OCR_DEBUG === 'true' && process.env.NODE_ENV !== 'production';
 
 type UploadErrorBody = {
   error?: string;
@@ -302,6 +303,8 @@ export default function DocumentsPage() {
   const [tab, setTab] = useState<'ocr' | 'library'>('ocr');
   const [confirmDeleteRow, setConfirmDeleteRow] = useState<OcrDisplayRow | null>(null);
   const [historyDocId, setHistoryDocId] = useState<string | null>(null);
+  const [emailModalDocId, setEmailModalDocId] = useState<string | null>(null);
+  const [shareToast, setShareToast] = useState<string | null>(null);
 
   // Library state
   const [library, setLibrary] = useState<AtlasDocument[]>([]);
@@ -788,6 +791,34 @@ export default function DocumentsPage() {
     }
   };
 
+  const downloadDocumentExport = (documentId: string, format: 'json' | 'csv' | 'xml' | 'xlsx') => {
+    const url = `/api/documents/${documentId}/export?format=${format}`;
+    const a = window.document.createElement('a');
+    a.href = url;
+    a.download = '';
+    a.click();
+  };
+
+  const shareDocumentLink = async (documentId: string) => {
+    try {
+      const res = await fetch(`/api/documents/${documentId}/share`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ permissions: 'read_only', expiresInHours: 168 }),
+      });
+      if (!res.ok) { setOcrError('Partage échoué. Réessayez.'); return; }
+      const data = await res.json() as { shareLink?: string };
+      if (data.shareLink) {
+        await navigator.clipboard.writeText(data.shareLink).catch(() => {});
+        setShareToast('Lien copié ! Valable 7 jours.');
+        setTimeout(() => setShareToast(null), 4000);
+      }
+    } catch {
+      setOcrError('Erreur lors de la création du lien de partage.');
+    }
+  };
+
   const handleFiles = (fileList: FileList | File[]) => {
     const files = Array.from(fileList).slice(0, ATLAS_DOCUMENT_MAX_FILES_PER_BATCH);
     for (const file of files) {
@@ -1227,52 +1258,72 @@ export default function DocumentsPage() {
                               </button>
                             )
                           )}
-                          {/* Three-dot action menu */}
+                          {/* Three-dot action menu — all actions real */}
                           <EntityActionMenu
                             entityLabel={d.nom}
                             actions={[
                               {
                                 id: 'view',
-                                label: 'Consulter',
+                                label: 'Consulter / Valider',
                                 Icon: Eye,
-                                onClick: () => {
-                                  if (supabaseMode && d.supabaseId) setValidationDocId(d.supabaseId);
-                                },
+                                onClick: () => { if (supabaseMode && d.supabaseId) setValidationDocId(d.supabaseId); },
                                 hidden: !supabaseMode || !d.supabaseId,
                               },
                               {
                                 id: 'correct',
-                                label: 'Corriger',
+                                label: 'Corriger les champs',
                                 Icon: Wrench,
-                                onClick: () => {
-                                  if (supabaseMode && d.supabaseId) setValidationDocId(d.supabaseId);
-                                },
+                                onClick: () => { if (supabaseMode && d.supabaseId) setValidationDocId(d.supabaseId); },
                                 hidden: !supabaseMode || d.statut !== 'analysé',
                               },
                               {
-                                id: 'download',
-                                label: 'Télécharger',
+                                id: 'export-json',
+                                label: 'Télécharger JSON',
+                                Icon: FileJson,
+                                onClick: () => { if (d.supabaseId) downloadDocumentExport(d.supabaseId, 'json'); },
+                                hidden: !supabaseMode || !d.supabaseId || d.statut !== 'analysé',
+                              },
+                              {
+                                id: 'export-csv',
+                                label: 'Télécharger CSV',
                                 Icon: Download,
-                                onClick: () => {},
-                                disabled: true,
-                                disabledReason: 'Téléchargement bientôt disponible',
+                                onClick: () => { if (d.supabaseId) downloadDocumentExport(d.supabaseId, 'csv'); },
+                                hidden: !supabaseMode || !d.supabaseId || d.statut !== 'analysé',
+                              },
+                              {
+                                id: 'export-xml',
+                                label: 'Télécharger XML',
+                                Icon: FileCode2,
+                                onClick: () => { if (d.supabaseId) downloadDocumentExport(d.supabaseId, 'xml'); },
+                                hidden: !supabaseMode || !d.supabaseId || d.statut !== 'analysé',
+                              },
+                              {
+                                id: 'export-xlsx',
+                                label: 'Télécharger Excel',
+                                Icon: FileSpreadsheet,
+                                onClick: () => { if (d.supabaseId) downloadDocumentExport(d.supabaseId, 'xlsx'); },
+                                hidden: !supabaseMode || !d.supabaseId || d.statut !== 'analysé',
                                 dividerAfter: true,
                               },
                               {
                                 id: 'share',
-                                label: 'Partager',
-                                Icon: Share2,
-                                onClick: () => {},
-                                disabled: true,
-                                disabledReason: 'Partage bientôt disponible',
+                                label: 'Partager (copier lien)',
+                                Icon: Link2,
+                                onClick: () => { if (d.supabaseId) void shareDocumentLink(d.supabaseId); },
+                                hidden: !supabaseMode || !d.supabaseId || d.statut !== 'analysé',
+                              },
+                              {
+                                id: 'send-email',
+                                label: 'Envoyer par email',
+                                Icon: Mail,
+                                onClick: () => { if (d.supabaseId) setEmailModalDocId(d.supabaseId); },
+                                hidden: !supabaseMode || !d.supabaseId || d.statut !== 'analysé',
                               },
                               {
                                 id: 'history',
                                 label: 'Historique',
                                 Icon: History,
-                                onClick: () => {
-                                  if (d.supabaseId) setHistoryDocId(d.supabaseId);
-                                },
+                                onClick: () => { if (d.supabaseId) setHistoryDocId(d.supabaseId); },
                                 hidden: !supabaseMode || !d.supabaseId,
                                 dividerAfter: true,
                               },
@@ -1389,6 +1440,22 @@ export default function DocumentsPage() {
         entityLabel={ocrRows.find(r => r.supabaseId === historyDocId)?.nom ?? 'Document'}
         onClose={() => setHistoryDocId(null)}
       />
+
+      {/* Email send modal */}
+      <SendEmailModal
+        open={emailModalDocId !== null}
+        documentId={emailModalDocId ?? ''}
+        documentName={ocrRows.find(r => r.supabaseId === emailModalDocId)?.nom ?? 'Document'}
+        onClose={() => setEmailModalDocId(null)}
+      />
+
+      {/* Share link toast */}
+      {shareToast && (
+        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-300 flex items-center gap-2 bg-gray-900 text-white text-sm px-4 py-2.5 rounded-xl shadow-lg">
+          <Link2 size={14} className="text-green-400" />
+          {shareToast}
+        </div>
+      )}
     </div>
   );
 }
