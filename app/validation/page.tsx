@@ -10,6 +10,19 @@ import { ValidationKpiCards } from '@/app/components/validation/ValidationKpiCar
 import { ValidationQueueTable } from '@/app/components/validation/ValidationQueueTable';
 import { ValidationStatusBadge } from '@/app/components/validation/ValidationStatusBadge';
 import { SourceDocumentBadge } from '@/app/components/SourceDocumentBadge';
+import { ExportMenu } from '@/app/components/ExportMenu';
+import type { ExportColumn } from '@/app/components/ExportMenu';
+
+const VALIDATION_EXPORT_COLUMNS: ExportColumn[] = [
+  { key: 'source_document_filename', label: 'Document source' },
+  { key: 'source_document_type', label: 'Type document' },
+  { key: 'module_label', label: 'Module' },
+  { key: 'validation_status', label: 'Statut' },
+  { key: 'extraction_confidence', label: 'Confiance IA', format: v => v != null ? `${Math.round((v as number) * 100)}%` : '' },
+  { key: 'source_document_id', label: 'Source Document ID' },
+  { key: 'target_entity_id', label: 'Entité cible ID' },
+  { key: 'created_at', label: 'Routé le', format: v => v ? new Date(v as string).toLocaleDateString('fr-FR') : '' },
+];
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -173,14 +186,26 @@ export default function ValidationPage() {
               Validez, révisez ou rejetez les enregistrements créés par Documents IA.
             </p>
           </div>
-          <button
-            type="button"
-            onClick={() => void loadRecords()}
-            className="flex items-center gap-1.5 text-sm text-gray-500 hover:text-gray-700 px-3 py-1.5 border border-gray-200 rounded-lg hover:bg-gray-50"
-          >
-            <RotateCcw size={14} />
-            Actualiser
-          </button>
+          <div className="flex items-center gap-2">
+            <ExportMenu
+              data={records as unknown as Record<string, unknown>[]}
+              columns={VALIDATION_EXPORT_COLUMNS}
+              filename="validation_queue"
+              title="File de validation"
+              selectedIds={selectedIds}
+              idKey="id"
+              filters={{ statut: statusFilter, module: moduleFilter }}
+              size="sm"
+            />
+            <button
+              type="button"
+              onClick={() => void loadRecords()}
+              className="flex items-center gap-1.5 text-sm text-gray-500 hover:text-gray-700 px-3 py-1.5 border border-gray-200 rounded-lg hover:bg-gray-50"
+            >
+              <RotateCcw size={14} />
+              Actualiser
+            </button>
+          </div>
         </div>
 
         {/* Flash */}

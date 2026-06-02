@@ -28,6 +28,22 @@ import { AppSidebar } from '@/app/components/shell/AppSidebar';
 import { EmptyStateCta } from '@/app/components/ui/EmptyStateCta';
 import { trackOnboardingMilestoneOnce } from '@/app/lib/atlas-onboarding-milestones';
 import { SourceDocumentBadge } from '@/app/components/SourceDocumentBadge';
+import { ExportMenu } from '@/app/components/ExportMenu';
+import type { ExportColumn } from '@/app/components/ExportMenu';
+
+const FACTURE_EXPORT_COLUMNS: ExportColumn[] = [
+  { key: 'numero', label: 'Numéro' },
+  { key: 'client', label: 'Client' },
+  { key: 'date', label: 'Date émission' },
+  { key: 'echeance', label: 'Échéance' },
+  { key: 'montantHT', label: 'Montant HT (MAD)', format: v => typeof v === 'number' ? v.toFixed(2) : String(v ?? '') },
+  { key: 'tva', label: 'TVA (MAD)', format: v => typeof v === 'number' ? v.toFixed(2) : String(v ?? '') },
+  { key: 'ttc', label: 'TTC (MAD)', format: v => typeof v === 'number' ? v.toFixed(2) : String(v ?? '') },
+  { key: 'paye', label: 'Payé (MAD)', format: v => typeof v === 'number' ? Math.round(v as number).toFixed(2) : String(v ?? '') },
+  { key: 'reste', label: 'Reste à payer (MAD)', format: v => typeof v === 'number' ? Math.round(v as number).toFixed(2) : String(v ?? '') },
+  { key: 'statut', label: 'Statut' },
+  { key: 'sourceDocumentId', label: 'Source Document IA' },
+];
 
 type FactureRow = {
   id: AtlasInvoice['id'];
@@ -687,6 +703,14 @@ export default function FacturesPage() {
             <div className="px-4 py-3 border-b border-gray-100 flex items-center justify-between gap-3">
               <p className="text-sm font-semibold text-gray-700">Liste des factures</p>
               <div className="flex items-center gap-2">
+                <ExportMenu
+                  data={filteredRows as unknown as Record<string, unknown>[]}
+                  columns={FACTURE_EXPORT_COLUMNS}
+                  filename="factures"
+                  title="Factures clients"
+                  filters={{ statut: filter }}
+                  size="xs"
+                />
                 <button onClick={() => setFilter('all')} className={`text-xs font-medium px-2.5 py-1 rounded-full border ${filter === 'all' ? 'bg-gray-900 text-white border-gray-900' : 'bg-white text-gray-600 border-gray-200 hover:bg-gray-50'}`}>
                   Toutes
                 </button>

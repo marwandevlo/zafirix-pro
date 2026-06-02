@@ -19,6 +19,8 @@ import {
   CheckCheck,
   Ban,
 } from 'lucide-react';
+import { ExportMenu } from '@/app/components/ExportMenu';
+import type { ExportColumn } from '@/app/components/ExportMenu';
 import type { AtlasDocument, AtlasExtractedField, AtlasStructuredExtraction } from '@/app/types/atlas-document';
 import {
   classificationFromDocument,
@@ -455,7 +457,35 @@ export function ValidationCenter({ document, onClose, onValidated, onRetryOcr }:
           {/* Extracted fields */}
           {visibleFields.length > 0 && (
             <section>
-              <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-3">Champs extraits</h3>
+              <div className="flex items-center justify-between mb-3">
+                <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Champs extraits</h3>
+                <ExportMenu
+                  data={visibleFields.map(([key, rawField]) => {
+                    const f = rawField as { value?: unknown; user_corrected_value?: unknown; confidence?: number; source_page?: number };
+                    return {
+                      champ: key,
+                      label: fieldLabel(key),
+                      valeur_ia: f.value != null ? String(f.value) : '',
+                      valeur_corrigee: f.user_corrected_value != null ? String(f.user_corrected_value) : '',
+                      confiance: f.confidence ?? null,
+                      page_source: f.source_page ?? null,
+                      source_document_id: document.id ?? '',
+                    };
+                  })}
+                  columns={[
+                    { key: 'label', label: 'Champ' },
+                    { key: 'valeur_ia', label: 'Valeur IA' },
+                    { key: 'valeur_corrigee', label: 'Valeur corrigée' },
+                    { key: 'confiance', label: 'Confiance', format: v => v != null ? `${Math.round((v as number) * 100)}%` : '' },
+                    { key: 'page_source', label: 'Page source', format: v => v != null ? String(v) : '' },
+                    { key: 'source_document_id', label: 'ID Document' },
+                  ] as ExportColumn[]}
+                  filename={`champs_extraits_${String(document.id ?? 'doc')}`}
+                  title={`Champs extraits — ${document.filename ?? document.title ?? 'Document'}`}
+                  size="xs"
+                  align="right"
+                />
+              </div>
               <div className="space-y-2">
                 {visibleFields.map(([key, rawField]) => {
                   const field = rawField as AtlasExtractedField;

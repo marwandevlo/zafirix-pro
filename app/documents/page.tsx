@@ -11,6 +11,19 @@ import {
   validationStatusFromDocument,
 } from '@/app/lib/atlas-documents-repository';
 import { documentTypeLabel } from '@/app/lib/atlas-document-routing';
+import { ExportMenu } from '@/app/components/ExportMenu';
+import type { ExportColumn } from '@/app/components/ExportMenu';
+
+const DOCUMENT_EXPORT_COLUMNS: ExportColumn[] = [
+  { key: 'filename', label: 'Nom fichier' },
+  { key: 'document_type', label: 'Type' },
+  { key: 'processing_status', label: 'Statut OCR' },
+  { key: 'validation_status', label: 'Statut validation' },
+  { key: 'page_count', label: 'Pages', format: v => String(v ?? '') },
+  { key: 'size_bytes', label: 'Taille (Ko)', format: v => v != null ? (Math.round((v as number) / 1024)).toString() : '' },
+  { key: 'id', label: 'ID document' },
+  { key: 'created_at', label: 'Uploadé le', format: v => v ? new Date(v as string).toLocaleDateString('fr-FR') : '' },
+];
 import { useRouter } from 'next/navigation';
 import { fetchAi } from '../lib/fetch-ai';
 import { addDaysYmd, todayYmd } from '@/app/lib/atlas-dates';
@@ -920,9 +933,29 @@ export default function DocumentsPage() {
                   </div>
                   <div className="mt-3 text-xs text-gray-400 flex items-center justify-between">
                     <span>{library.length} document(s)</span>
-                    <button type="button" onClick={() => void refreshLibrary()} className="text-rose-600 hover:text-rose-700 font-medium">
-                      Actualiser
-                    </button>
+                    <div className="flex items-center gap-2">
+                      <ExportMenu
+                        data={library.map(d => ({
+                          id: d.id ?? '',
+                          filename: d.filename ?? d.title ?? '',
+                          document_type: (() => { const t = documentTypeFromDocument(d); return t ? documentTypeLabel(t) : ''; })(),
+                          processing_status: d.processingStatus ?? '',
+                          validation_status: d.validationStatus ?? '',
+                          page_count: ocrProcessedPageCountFromDocument(d) ?? null,
+                          size_bytes: d.sizeBytes ?? null,
+                          created_at: d.createdAt ?? '',
+                        }))}
+                        columns={DOCUMENT_EXPORT_COLUMNS}
+                        filename="documents_ia"
+                        title="Documents IA"
+                        filters={{ type: libraryType, recherche: libraryQuery }}
+                        size="xs"
+                        align="right"
+                      />
+                      <button type="button" onClick={() => void refreshLibrary()} className="text-rose-600 hover:text-rose-700 font-medium">
+                        Actualiser
+                      </button>
+                    </div>
                   </div>
                 </div>
 

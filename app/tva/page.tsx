@@ -14,6 +14,19 @@ import {
 } from 'lucide-react';
 import { AppSidebar } from '@/app/components/shell/AppSidebar';
 import { BetaSurfaceBadge } from '@/app/components/safety/BetaSurfaceBadge';
+import { ExportMenu } from '@/app/components/ExportMenu';
+import type { ExportColumn } from '@/app/components/ExportMenu';
+
+const TVA_LINE_EXPORT_COLUMNS: ExportColumn[] = [
+  { key: 'reference', label: 'Référence' },
+  { key: 'counterparty', label: 'Tiers' },
+  { key: 'issueDate', label: 'Date' },
+  { key: 'amountHT', label: 'Montant HT (MAD)', format: v => typeof v === 'number' ? v.toFixed(2) : String(v ?? '') },
+  { key: 'vatAmount', label: 'TVA (MAD)', format: v => typeof v === 'number' ? v.toFixed(2) : String(v ?? '') },
+  { key: 'totalTTC', label: 'TTC (MAD)', format: v => typeof v === 'number' ? v.toFixed(2) : String(v ?? '') },
+  { key: 'source', label: 'Source' },
+  { key: 'source_document_id', label: 'Source Document IA' },
+];
 import { getActiveCompanyDbRowId } from '@/app/lib/atlas-active-company';
 import { isAtlasSupabaseDataEnabled } from '@/app/lib/atlas-data-source';
 import { generateTvaDeclarationXml } from '@/app/lib/atlas-tva-xml';
@@ -390,9 +403,19 @@ function InvoiceTable({
 }) {
   return (
     <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
-      <div className="px-5 py-4 border-b border-gray-100">
-        <h2 className="font-semibold text-gray-700">{title}</h2>
-        <p className="text-xs text-gray-400 mt-0.5">{lines.length} ligne(s)</p>
+      <div className="px-5 py-4 border-b border-gray-100 flex items-center justify-between gap-3">
+        <div>
+          <h2 className="font-semibold text-gray-700">{title}</h2>
+          <p className="text-xs text-gray-400 mt-0.5">{lines.length} ligne(s)</p>
+        </div>
+        <ExportMenu
+          data={lines as unknown as Record<string, unknown>[]}
+          columns={TVA_LINE_EXPORT_COLUMNS}
+          filename={`tva_${counterpartyLabel.toLowerCase()}`}
+          title={title}
+          size="xs"
+          align="right"
+        />
       </div>
       <table className="w-full text-sm">
         <thead>

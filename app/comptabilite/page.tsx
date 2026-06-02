@@ -14,6 +14,18 @@ import { AppSidebar } from '@/app/components/shell/AppSidebar';
 import { formatMadAmountLabel } from '@/app/lib/atlas-format';
 import { SourceDocumentBadge } from '@/app/components/SourceDocumentBadge';
 import { ValidationStatusBadge } from '@/app/components/validation/ValidationStatusBadge';
+import { ExportMenu } from '@/app/components/ExportMenu';
+import type { ExportColumn } from '@/app/components/ExportMenu';
+
+const ECRITURE_EXPORT_COLUMNS: ExportColumn[] = [
+  { key: 'date', label: 'Date' },
+  { key: 'libelle', label: 'Libellé' },
+  { key: 'compte', label: 'Compte' },
+  { key: 'debit', label: 'Débit (MAD)', format: v => typeof v === 'number' && v > 0 ? v.toFixed(2) : '' },
+  { key: 'credit', label: 'Crédit (MAD)', format: v => typeof v === 'number' && v > 0 ? v.toFixed(2) : '' },
+  { key: 'sourceDocumentId', label: 'Source Document IA' },
+  { key: 'validationStatus', label: 'Statut' },
+];
 import {
   listAtlasAccountingEntries,
   upsertAtlasAccountingEntry,
@@ -191,9 +203,18 @@ export default function ComptabilitePage() {
             <h1 className="text-xl font-bold text-gray-800">Comptabilite</h1>
             <p className="text-xs text-gray-400 mt-0.5">KPIs factures · journal enregistré</p>
           </div>
-          <button onClick={() => setShowForm(!showForm)} className="flex items-center gap-2 px-4 py-2 bg-[#1B2A4A] text-white rounded-lg text-sm hover:bg-[#243660] transition-colors">
-            <Plus size={16} /> Nouvelle ecriture
-          </button>
+          <div className="flex items-center gap-2">
+            <ExportMenu
+              data={ecritures as unknown as Record<string, unknown>[]}
+              columns={ECRITURE_EXPORT_COLUMNS}
+              filename="journal_comptable"
+              title="Journal Comptable"
+              size="sm"
+            />
+            <button onClick={() => setShowForm(!showForm)} className="flex items-center gap-2 px-4 py-2 bg-[#1B2A4A] text-white rounded-lg text-sm hover:bg-[#243660] transition-colors">
+              <Plus size={16} /> Nouvelle ecriture
+            </button>
+          </div>
         </header>
 
         <div className="flex-1 overflow-y-auto px-8 py-6 space-y-6">

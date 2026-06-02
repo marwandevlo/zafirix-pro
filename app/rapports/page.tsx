@@ -20,6 +20,8 @@ import { ValidationKpiCards } from '@/app/components/validation/ValidationKpiCar
 import { getActiveCompanyDbRowId } from '@/app/lib/atlas-active-company';
 import { isAtlasSupabaseDataEnabled } from '@/app/lib/atlas-data-source';
 import { downloadCsvReport, downloadPdfReport } from '@/app/lib/atlas-reports-export';
+import { ExportMenu } from '@/app/components/ExportMenu';
+import type { ExportColumn } from '@/app/components/ExportMenu';
 import type {
   AtlasReportPeriodPreset,
   AtlasReportPayload,
@@ -207,6 +209,26 @@ export default function RapportsPage() {
                     className="px-3 py-2 text-sm border border-gray-200 rounded-lg"
                   />
                 </>
+              )}
+              {dashboard && (
+                <ExportMenu
+                  data={REPORT_META.map(r => ({
+                    rapport: r.label,
+                    description: r.desc,
+                    periode: dashboard.period.periodLabel,
+                    statut_filtre: validationFilter,
+                  }))}
+                  columns={[
+                    { key: 'rapport', label: 'Rapport' },
+                    { key: 'description', label: 'Description' },
+                    { key: 'periode', label: 'Période' },
+                    { key: 'statut_filtre', label: 'Filtre statut' },
+                  ] as ExportColumn[]}
+                  filename="rapports_dashboard"
+                  title={`Rapports — ${dashboard.period.periodLabel}`}
+                  filters={{ periode: preset, statut: validationFilter }}
+                  size="sm"
+                />
               )}
               <button
                 type="button"
