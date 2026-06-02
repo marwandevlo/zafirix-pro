@@ -32,6 +32,9 @@ import {
   persistJournalLines,
   persistTvaSuggestion,
 } from '@/app/lib/atlas-documents-accounting-engine';
+import { createBankStatementFromDocument } from '@/app/lib/atlas-bank-server';
+import { createPayslipExtractionFromDocument } from '@/app/lib/atlas-payslip-server';
+import { logAuditEvent } from '@/app/lib/atlas-audit-log';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -229,31 +232,6 @@ async function routeSalesInvoice(
   return { invoiceId: String(inv?.id), amountTtc };
 }
 
-/** Bank statement → zafirix_routing_records with extracted transactions payload */
-async function routeBankStatement(
-  extraction: AtlasStructuredExtraction,
-  documentId: string,
-): Promise<{ openingBalance: number | null; closingBalance: number | null; period: string | null }> {
-  const opening = extractNumeric((extraction as Record<string, unknown>).opening_balance as Parameters<typeof extractNumeric>[0]);
-  const closing = extractNumeric((extraction as Record<string, unknown>).closing_balance as Parameters<typeof extractNumeric>[0]);
-  const period = extractString((extraction as Record<string, unknown>).statement_period as Parameters<typeof extractString>[0]);
-  const bankName = extractString((extraction as Record<string, unknown>).bank_name as Parameters<typeof extractString>[0]);
-  void documentId; void bankName;
-  return { openingBalance: opening, closingBalance: closing, period };
-}
-
-/** Payroll slip → zafirix_routing_records with salary payload */
-async function routePayrollSlip(
-  extraction: AtlasStructuredExtraction,
-): Promise<{ employeeName: string | null; grossSalary: number | null; netSalary: number | null; cnss: number | null; ir: number | null }> {
-  const ext = extraction as Record<string, unknown>;
-  const employeeName = extractString(ext.employee_name as Parameters<typeof extractString>[0]);
-  const gross = extractNumeric(ext.gross_salary as Parameters<typeof extractNumeric>[0]);
-  const net = extractNumeric(ext.net_salary as Parameters<typeof extractNumeric>[0]);
-  const cnss = extractNumeric(ext.cnss_amount as Parameters<typeof extractNumeric>[0]);
-  const ir = extractNumeric(ext.ir_amount as Parameters<typeof extractNumeric>[0]);
-  return { employeeName, grossSalary: gross, netSalary: net, cnss, ir };
-}
 
 /** Legal contract / statutes → zafirix_legal_documents */
 async function routeLegalDocument(
@@ -414,21 +392,60 @@ export async function POST(
       });
 
     } else if (moduleGroup === 'banque') {
-      const r = await routeBankStatement(extraction, documentId);
-      result = { module: 'banque', ...r, note: 'Relevé enregistré en brouillon' };
+      const r = await createBankStatementFromDocument(admin, {
+        userId, companyId, documentId, extraction, metadata: meta,
+      });
+      result = {
+        module: 'banque',
+        statementId: r.statementId,
+        transactionCount: r.transactionCount,
+        reconciliationRun: r.reconciliationRun,
+        note: `${r.transactionCount} opération(s) importée(s)`,
+      };
       await registerRouting(admin, {
         userId, companyId, documentId, documentType: docType,
         targetModule: moduleGroup, targetEntityType,
-        payload: { opening_balance: r.openingBalance, closing_balance: r.closingBalance, period: r.period },
+        targetEntityId: r.statementId,
+        payload: { statement_id: r.statementId, transaction_count: r.transactionCount },
+      });
+      void logAuditEvent({
+        entityType: 'bank_statement',
+        entityId: r.statementId,
+        action: 'routed',
+        performedBy: userId,
+        companyId,
+        sourceDocumentId: documentId,
       });
 
     } else if (moduleGroup === 'rh') {
-      const r = await routePayrollSlip(extraction);
-      result = { module: 'rh', ...r, note: 'Dossier RH mis à jour (brouillon)' };
+      const r = await createPayslipExtractionFromDocument(admin, {
+        userId, companyId, documentId, extraction, metadata: meta,
+      });
+      result = {
+        module: 'rh',
+        extractionId: r.extractionId,
+        employeeId: r.employeeId,
+        matchConfidence: r.matchConfidence,
+        needsReview: r.needsReview,
+        note: r.needsReview ? 'Bulletin en file de révision' : 'Bulletin associé à l\'employé',
+      };
       await registerRouting(admin, {
         userId, companyId, documentId, documentType: docType,
         targetModule: moduleGroup, targetEntityType,
-        payload: { employee_name: r.employeeName, gross_salary: r.grossSalary, net_salary: r.netSalary, cnss: r.cnss, ir: r.ir },
+        targetEntityId: r.extractionId,
+        payload: {
+          extraction_id: r.extractionId,
+          employee_id: r.employeeId,
+          match_confidence: r.matchConfidence,
+        },
+      });
+      void logAuditEvent({
+        entityType: 'payroll_record',
+        entityId: r.extractionId,
+        action: 'routed',
+        performedBy: userId,
+        companyId,
+        sourceDocumentId: documentId,
       });
 
     } else if (moduleGroup === 'juridique') {

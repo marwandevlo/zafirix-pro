@@ -26,6 +26,9 @@ import { DashboardIaSection } from '@/app/components/dashboard/DashboardIaSectio
 import { LegalContractsWidget } from '@/app/components/dashboard/LegalContractsWidget';
 import { AuditStatsWidget } from '@/app/components/dashboard/AuditStatsWidget';
 import { AlertCenterWidget } from '@/app/components/dashboard/AlertCenterWidget';
+import { ReconciliationWidget } from '@/app/components/bank/ReconciliationWidget';
+import { BankAlertCenter } from '@/app/components/bank/BankAlertCenter';
+import { PayrollDashboardSection } from '@/app/components/payroll/PayrollDashboardSection';
 
 const ReferralPostOnboardingModal = dynamic(
   () =>
@@ -287,6 +290,13 @@ export default function Home() {
               <LegalContractsWidget />
             </div>
           </div>
+
+          {/* ── Banking & Payroll ─────────────────────────────────────────── */}
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 lg:gap-6">
+            <ReconciliationWidget />
+            <BankAlertCenter compact />
+          </div>
+          <PayrollDashboardSection />
 
           {/* ── Documents IA — Validation KPIs + Queue ───────────────────── */}
           <DashboardIaSection />

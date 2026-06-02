@@ -30,6 +30,8 @@ export type AuditEntityType =
   | 'tva_suggestion'
   | 'legal_document'
   | 'payroll_record'
+  | 'bank_statement'
+  | 'bank_transaction'
   | 'routing_record'
   | 'export'
   | 'backup';

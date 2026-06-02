@@ -50,6 +50,32 @@ export type AtlasIrSnapshot = {
 
 export type AtlasIsDraftStatus = 'draft' | 'validated';
 
+export type PayslipValidationStatus = 'draft' | 'reviewed' | 'validated' | 'rejected';
+
+export type AtlasPayslipExtraction = {
+  id: string;
+  companyId: string | null;
+  sourceDocumentId: string | null;
+  employeeId: string | null;
+  employeeName: string | null;
+  matricule: string | null;
+  cin: string | null;
+  cnssNumber: string | null;
+  periodYear: number | null;
+  periodMonth: number | null;
+  grossSalary: number | null;
+  netSalary: number | null;
+  bonuses: number;
+  deductions: number;
+  cnssAmount: number | null;
+  irAmount: number | null;
+  matchConfidence: number;
+  validationStatus: PayslipValidationStatus;
+  payrollRunId: string | null;
+  salaryId: string | null;
+  createdAt: string;
+};
+
 export type AtlasIsDraft = {
   id: string;
   companyId: string;

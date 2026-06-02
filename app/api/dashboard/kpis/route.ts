@@ -37,6 +37,10 @@ export async function GET(request: NextRequest) {
     legalExpired,
     tvaDetected,
     recentAuditEvents,
+    bankTransactions,
+    bankMatched,
+    payslipExtractions,
+    employeeCount,
   ] = await Promise.all([
     // Documents uploaded today
     admin.from('zafirix_ocr_documents')
@@ -98,6 +102,27 @@ export async function GET(request: NextRequest) {
       .select('action')
       .eq('performed_by', userId)
       .gte('created_at', thirtyDaysAgo.toISOString()),
+
+    // Bank transactions
+    admin.from('zafirix_bank_transactions')
+      .select('id', { count: 'exact', head: true })
+      .eq('user_id', userId),
+
+    // Bank reconciliation matched
+    admin.from('atlas_bank_reconciliation')
+      .select('id', { count: 'exact', head: true })
+      .eq('user_id', userId)
+      .eq('status', 'matched'),
+
+    // Payslip extractions
+    admin.from('atlas_payslip_extractions')
+      .select('id', { count: 'exact', head: true })
+      .eq('user_id', userId),
+
+    // Employees
+    admin.from('atlas_employees')
+      .select('id', { count: 'exact', head: true })
+      .eq('user_id', userId),
   ]);
 
   // Aggregate audit counts by action
@@ -119,6 +144,10 @@ export async function GET(request: NextRequest) {
       legal_expiring: legalExpiring.count ?? 0,
       legal_expired: legalExpired.count ?? 0,
       tva_detected: tvaDetected.count ?? 0,
+      bank_transactions: bankTransactions.count ?? 0,
+      bank_reconciled: bankMatched.count ?? 0,
+      payslips_extracted: payslipExtractions.count ?? 0,
+      employees: employeeCount.count ?? 0,
     },
     audit_last_30d: auditCounts,
   });

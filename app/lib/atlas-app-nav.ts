@@ -12,6 +12,7 @@ import {
   Scale,
   Users,
   Building2,
+  Landmark,
   Settings,
   CreditCard,
   Shield,
@@ -28,6 +29,7 @@ export type AtlasNavItemId =
   | 'documents'
   | 'validation'
   | 'comptabilite'
+  | 'banque'
   | 'factures'
   | 'juridique'
   | 'rh'
@@ -61,6 +63,7 @@ export const ATLAS_APP_NAV_ITEMS: AtlasAppNavItem[] = [
   { id: 'documents', label: 'Documents IA', labelAr: 'وثائق ذكية', icon: Upload, href: '/documents' },
   { id: 'validation', label: 'Validation', labelAr: 'التحقق', icon: ClipboardList, href: '/validation' },
   { id: 'comptabilite', label: 'Comptabilité', labelAr: 'المحاسبة', icon: LayoutDashboard, href: '/comptabilite' },
+  { id: 'banque', label: 'Banque', labelAr: 'البنك', icon: Landmark, href: '/banque' },
   { id: 'factures', label: 'Factures', labelAr: 'الفواتير', icon: FileText, href: '/factures' },
   { id: 'juridique', label: 'Juridique', labelAr: 'القانونية', icon: Scale, href: '/juridique' },
   { id: 'rh', label: 'Ressources humaines', labelAr: 'الموارد البشرية', icon: Users, href: '/rh' },

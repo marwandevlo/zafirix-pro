@@ -21,7 +21,7 @@ const MODULE_HREFS: Record<string, string> = {
   tva: '/tva',
   rh: '/rh',
   juridique: '/juridique',
-  banque: '/rapports',
+  banque: '/banque',
   rapports: '/rapports',
   fiscalite: '/rapports',
 };

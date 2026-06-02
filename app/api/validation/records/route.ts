@@ -93,6 +93,8 @@ export async function PATCH(request: NextRequest) {
         sales_invoice: 'atlas_invoices',
         accounting_entry: 'atlas_accounting_entries',
         legal_document: 'zafirix_legal_documents',
+        bank_statement: 'zafirix_bank_statements',
+        payroll_record: 'atlas_payslip_extractions',
       };
       const entityTable = tableMap[rec.target_entity_type as string];
       if (entityTable) {

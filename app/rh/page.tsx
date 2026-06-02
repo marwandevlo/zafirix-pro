@@ -3,11 +3,12 @@ import { fetchAi } from '../lib/fetch-ai';
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import type { LucideIcon } from 'lucide-react';
-import { ArrowLeft, FileText, Download, Bot, User, Send, Users, Briefcase, Award, FileCheck, Search, Share2 } from 'lucide-react';
+import { ArrowLeft, FileText, Download, Bot, User, Send, Users, Briefcase, Award, FileCheck, Search, Share2, Receipt } from 'lucide-react';
 import { createAtlasLink } from '@/app/lib/atlas-links-repository';
 import { createDocument } from '@/app/lib/atlas-documents-repository';
 import { AppSidebar } from '@/app/components/shell/AppSidebar';
 import { RhEmployeesPanel } from '@/app/rh/RhEmployeesPanel';
+import { RhPayrollPanel } from '@/app/rh/RhPayrollPanel';
 import { BetaSurfaceBadge } from '@/app/components/safety/BetaSurfaceBadge';
 import { EntityAuditTable } from '@/app/components/history/EntityAuditTable';
 
@@ -157,7 +158,7 @@ export default function RHPage() {
   const [linking, setLinking] = useState(false);
   const [linkCompanyId, setLinkCompanyId] = useState<number | ''>('');
   const [linkStatus, setLinkStatus] = useState<string>('');
-  const [rhView, setRhView] = useState<'documents' | 'employees' | 'historique'>('documents');
+  const [rhView, setRhView] = useState<'documents' | 'employees' | 'paie' | 'historique'>('documents');
 
   useEffect(() => {
     void (async () => {
@@ -452,6 +453,13 @@ Genere UNIQUEMENT le document en texte propre, sans commentaires.`,
           </button>
           <button
             type="button"
+            onClick={() => setRhView('paie')}
+            className={`w-full flex items-center gap-2 px-3 py-2 rounded-lg text-xs transition-all mb-2 ${rhView === 'paie' ? 'bg-white/10 text-white' : 'text-white/30 hover:text-white/60'}`}
+          >
+            <Receipt size={12} /> Paie &amp; bulletins
+          </button>
+          <button
+            type="button"
             onClick={() => setRhView('historique')}
             className={`w-full flex items-center gap-2 px-3 py-2 rounded-lg text-xs transition-all mb-2 ${rhView === 'historique' ? 'bg-white/10 text-white' : 'text-white/30 hover:text-white/60'}`}
           >
@@ -480,7 +488,9 @@ Genere UNIQUEMENT le document en texte propre, sans commentaires.`,
           <BetaSurfaceBadge label="Bêta · RH · Documents et paie à valider par expert-comptable / juriste" />
         </div>
         <div className="flex-1 flex overflow-hidden min-h-0">
-      {rhView === 'historique' ? (
+      {rhView === 'paie' ? (
+        <RhPayrollPanel />
+      ) : rhView === 'historique' ? (
         <div className="flex-1 overflow-y-auto p-6">
           <EntityAuditTable entityType="payroll_record" title="Historique — Activité RH" />
         </div>
