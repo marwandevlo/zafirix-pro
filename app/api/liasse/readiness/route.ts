@@ -1,30 +1,34 @@
 /**
- * GET /api/liasse/readiness?companyId=&fiscalYear=
+ * GET /api/liasse/readiness — closing readiness without persisting
  */
 import { NextRequest, NextResponse } from 'next/server';
-import { atlasDataBackend } from '@/app/lib/atlas-data-source';
-import { requireAgentsRouteDb } from '@/app/lib/atlas-agents-route-db';
-import { getReadiness } from '@/app/lib/atlas-liasse-server';
+import { documentUploadSessionUserId } from '@/app/lib/atlas-document-upload-auth';
+import { runLiasseEngine } from '@/app/lib/atlas-liasse-engine';
+import { getSupabaseServiceRoleClient } from '@/app/lib/supabase-admin';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
 export async function GET(request: NextRequest) {
-  if (atlasDataBackend() !== 'supabase') {
-    return NextResponse.json({ error: 'not_enabled' }, { status: 400 });
-  }
-  const ctx = await requireAgentsRouteDb(request);
-  if (!ctx.ok) return NextResponse.json({ error: ctx.error }, { status: ctx.status });
+  const userId = await documentUploadSessionUserId(request);
+  if (!userId) return NextResponse.json({ error: 'auth_required' }, { status: 401 });
 
-  const companyId = request.nextUrl.searchParams.get('companyId')?.trim();
-  const fiscalYear = Number(request.nextUrl.searchParams.get('fiscalYear') ?? new Date().getFullYear());
-  if (!companyId) return NextResponse.json({ error: 'company_required' }, { status: 400 });
+  const params = request.nextUrl.searchParams;
+  const companyId = params.get('companyId')?.trim() || null;
+  const fiscalYear = Number(params.get('fiscalYear') ?? new Date().getFullYear());
 
-  try {
-    const readiness = await getReadiness(ctx.db, ctx.userId, companyId, fiscalYear);
-    return NextResponse.json({ ok: true, ...readiness });
-  } catch (err) {
-    const message = err instanceof Error ? err.message : 'readiness_failed';
-    return NextResponse.json({ error: message }, { status: 500 });
-  }
+  const admin = getSupabaseServiceRoleClient();
+  const result = await runLiasseEngine(admin, { userId, companyId, fiscalYear });
+
+  return NextResponse.json({
+    ok: true,
+    fiscalYear,
+    readinessScore: result.readinessScore,
+    readinessBreakdown: result.readinessBreakdown,
+    checks: result.checks,
+    blockingIssues: result.blockingIssues,
+    bankSummary: result.bankSummary,
+    payrollSummary: result.payrollSummary,
+    label: `Prêt pour clôture fiscale: ${result.readinessScore}%`,
+  });
 }

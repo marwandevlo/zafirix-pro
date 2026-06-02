@@ -1,588 +1,665 @@
 /**
- * Liasse Fiscale engine — aggregates Phase 11 bank/payroll + accounting/TVA/legal.
- * Validation checks, readiness score (0–100), blocking rules, audit package.
+ * Liasse Fiscale engine — integrates Phase 11 bank/payroll + accounting/TVA/legal.
  */
 
 import type { SupabaseClient } from '@supabase/supabase-js';
 import type {
   LiasseAuditPackage,
-  LiasseCheck,
-  LiasseFiscalePayload,
-  LiasseReadinessFactors,
+  LiasseBankSummary,
+  LiassePayrollSummary,
+  LiasseValidationCheck,
 } from '@/app/types/atlas-liasse';
 
-const TOLERANCE_MAD = 1;
+const BALANCE_TOLERANCE = 1;
+const TVA_TOLERANCE_PCT = 0.05;
 
-function round(n: number): number {
+function round2(n: number): number {
   return Math.round(n * 100) / 100;
 }
 
-function accountClass(compte: string): string {
-  return (compte || '').trim().charAt(0);
-}
-
-/** Build account balances from journal lines */
-function balancesFromEntries(
-  entries: { compte: string; debit: number; credit: number }[],
-): Map<string, { debit: number; credit: number }> {
-  const map = new Map<string, { debit: number; credit: number }>();
-  for (const e of entries) {
-    const key = e.compte || '000';
-    const cur = map.get(key) ?? { debit: 0, credit: 0 };
-    cur.debit += e.debit;
-    cur.credit += e.credit;
-    map.set(key, cur);
-  }
-  return map;
-}
-
-function bilanFromBalances(balances: Map<string, { debit: number; credit: number }>): {
-  actif: number;
-  passif: number;
-  balanced: boolean;
-} {
-  let actif = 0;
-  let passif = 0;
-  for (const [compte, { debit, credit }] of balances) {
-    const cls = accountClass(compte);
-    const net = debit - credit;
-    if (['2', '3', '5'].includes(cls) && net > 0) actif += net;
-    if (['1', '4'].includes(cls) && net < 0) passif += Math.abs(net);
-    if (cls === '1' && net > 0) passif += net;
-    if (['4'].includes(cls) && net > 0) passif += net;
-  }
-  return {
-    actif: round(actif),
-    passif: round(passif),
-    balanced: Math.abs(actif - passif) <= TOLERANCE_MAD,
-  };
-}
-
-function accountingBankBalance(balances: Map<string, { debit: number; credit: number }>): number {
-  let bank = 0;
-  for (const [compte, { debit, credit }] of balances) {
-    if (compte.startsWith('512') || compte.startsWith('514')) {
-      bank += debit - credit;
-    }
-  }
-  return round(bank);
+function accountClass(compte: string): number {
+  const c = String(compte).trim().charAt(0);
+  const n = parseInt(c, 10);
+  return Number.isFinite(n) ? n : 0;
 }
 
 export type LiasseEngineInput = {
   userId: string;
-  companyId: string;
-  companyName: string;
+  companyId: string | null;
   fiscalYear: number;
 };
 
-export async function buildLiassePayload(
+export type LiasseEngineResult = {
+  payload: Record<string, unknown>;
+  checks: LiasseValidationCheck[];
+  blockingIssues: LiasseValidationCheck[];
+  readinessScore: number;
+  readinessBreakdown: Record<string, number>;
+  bankSummary: LiasseBankSummary;
+  payrollSummary: LiassePayrollSummary;
+};
+
+export async function runLiasseEngine(
   db: SupabaseClient,
   input: LiasseEngineInput,
-): Promise<LiasseFiscalePayload> {
-  const { userId, companyId, companyName, fiscalYear } = input;
+): Promise<LiasseEngineResult> {
+  const { userId, companyId, fiscalYear } = input;
   const yearStart = `${fiscalYear}-01-01`;
   const yearEnd = `${fiscalYear}-12-31`;
-  const checks: LiasseCheck[] = [];
 
-  // ── Accounting entries ──────────────────────────────────────────────────────
-  const { data: accRows } = await db
-    .from('atlas_accounting_entries')
-    .select('entry_json, validation_status')
-    .eq('user_id', userId);
+  const filterCo = <T extends { company_id?: string | null }>(rows: T[] | null | undefined): T[] => {
+    if (!companyId) return rows ?? [];
+    return (rows ?? []).filter((r) => !r.company_id || r.company_id === companyId);
+  };
 
-  const entries = (accRows ?? []).map(row => {
-    const j = row.entry_json as { date?: string; libelle?: string; compte?: string; debit?: number; credit?: number } | null;
-    return {
-      compte: String(j?.compte ?? ''),
-      debit: Number(j?.debit ?? 0),
-      credit: Number(j?.credit ?? 0),
-      date: j?.date,
-    };
-  }).filter(e => {
-    if (!e.date) return true;
-    return e.date >= yearStart && e.date <= yearEnd;
+  const [
+    entriesRes,
+    invoicesRes,
+    supplierRes,
+    statementsRes,
+    transactionsRes,
+    reconRes,
+    payslipsRes,
+    payrollRunsRes,
+    salariesRes,
+    irSnapshotsRes,
+    tvaSuggestionsRes,
+    legalRes,
+    liasseExistsRes,
+    paidInvoicesRes,
+  ] = await Promise.all([
+    db.from('atlas_accounting_entries').select('entry_json, validation_status, company_id').eq('user_id', userId),
+    db.from('atlas_invoices').select('id, status, total_ttc, client_name, validation_status, company_id').eq('user_id', userId),
+    db.from('atlas_supplier_invoices').select('id, status, amount_ttc, validation_status, company_id').eq('user_id', userId),
+    db.from('zafirix_bank_statements').select('id, closing_balance, opening_balance, statement_period_end, company_id').eq('user_id', userId),
+    db.from('zafirix_bank_transactions').select('id, debit, credit, amount, transaction_date, description, validation_status, company_id').eq('user_id', userId),
+    db.from('atlas_bank_reconciliation').select('transaction_id, status, confidence, entity_type, entity_id, company_id').eq('user_id', userId),
+    db.from('atlas_payslip_extractions').select('*').eq('user_id', userId),
+    db.from('atlas_payroll_runs').select('*').eq('user_id', userId).eq('period_year', fiscalYear),
+    db.from('atlas_salaries').select('gross_salary, net_salary, cnss_employee, ir_amount, payroll_run_id, company_id').eq('user_id', userId),
+    db.from('atlas_ir_snapshots').select('*').eq('user_id', userId).eq('period_year', fiscalYear),
+    db.from('zafirix_tva_suggestions').select('id, amount_ht, vat_rate, vat_amount, validation_status, metadata, company_id').eq('user_id', userId),
+    db.from('zafirix_legal_documents').select('id, title, expiry_date, company_id').eq('user_id', userId),
+    db.from('zafirix_liasse_fiscale').select('id, company_id').eq('user_id', userId).eq('fiscal_year', fiscalYear).maybeSingle(),
+    db.from('atlas_invoices').select('id, number, client_name, total_ttc, status, company_id').eq('user_id', userId).eq('status', 'paid'),
+  ]);
+
+  entriesRes.data = filterCo(entriesRes.data);
+  invoicesRes.data = filterCo(invoicesRes.data);
+  supplierRes.data = filterCo(supplierRes.data);
+  statementsRes.data = filterCo(statementsRes.data);
+  transactionsRes.data = filterCo(transactionsRes.data);
+  reconRes.data = filterCo(reconRes.data);
+  payslipsRes.data = filterCo(payslipsRes.data);
+  payrollRunsRes.data = filterCo(payrollRunsRes.data);
+  salariesRes.data = filterCo(salariesRes.data);
+  irSnapshotsRes.data = filterCo(irSnapshotsRes.data);
+  tvaSuggestionsRes.data = filterCo(tvaSuggestionsRes.data);
+  legalRes.data = filterCo(legalRes.data);
+  paidInvoicesRes.data = filterCo(paidInvoicesRes.data);
+  if (companyId && liasseExistsRes.data && liasseExistsRes.data.company_id !== companyId) {
+    liasseExistsRes.data = null;
+  }
+
+  // ── Accounting aggregates ───────────────────────────────────────────────────
+  let totalDebit = 0;
+  let totalCredit = 0;
+  let actif = 0;
+  let passif = 0;
+  let bankAccountBalance = 0;
+  let draftEntries = 0;
+
+  for (const row of entriesRes.data ?? []) {
+    const j = row.entry_json as { compte?: string; debit?: number; credit?: number } | null;
+    if (!j) continue;
+    const d = Number(j.debit ?? 0);
+    const c = Number(j.credit ?? 0);
+    totalDebit += d;
+    totalCredit += c;
+    const cls = accountClass(String(j.compte ?? ''));
+    if (cls === 5 || cls === 2) bankAccountBalance += c - d;
+    if (cls === 1 || cls === 2) actif += d - c;
+    if (cls === 1 && String(j.compte).startsWith('1') && !String(j.compte).startsWith('10')) passif += c - d;
+    if (cls === 3) passif += c - d;
+    if (row.validation_status === 'draft') draftEntries++;
+  }
+
+  // ── Bank ────────────────────────────────────────────────────────────────────
+  const transactions = transactionsRes.data ?? [];
+  const recons = reconRes.data ?? [];
+  const reconByTx = new Map<string, typeof recons>();
+  for (const r of recons) {
+    const tid = String(r.transaction_id);
+    if (!reconByTx.has(tid)) reconByTx.set(tid, []);
+    reconByTx.get(tid)!.push(r);
+  }
+
+  const fiscalTx = transactions.filter(t => {
+    const d = t.transaction_date as string | null;
+    return d && d >= yearStart && d <= yearEnd;
   });
 
-  const balances = balancesFromEntries(entries);
-  const totalDebit = round(entries.reduce((s, e) => s + e.debit, 0));
-  const totalCredit = round(entries.reduce((s, e) => s + e.credit, 0));
-  const bilan = bilanFromBalances(balances);
-  const accBankBalance = accountingBankBalance(balances);
+  const importedTotal = fiscalTx.reduce((s, t) => s + Number(t.credit ?? 0) - Number(t.debit ?? 0), 0);
+  const reconciledCount = recons.filter(r => r.status === 'matched').length;
+  const suggestedCount = recons.filter(r => r.status === 'suggested').length;
+  const unreconciledCount = recons.filter(r => r.status === 'unmatched').length;
 
-  if (!bilan.balanced) {
-    checks.push({
-      id: 'bilan-imbalance',
-      category: 'accounting',
-      severity: 'critical',
-      title: 'Bilan déséquilibré',
-      description: `Actif ${bilan.actif} MAD ≠ Passif ${bilan.passif} MAD`,
-      blocking: true,
-    });
+  const statements = statementsRes.data ?? [];
+  const lastStmt = statements.sort((a, b) =>
+    String(b.statement_period_end ?? '').localeCompare(String(a.statement_period_end ?? '')),
+  )[0];
+  const lastClosing = lastStmt?.closing_balance != null ? Number(lastStmt.closing_balance) : null;
+
+  let running = lastStmt?.opening_balance != null ? Number(lastStmt.opening_balance) : 0;
+  const sortedTx = [...fiscalTx].sort((a, b) =>
+    String(a.transaction_date).localeCompare(String(b.transaction_date)),
+  );
+  for (const t of sortedTx) {
+    running += Number(t.credit ?? 0) - Number(t.debit ?? 0);
   }
-
-  // ── Bank (Phase 11) ─────────────────────────────────────────────────────────
-  const { data: statements } = await db
-    .from('zafirix_bank_statements')
-    .select('id, closing_balance, opening_balance, statement_period_end')
-    .eq('user_id', userId)
-    .eq('company_id', companyId)
-    .order('created_at', { ascending: false })
-    .limit(5);
-
-  const latestStatement = statements?.[0];
-  const statementClosing = latestStatement?.closing_balance != null
-    ? Number(latestStatement.closing_balance)
+  const computedClosing = fiscalTx.length > 0 ? round2(running) : null;
+  const closingDelta = lastClosing != null && computedClosing != null
+    ? round2(Math.abs(lastClosing - computedClosing))
     : null;
 
-  const closingMismatch = statementClosing != null
-    && Math.abs(accBankBalance - statementClosing) > TOLERANCE_MAD * 10;
+  const bankSummary: LiasseBankSummary = {
+    statements_count: statements.length,
+    transactions_count: fiscalTx.length,
+    reconciled_count: reconciledCount,
+    suggested_count: suggestedCount,
+    unreconciled_count: unreconciledCount,
+    accounting_bank_balance: round2(bankAccountBalance),
+    imported_transactions_total: round2(importedTotal),
+    last_statement_closing: lastClosing,
+    computed_closing_from_tx: computedClosing,
+    closing_balance_delta: closingDelta,
+  };
 
-  if (closingMismatch) {
+  // ── Payroll ─────────────────────────────────────────────────────────────────
+  const payslips = payslipsRes.data ?? [];
+  const fiscalPayslips = payslips.filter(p =>
+    (p.period_year as number | null) === fiscalYear || p.period_year == null,
+  );
+  const runs = payrollRunsRes.data ?? [];
+  const salaries = salariesRes.data ?? [];
+  const runIds = new Set(runs.map(r => String(r.id)));
+  const fiscalSalaries = salaries.filter(s => runIds.has(String(s.payroll_run_id)));
+
+  let grossSal = fiscalPayslips.reduce((s, p) => s + Number(p.gross_salary ?? 0), 0);
+  let netSal = fiscalPayslips.reduce((s, p) => s + Number(p.net_salary ?? 0), 0);
+  let cnssSal = fiscalPayslips.reduce((s, p) => s + Number(p.cnss_amount ?? 0), 0);
+  let irSal = fiscalPayslips.reduce((s, p) => s + Number(p.ir_amount ?? 0), 0);
+
+  if (grossSal === 0 && runs.length > 0) {
+    grossSal = runs.reduce((s, r) => s + Number(r.total_gross ?? 0), 0);
+    netSal = runs.reduce((s, r) => s + Number(r.total_net ?? 0), 0);
+    cnssSal = runs.reduce((s, r) => s + Number(r.total_cnss_employee ?? 0), 0);
+    irSal = runs.reduce((s, r) => s + Number(r.total_ir ?? 0), 0);
+  }
+  if (grossSal === 0) {
+    grossSal = fiscalSalaries.reduce((s, r) => s + Number(r.gross_salary ?? 0), 0);
+    netSal = fiscalSalaries.reduce((s, r) => s + Number(r.net_salary ?? 0), 0);
+    cnssSal = fiscalSalaries.reduce((s, r) => s + Number(r.cnss_employee ?? 0), 0);
+    irSal = fiscalSalaries.reduce((s, r) => s + Number(r.ir_amount ?? 0), 0);
+  }
+
+  const irSnapshots = irSnapshotsRes.data ?? [];
+  if (irSal === 0 && irSnapshots.length > 0) {
+    irSal = irSnapshots.reduce((s, r) => s + Number(r.total_ir ?? 0), 0);
+  }
+
+  const payrollAnomalies: string[] = [];
+  for (const p of fiscalPayslips) {
+    if (!p.cnss_number && !p.employee_id) payrollAnomalies.push(`CNSS manquant: ${p.employee_name ?? p.id}`);
+    if ((p.match_confidence ?? 0) < 75) payrollAnomalies.push(`Employé non associé: ${p.employee_name ?? '?'}`);
+    if (p.validation_status === 'draft') payrollAnomalies.push(`Bulletin brouillon: ${p.employee_name ?? p.id}`);
+  }
+
+  const payrollSummary: LiassePayrollSummary = {
+    employees: fiscalPayslips.length || fiscalSalaries.length,
+    gross_salaries: round2(grossSal),
+    net_salaries: round2(netSal),
+    cnss_deductions: round2(cnssSal),
+    ir_retained: round2(irSal),
+    payslips_total: fiscalPayslips.length,
+    payslips_validated: fiscalPayslips.filter(p => p.validation_status === 'validated').length,
+    payslips_draft: fiscalPayslips.filter(p => p.validation_status === 'draft').length,
+    payroll_anomalies: payrollAnomalies.slice(0, 20),
+    payroll_run_status: runs[0]?.status as string ?? null,
+  };
+
+  // ── Build checks ────────────────────────────────────────────────────────────
+  const checks: LiasseValidationCheck[] = [];
+
+  if (Math.abs(totalDebit - totalCredit) > BALANCE_TOLERANCE) {
     checks.push({
-      id: 'bank-closing-mismatch',
-      category: 'bank',
+      id: 'accounting-unbalanced',
       severity: 'critical',
-      title: 'Écart solde bancaire',
-      description: `Comptabilité ${accBankBalance} MAD vs relevé ${statementClosing} MAD`,
+      category: 'Comptabilité',
+      message: `Journal déséquilibré: débit ${round2(totalDebit)} ≠ crédit ${round2(totalCredit)}`,
       blocking: true,
+      details: { totalDebit, totalCredit },
     });
   }
 
-  const { data: bankTx } = await db
-    .from('zafirix_bank_transactions')
-    .select('id, amount, debit, credit, transaction_date, description')
-    .eq('user_id', userId)
-    .eq('company_id', companyId)
-    .gte('transaction_date', yearStart)
-    .lte('transaction_date', yearEnd);
-
-  const txList = bankTx ?? [];
-  const txIds = txList.map(t => String(t.id));
-
-  const { data: recons } = txIds.length
-    ? await db.from('atlas_bank_reconciliation')
-      .select('transaction_id, status, confidence, entity_type, entity_id')
-      .in('transaction_id', txIds)
-    : { data: [] };
-
-  const reconByTx = new Map<string, string>();
-  for (const r of recons ?? []) {
-    reconByTx.set(String(r.transaction_id), String(r.status));
-  }
-
-  let reconciledAmount = 0;
-  let unreconciledAmount = 0;
-  let unreconciledCount = 0;
-  for (const tx of txList) {
-    const amt = Number(tx.amount ?? 0);
-    const st = reconByTx.get(String(tx.id));
-    if (st === 'matched') reconciledAmount += amt;
-    else if (!st || st === 'unmatched' || st === 'suggested') {
-      unreconciledAmount += amt;
-      unreconciledCount++;
-    }
+  if (Math.abs(actif - passif) > BALANCE_TOLERANCE && actif > 0 && passif > 0) {
+    checks.push({
+      id: 'bilan-actif-passif',
+      severity: 'critical',
+      category: 'Bilan',
+      message: `Bilan non équilibré: actif ${round2(actif)} ≠ passif ${round2(passif)}`,
+      blocking: true,
+      details: { actif, passif },
+    });
   }
 
   if (unreconciledCount > 0) {
     checks.push({
       id: 'bank-unreconciled',
-      category: 'bank',
-      severity: unreconciledCount > 5 ? 'critical' : 'warning',
-      title: 'Opérations bancaires non rapprochées',
-      description: `${unreconciledCount} opération(s) · ${round(unreconciledAmount)} MAD`,
-      blocking: unreconciledCount > 0,
+      severity: 'critical',
+      category: 'Banque',
+      message: `${unreconciledCount} opération(s) bancaire(s) non rapprochée(s)`,
+      blocking: true,
+      details: { unreconciledCount },
     });
   }
 
-  // Payments without accounting entries (bank debit, no 512 credit movement match — heuristic: unreconciled debits)
-  const paymentsWithoutEntries = txList.filter(tx => {
-    const debit = Number(tx.debit ?? 0);
-    return debit > 0 && (reconByTx.get(String(tx.id)) === 'unmatched' || !reconByTx.get(String(tx.id)));
-  }).length;
-
-  if (paymentsWithoutEntries > 0) {
+  if (suggestedCount > 0) {
     checks.push({
-      id: 'bank-no-entry',
-      category: 'bank',
+      id: 'bank-suggested-pending',
       severity: 'warning',
-      title: 'Paiements sans écriture comptable',
-      description: `${paymentsWithoutEntries} paiement(s) non rapproché(s)`,
+      category: 'Banque',
+      message: `${suggestedCount} rapprochement(s) en attente de validation`,
       blocking: false,
     });
   }
 
-  // Invoices marked paid but no bank match
-  const { data: paidInvoices } = await db
-    .from('atlas_invoices')
-    .select('id, number, total_ttc, status')
-    .eq('user_id', userId)
-    .in('status', ['paid', 'validated']);
+  if (closingDelta != null && closingDelta > BALANCE_TOLERANCE) {
+    checks.push({
+      id: 'bank-closing-mismatch',
+      severity: 'warning',
+      category: 'Banque',
+      message: `Écart solde clôture relevé: ${closingDelta} MAD (relevé vs calculé)`,
+      blocking: false,
+      details: { lastClosing, computedClosing, closingDelta },
+    });
+  }
 
-  const matchedInvoiceIds = new Set(
-    (recons ?? [])
-      .filter(r => r.status === 'matched' && String(r.entity_type) === 'sales_invoice')
-      .map(r => String(r.entity_id)),
+  const unmatchedDebits = fiscalTx.filter(t => {
+    const rec = reconByTx.get(String(t.id)) ?? [];
+    return Number(t.debit) > 0 && (!rec.length || rec.every(r => r.status === 'unmatched'));
+  });
+  if (unmatchedDebits.length > 0) {
+    checks.push({
+      id: 'payments-no-entry',
+      severity: 'warning',
+      category: 'Banque',
+      message: `${unmatchedDebits.length} paiement(s) sans écriture comptable rapprochée`,
+      blocking: false,
+    });
+  }
+
+  const matchedEntityIds = new Set(
+    recons.filter(r => r.status === 'matched' && r.entity_type === 'sales_invoice').map(r => String(r.entity_id)),
   );
-
-  const paidNoBank = (paidInvoices ?? []).filter(
-    inv => !matchedInvoiceIds.has(String(inv.id)),
-  ).length;
-
-  if (paidNoBank > 0) {
+  for (const inv of paidInvoicesRes.data ?? []) {
+    if (!matchedEntityIds.has(String(inv.id))) {
+      checks.push({
+        id: `paid-no-bank-${inv.id}`,
+        severity: 'warning',
+        category: 'Banque',
+        message: `Facture payée sans rapprochement bancaire: ${inv.number ?? inv.id}`,
+        blocking: false,
+        details: { invoiceId: inv.id },
+      });
+      break; // one representative warning; count in details
+    }
+  }
+  const paidWithoutBank = (paidInvoicesRes.data ?? []).filter(inv => !matchedEntityIds.has(String(inv.id))).length;
+  if (paidWithoutBank > 1) {
     checks.push({
-      id: 'invoice-paid-no-bank',
-      category: 'invoices',
+      id: 'paid-invoices-no-bank-batch',
       severity: 'warning',
-      title: 'Factures payées sans rapprochement bancaire',
-      description: `${paidNoBank} facture(s) client`,
+      category: 'Banque',
+      message: `${paidWithoutBank} facture(s) marquée(s) payée(s) sans correspondance bancaire`,
       blocking: false,
+      details: { count: paidWithoutBank },
     });
   }
 
-  const bank: LiasseFiscalePayload['bank'] = {
-    accounting_bank_balance: accBankBalance,
-    statement_closing_balance: statementClosing,
-    closing_balance_mismatch: closingMismatch,
-    transactions_imported: txList.length,
-    reconciled_amount: round(reconciledAmount),
-    unreconciled_amount: round(unreconciledAmount),
-    unreconciled_count: unreconciledCount,
-    payments_without_entries: paymentsWithoutEntries,
-    paid_invoices_no_bank_match: paidNoBank,
-  };
-
-  // ── Payroll (Phase 11) ──────────────────────────────────────────────────────
-  const { data: payslips } = await db
-    .from('atlas_payslip_extractions')
-    .select('*')
-    .eq('user_id', userId)
-    .eq('company_id', companyId);
-
-  const payslipList = payslips ?? [];
-  const fiscalPayslips = payslipList.filter(p => Number(p.period_year) === fiscalYear);
-
-  const { data: payrollRuns } = await db
-    .from('atlas_payroll_runs')
-    .select('*')
-    .eq('company_id', companyId)
-    .eq('period_year', fiscalYear);
-
-  const runs = payrollRuns ?? [];
-  const { data: salaries } = runs.length
-    ? await db.from('atlas_salaries').select('gross_salary, net_salary, cnss_employee, ir_amount').in('payroll_run_id', runs.map(r => String(r.id)))
-    : { data: [] };
-
-  let grossSalaries = fiscalPayslips.reduce((s, p) => s + Number(p.gross_salary ?? 0), 0);
-  let netSalaries = fiscalPayslips.reduce((s, p) => s + Number(p.net_salary ?? 0), 0);
-  let cnssDed = fiscalPayslips.reduce((s, p) => s + Number(p.cnss_amount ?? 0), 0);
-  let irRet = fiscalPayslips.reduce((s, p) => s + Number(p.ir_amount ?? 0), 0);
-
-  for (const sal of salaries ?? []) {
-    grossSalaries += Number(sal.gross_salary ?? 0);
-    netSalaries += Number(sal.net_salary ?? 0);
-    cnssDed += Number(sal.cnss_employee ?? 0);
-    irRet += Number(sal.ir_amount ?? 0);
+  for (const tva of tvaSuggestionsRes.data ?? []) {
+    const meta = (tva.metadata && typeof tva.metadata === 'object') ? tva.metadata as Record<string, unknown> : {};
+    const ht = Number(tva.amount_ht ?? meta.amount_ht ?? 0);
+    const rate = Number(tva.vat_rate ?? meta.vat_rate ?? 20);
+    const detected = Number(tva.vat_amount ?? meta.vat_amount ?? 0);
+    const expected = ht * (rate / 100);
+    if (ht > 0 && Math.abs(expected - detected) > expected * TVA_TOLERANCE_PCT + 0.5) {
+      checks.push({
+        id: `tva-inconsistency-${tva.id}`,
+        severity: 'critical',
+        category: 'TVA',
+        message: `Incohérence TVA: attendu ${round2(expected)} MAD, détecté ${round2(detected)} MAD`,
+        blocking: true,
+        details: { ht, rate, expected, detected },
+      });
+    }
   }
 
-  const { data: irSnap } = await db
-    .from('atlas_ir_snapshots')
-    .select('total_ir, total_gross')
-    .eq('company_id', companyId)
-    .eq('period_year', fiscalYear);
-
-  if (irSnap?.length) {
-    irRet = Math.max(irRet, irSnap.reduce((s, r) => s + Number(r.total_ir ?? 0), 0));
-    grossSalaries = Math.max(grossSalaries, irSnap.reduce((s, r) => s + Number(r.total_gross ?? 0), 0));
-  }
-
-  const payslipsDraft = fiscalPayslips.filter(p => p.validation_status === 'draft').length;
-  const payslipsValidated = fiscalPayslips.filter(p => p.validation_status === 'validated').length;
-  const payrollAnomalies = fiscalPayslips.filter(p => !p.employee_id || (p.match_confidence ?? 0) < 75).length;
-  const runValidated = runs.some(r => r.status === 'validated');
-
-  if (payslipsDraft > 0) {
+  if (payrollSummary.payslips_draft > 0) {
     checks.push({
       id: 'payroll-not-validated',
-      category: 'payroll',
       severity: 'critical',
-      title: 'Bulletins de paie non validés',
-      description: `${payslipsDraft} bulletin(s) en brouillon`,
+      category: 'Paie',
+      message: `${payrollSummary.payslips_draft} bulletin(s) non validé(s)`,
       blocking: true,
     });
   }
 
-  if (payrollAnomalies > 0) {
-    checks.push({
-      id: 'payroll-anomalies',
-      category: 'payroll',
-      severity: 'warning',
-      title: 'Anomalies paie détectées',
-      description: `${payrollAnomalies} bulletin(s) — employé non trouvé ou CNSS manquant`,
-      blocking: payrollAnomalies > 2,
-    });
-  }
-
-  const cnssMissing = fiscalPayslips.filter(p => !p.cnss_number && !p.cnss_amount).length;
-  if (cnssMissing > 0) {
+  if (payrollSummary.payslips_total > 0 && payrollSummary.cnss_deductions === 0) {
     checks.push({
       id: 'cnss-missing',
-      category: 'payroll',
       severity: 'critical',
-      title: 'CNSS manquant avant clôture',
-      description: `${cnssMissing} bulletin(s) sans données CNSS`,
+      category: 'CNSS',
+      message: 'CNSS non renseignée sur les bulletins de paie',
       blocking: true,
     });
   }
 
-  const payroll: LiasseFiscalePayload['payroll'] = {
-    gross_salaries: round(grossSalaries),
-    net_salaries: round(netSalaries),
-    cnss_deductions: round(cnssDed),
-    ir_retained: round(irRet),
-    employees_count: fiscalPayslips.length || (salaries?.length ?? 0),
-    payslips_validated: payslipsValidated,
-    payslips_draft: payslipsDraft,
-    payroll_anomalies: payrollAnomalies,
-    payroll_run_validated: runValidated,
-  };
-
-  // ── TVA ─────────────────────────────────────────────────────────────────────
-  const { data: salesInv } = await db
-    .from('atlas_invoices')
-    .select('vat_amount, amount_ht, vat_rate, validation_status')
-    .eq('user_id', userId);
-
-  const { data: purchaseInv } = await db
-    .from('atlas_supplier_invoices')
-    .select('vat_amount, amount_ht, validation_status')
-    .eq('user_id', userId);
-
-  let tvaCollected = 0;
-  let tvaDeductible = 0;
-  let tvaInconsistencies = 0;
-
-  for (const inv of salesInv ?? []) {
-    tvaCollected += Number(inv.vat_amount ?? 0);
-    const ht = Number(inv.amount_ht ?? 0);
-    const rate = Number(inv.vat_rate ?? 20);
-    const expected = ht * (rate / 100);
-    const detected = Number(inv.vat_amount ?? 0);
-    if (ht > 0 && Math.abs(expected - detected) / ht > 0.05) tvaInconsistencies++;
-  }
-
-  for (const inv of purchaseInv ?? []) {
-    tvaDeductible += Number(inv.vat_amount ?? 0);
-  }
-
-  if (tvaInconsistencies > 0) {
-    checks.push({
-      id: 'tva-inconsistency',
-      category: 'tva',
-      severity: 'critical',
-      title: 'Incohérences TVA avant clôture',
-      description: `${tvaInconsistencies} facture(s) avec écart HT × taux vs TVA`,
-      blocking: true,
-    });
-  }
-
-  // ── Invoices validation ─────────────────────────────────────────────────────
-  const allInvoices = [...(salesInv ?? []), ...(purchaseInv ?? [])];
-  const validatedCount = allInvoices.filter(i => i.validation_status === 'validated').length;
-  const invoicesValidatedPct = allInvoices.length
-    ? Math.round((validatedCount / allInvoices.length) * 100)
-    : 100;
-
-  // ── Legal expired ───────────────────────────────────────────────────────────
   const today = new Date().toISOString().split('T')[0];
-  const { count: expiredLegal } = await db
-    .from('zafirix_legal_documents')
-    .select('id', { count: 'exact', head: true })
-    .eq('user_id', userId)
-    .lt('expiry_date', today);
-
-  if ((expiredLegal ?? 0) > 0) {
+  const expiredLegal = (legalRes.data ?? []).filter(l => l.expiry_date && String(l.expiry_date) < today);
+  if (expiredLegal.length > 0) {
     checks.push({
       id: 'legal-expired',
-      category: 'legal',
       severity: 'warning',
-      title: 'Contrats expirés',
-      description: `${expiredLegal} contrat(s) juridique(s) expiré(s)`,
+      category: 'Juridique',
+      message: `${expiredLegal.length} contrat(s) juridique(s) expiré(s)`,
       blocking: false,
+    });
+  }
+
+  if (!liasseExistsRes.data && fiscalYear < new Date().getFullYear()) {
+    checks.push({
+      id: 'liasse-not-generated',
+      severity: 'warning',
+      category: 'Liasse',
+      message: `Aucune liasse générée pour l'exercice ${fiscalYear}`,
+      blocking: false,
+    });
+  }
+
+  const draftInvoices = (invoicesRes.data ?? []).filter(i => i.validation_status === 'draft').length;
+  const draftSupplier = (supplierRes.data ?? []).filter(i => i.validation_status === 'draft').length;
+  if (draftInvoices + draftSupplier > 0) {
+    checks.push({
+      id: 'invoices-draft',
+      severity: 'warning',
+      category: 'Factures',
+      message: `${draftInvoices + draftSupplier} facture(s) en brouillon`,
+      blocking: false,
+    });
+  }
+
+  const entryCount = entriesRes.data?.length ?? 0;
+  const requiredKeys = ['bilan', 'cpc', 'etat_tva', 'etat_cnss', 'etat_ir'] as const;
+  const missingSections = requiredKeys.filter((k) => {
+    if (entryCount === 0 && (k === 'bilan' || k === 'cpc')) return true;
+    return false;
+  });
+  if (missingSections.length > 0) {
+    checks.push({
+      id: 'sections-missing',
+      severity: 'critical',
+      category: 'Liasse',
+      message: `Sections requises manquantes: ${missingSections.join(', ')}`,
+      blocking: true,
+      details: { missing: missingSections },
     });
   }
 
   // ── Readiness score ─────────────────────────────────────────────────────────
-  const bankReconciledPct = txList.length
-    ? Math.round(((txList.length - unreconciledCount) / txList.length) * 100)
-    : 100;
+  const breakdown: Record<string, number> = {};
+  let score = 0;
 
-  const factors: LiasseReadinessFactors = {
-    accounting_balanced: bilan.balanced,
-    invoices_validated_pct: invoicesValidatedPct,
-    tva_consistent: tvaInconsistencies === 0,
-    bank_reconciled_pct: bankReconciledPct,
-    payroll_validated: payslipsDraft === 0 && payrollAnomalies <= 2,
-    no_critical_alerts: !checks.some(c => c.severity === 'critical'),
-    legal_not_expired: (expiredLegal ?? 0) === 0,
-    liasse_generated: true,
-  };
-
-  const weights = [
-    factors.accounting_balanced ? 20 : 0,
-    Math.min(15, Math.round(factors.invoices_validated_pct * 0.15)),
-    factors.tva_consistent ? 15 : 0,
-    Math.min(20, Math.round(factors.bank_reconciled_pct * 0.2)),
-    factors.payroll_validated ? 15 : 0,
-    factors.no_critical_alerts ? 10 : 0,
-    factors.legal_not_expired ? 5 : 0,
-  ];
-  const readiness_score = Math.min(100, weights.reduce((a, b) => a + b, 0));
-
-  return {
-    fiscal_year: fiscalYear,
-    company_name: companyName,
-    generated_at: new Date().toISOString(),
-    bank,
-    payroll,
-    accounting: {
-      total_debit: totalDebit,
-      total_credit: totalCredit,
-      bilan_actif: bilan.actif,
-      bilan_passif: bilan.passif,
-      bilan_balanced: bilan.balanced,
-    },
-    tva: {
-      collected: round(tvaCollected),
-      deductible: round(tvaDeductible),
-      inconsistencies: tvaInconsistencies,
-    },
-    checks,
-    readiness_score,
-    readiness_factors: factors,
-  };
-}
-
-export function getBlockingIssues(checks: LiasseCheck[]): LiasseCheck[] {
-  return checks.filter(c => c.blocking);
-}
-
-export function canValidateOrFile(
-  checks: LiasseCheck[],
-  overrideReason?: string | null,
-): { allowed: boolean; blockers: LiasseCheck[]; message?: string } {
-  const blockers = getBlockingIssues(checks);
-  if (blockers.length === 0) return { allowed: true, blockers: [] };
-  if (overrideReason && overrideReason.trim().length >= 10) {
-    return { allowed: true, blockers, message: 'Dérogation administrateur appliquée' };
+  if (Math.abs(totalDebit - totalCredit) <= BALANCE_TOLERANCE) { breakdown.accounting_balanced = 15; score += 15; }
+  if (Math.abs(actif - passif) <= BALANCE_TOLERANCE || actif === 0) { breakdown.bilan_balanced = 15; score += 15; }
+  const invTotal = (invoicesRes.data?.length ?? 0) + (supplierRes.data?.length ?? 0);
+  const invValidated = (invoicesRes.data ?? []).filter(i => i.validation_status === 'validated').length
+    + (supplierRes.data ?? []).filter(i => i.validation_status === 'validated').length;
+  if (invTotal === 0 || invValidated / invTotal >= 0.8) { breakdown.invoices_validated = 10; score += 10; }
+  const hasTvaCritical = checks.some(c => c.id.startsWith('tva-inconsistency'));
+  if (!hasTvaCritical) { breakdown.tva_ok = 15; score += 15; }
+  const txTotal = fiscalTx.length || 1;
+  const reconRatio = reconciledCount / Math.max(txTotal, 1);
+  breakdown.bank_reconciled = Math.round(Math.min(20, reconRatio * 20));
+  score += breakdown.bank_reconciled;
+  if (payrollSummary.payslips_total === 0 || payrollSummary.payslips_draft === 0) {
+    breakdown.payroll_validated = 15; score += 15;
+  } else if (payrollSummary.payslips_validated / payrollSummary.payslips_total >= 0.8) {
+    breakdown.payroll_validated = 10; score += 10;
   }
-  return {
-    allowed: false,
-    blockers,
-    message: `${blockers.length} point(s) bloquant(s). Dérogation admin requise (min. 10 caractères).`,
+  const criticalCount = checks.filter(c => c.severity === 'critical').length;
+  if (criticalCount === 0) { breakdown.no_critical = 10; score += 10; }
+  if (expiredLegal.length === 0) { breakdown.legal_ok = 5; score += 5; }
+
+  const readinessScore = Math.min(100, Math.max(0, score));
+
+  const blockingIssues = checks.filter(c => c.blocking);
+
+  const payload: Record<string, unknown> = {
+    fiscal_year: fiscalYear,
+    generated_at: new Date().toISOString(),
+    bilan: {
+      actif: round2(actif),
+      passif: round2(passif),
+      total_debit: round2(totalDebit),
+      total_credit: round2(totalCredit),
+    },
+    cpc: {
+      charges: round2(totalDebit),
+      produits: round2(totalCredit),
+    },
+    etat_tva: {
+      suggestions_count: tvaSuggestionsRes.data?.length ?? 0,
+    },
+    etat_cnss: {
+      total_cnss: payrollSummary.cnss_deductions,
+      employees: payrollSummary.employees,
+    },
+    etat_ir: {
+      total_ir: payrollSummary.ir_retained,
+    },
+    annexes: {
+      bank: bankSummary,
+      payroll: payrollSummary,
+    },
+    bank_summary: bankSummary,
+    payroll_summary: payrollSummary,
   };
+
+  return {
+    payload,
+    checks,
+    blockingIssues,
+    readinessScore,
+    readinessBreakdown: breakdown,
+    bankSummary,
+    payrollSummary,
+  };
+}
+
+/** Liasse-specific dashboard alerts */
+export async function collectLiasseAlerts(
+  db: SupabaseClient,
+  userId: string,
+  companyId: string | null,
+): Promise<Array<{
+  id: string;
+  severity: 'red' | 'orange' | 'yellow';
+  category: string;
+  title: string;
+  description: string;
+  href?: string;
+}>> {
+  const fiscalYear = new Date().getFullYear();
+  const result = await runLiasseEngine(db, { userId, companyId, fiscalYear });
+  const alerts: Array<{
+    id: string;
+    severity: 'red' | 'orange' | 'yellow';
+    category: string;
+    title: string;
+    description: string;
+    href?: string;
+  }> = [];
+
+  if (result.bankSummary.unreconciled_count > 0) {
+    alerts.push({
+      id: 'liasse-bank-unreconciled',
+      severity: 'red',
+      category: 'Clôture fiscale',
+      title: 'Transactions bancaires non rapprochées',
+      description: `${result.bankSummary.unreconciled_count} opération(s) avant clôture`,
+      href: '/banque',
+    });
+  }
+
+  if (result.payrollSummary.payslips_draft > 0) {
+    alerts.push({
+      id: 'liasse-payroll-draft',
+      severity: 'orange',
+      category: 'Clôture fiscale',
+      title: 'Bulletins de paie non validés',
+      description: `${result.payrollSummary.payslips_draft} bulletin(s) en attente`,
+      href: '/rh',
+    });
+  }
+
+  if (result.payrollSummary.cnss_deductions === 0 && result.payrollSummary.payslips_total > 0) {
+    alerts.push({
+      id: 'liasse-cnss-missing',
+      severity: 'orange',
+      category: 'Clôture fiscale',
+      title: 'CNSS manquante',
+      description: 'Données CNSS absentes avant clôture',
+      href: '/rh',
+    });
+  }
+
+  const tvaCritical = result.checks.filter(c => c.category === 'TVA' && c.severity === 'critical');
+  if (tvaCritical.length > 0) {
+    alerts.push({
+      id: 'liasse-tva-inconsistency',
+      severity: 'red',
+      category: 'Clôture fiscale',
+      title: 'Incohérence TVA détectée',
+      description: `${tvaCritical.length} anomalie(s) TVA avant clôture`,
+      href: '/tva',
+    });
+  }
+
+  let liasseQuery = db
+    .from('zafirix_liasse_fiscale')
+    .select('id')
+    .eq('user_id', userId)
+    .eq('fiscal_year', fiscalYear);
+  if (companyId) liasseQuery = liasseQuery.eq('company_id', companyId);
+  else liasseQuery = liasseQuery.is('company_id', null);
+  const { data: liasse } = await liasseQuery.maybeSingle();
+
+  if (!liasse) {
+    alerts.push({
+      id: 'liasse-not-generated',
+      severity: 'yellow',
+      category: 'Clôture fiscale',
+      title: `Liasse ${fiscalYear} non générée`,
+      description: 'Générez la liasse fiscale pour l\'exercice en cours',
+      href: '/liasse',
+    });
+  }
+
+  if (result.readinessScore < 70) {
+    alerts.push({
+      id: 'liasse-low-readiness',
+      severity: 'orange',
+      category: 'Clôture fiscale',
+      title: `Préparation clôture: ${result.readinessScore}%`,
+      description: 'Score de préparation insuffisant pour valider la liasse',
+      href: '/liasse',
+    });
+  }
+
+  return alerts;
 }
 
 export async function buildAuditPackage(
   db: SupabaseClient,
-  payload: LiasseFiscalePayload,
-  input: LiasseEngineInput & { status: string },
+  userId: string,
+  liasseRow: {
+    id: string;
+    company_id: string | null;
+    fiscal_year: number;
+    status: string;
+    readiness_score: number;
+    payload: Record<string, unknown>;
+    validation_result: Record<string, unknown>;
+  },
 ): Promise<LiasseAuditPackage> {
-  const { userId, companyId, fiscalYear } = input;
-  const yearStart = `${fiscalYear}-01-01`;
-  const yearEnd = `${fiscalYear}-12-31`;
+  const fiscalYear = liasseRow.fiscal_year;
+  const engine = await runLiasseEngine(db, { userId, companyId: liasseRow.company_id, fiscalYear });
 
   const { data: unreconciledTx } = await db
     .from('zafirix_bank_transactions')
-    .select('id, transaction_date, description, amount')
+    .select('id, transaction_date, description, debit, credit, amount')
     .eq('user_id', userId)
-    .eq('company_id', companyId)
-    .gte('transaction_date', yearStart)
-    .lte('transaction_date', yearEnd)
-    .limit(200);
+    .limit(50);
 
-  const txIds = (unreconciledTx ?? []).map(t => String(t.id));
-  const { data: recons } = txIds.length
-    ? await db.from('atlas_bank_reconciliation').select('transaction_id, status').in('transaction_id', txIds)
-    : { data: [] };
-
-  const unmatchedIds = new Set(
-    (recons ?? [])
-      .filter(r => r.status === 'unmatched' || r.status === 'suggested')
-      .map(r => String(r.transaction_id)),
+  const unreconciledIds = new Set(
+    (await db.from('atlas_bank_reconciliation').select('transaction_id').eq('user_id', userId).eq('status', 'unmatched'))
+      .data?.map(r => String(r.transaction_id)) ?? [],
   );
-
-  const unreconciled = (unreconciledTx ?? [])
-    .filter(t => unmatchedIds.has(String(t.id)) || !(recons ?? []).some(r => String(r.transaction_id) === String(t.id)))
-    .slice(0, 50)
-    .map(t => ({
-      id: String(t.id),
-      date: t.transaction_date as string | null,
-      description: t.description as string | null,
-      amount: Number(t.amount ?? 0),
-    }));
+  const unreconciled = (unreconciledTx ?? []).filter(t => unreconciledIds.has(String(t.id)));
 
   const { data: auditLogs } = await db
     .from('atlas_audit_logs')
-    .select('action, entity_type, created_at')
+    .select('*')
     .eq('performed_by', userId)
     .order('created_at', { ascending: false })
+    .limit(100);
+
+  const { data: routingDocs } = await db
+    .from('zafirix_routing_records')
+    .select('source_document_id, target_module')
+    .eq('user_id', userId)
+    .not('source_document_id', 'is', null)
     .limit(30);
 
-  const { count: docCount } = await db
-    .from('atlas_documents')
-    .select('id', { count: 'exact', head: true })
-    .eq('user_id', userId)
-    .eq('company_id', companyId);
+  const docIds = [...new Set((routingDocs ?? []).map(r => r.source_document_id).filter(Boolean))];
+  const { data: docs } = docIds.length
+    ? await db.from('atlas_documents').select('id, filename, document_type, validation_status').in('id', docIds)
+    : { data: [] };
+
+  const checks = (liasseRow.validation_result?.checks as LiasseValidationCheck[]) ?? engine.checks;
 
   return {
     exported_at: new Date().toISOString(),
     fiscal_year: fiscalYear,
-    company_name: payload.company_name,
-    readiness_score: payload.readiness_score,
-    status: input.status as LiasseAuditPackage['status'],
-    bank_reconciliation_summary: payload.bank,
+    company_id: liasseRow.company_id,
+    readiness_score: Number(liasseRow.readiness_score),
+    status: liasseRow.status as 'draft' | 'validated' | 'filed',
+    bank_reconciliation_summary: engine.bankSummary,
     unreconciled_transactions: unreconciled,
-    payroll_summary: payload.payroll,
+    payroll_summary: engine.payrollSummary,
     cnss_summary: {
-      total_cnss: payload.payroll.cnss_deductions,
-      pending: payload.payroll.payslips_draft,
+      total_cnss: engine.payrollSummary.cnss_deductions,
+      employees: engine.payrollSummary.employees,
+      pending: engine.payrollSummary.payslips_draft,
     },
-    ir_summary: { retained_ir: payload.payroll.ir_retained },
-    validation_alerts: payload.checks,
-    audit_logs_sample: (auditLogs ?? []).map(l => ({
-      action: String(l.action),
-      entity_type: String(l.entity_type),
-      created_at: String(l.created_at),
-    })),
-    source_documents_count: docCount ?? 0,
-  };
-}
-
-export async function upsertLiasseRecord(
-  db: SupabaseClient,
-  userId: string,
-  companyId: string,
-  fiscalYear: number,
-  payload: LiasseFiscalePayload,
-): Promise<string> {
-  const blockers = getBlockingIssues(payload.checks);
-  const { data, error } = await db
-    .from('zafirix_liasse_fiscale')
-    .upsert({
-      user_id: userId,
-      company_id: companyId,
+    ir_summary: {
+      retained_ir: engine.payrollSummary.ir_retained,
       fiscal_year: fiscalYear,
-      status: 'draft',
-      readiness_score: payload.readiness_score,
-      payload: payload as unknown as Record<string, unknown>,
-      validation_result: { checks: payload.checks, factors: payload.readiness_factors } as unknown as Record<string, unknown>,
-      blocking_issues: blockers as unknown as Record<string, unknown>[],
-      generated_at: new Date().toISOString(),
-      updated_at: new Date().toISOString(),
-    }, { onConflict: 'user_id,company_id,fiscal_year' })
-    .select('id')
-    .single();
-
-  if (error) throw new Error(error.message);
-  return String(data?.id);
+    },
+    validation_alerts: checks,
+    bilan_excerpt: (liasseRow.payload?.bilan as Record<string, unknown>) ?? {},
+    audit_logs_sample: auditLogs ?? [],
+    source_documents: docs ?? [],
+  };
 }

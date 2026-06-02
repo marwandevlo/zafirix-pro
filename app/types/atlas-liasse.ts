@@ -2,85 +2,73 @@ export type LiasseStatus = 'draft' | 'validated' | 'filed';
 
 export type LiasseCheckSeverity = 'critical' | 'warning' | 'info';
 
-export type LiasseCheck = {
+export type LiasseValidationCheck = {
   id: string;
-  category: 'bank' | 'payroll' | 'tva' | 'accounting' | 'legal' | 'invoices' | 'liasse';
   severity: LiasseCheckSeverity;
-  title: string;
-  description: string;
+  category: string;
+  message: string;
   blocking: boolean;
+  details?: Record<string, unknown>;
 };
 
 export type LiasseBankSummary = {
-  accounting_bank_balance: number;
-  statement_closing_balance: number | null;
-  closing_balance_mismatch: boolean;
-  transactions_imported: number;
-  reconciled_amount: number;
-  unreconciled_amount: number;
+  statements_count: number;
+  transactions_count: number;
+  reconciled_count: number;
+  suggested_count: number;
   unreconciled_count: number;
-  payments_without_entries: number;
-  paid_invoices_no_bank_match: number;
+  accounting_bank_balance: number;
+  imported_transactions_total: number;
+  last_statement_closing: number | null;
+  computed_closing_from_tx: number | null;
+  closing_balance_delta: number | null;
 };
 
 export type LiassePayrollSummary = {
+  employees: number;
   gross_salaries: number;
   net_salaries: number;
   cnss_deductions: number;
   ir_retained: number;
-  employees_count: number;
+  payslips_total: number;
   payslips_validated: number;
   payslips_draft: number;
-  payroll_anomalies: number;
-  payroll_run_validated: boolean;
+  payroll_anomalies: string[];
+  payroll_run_status: string | null;
 };
 
-export type LiasseReadinessFactors = {
-  accounting_balanced: boolean;
-  invoices_validated_pct: number;
-  tva_consistent: boolean;
-  bank_reconciled_pct: number;
-  payroll_validated: boolean;
-  no_critical_alerts: boolean;
-  legal_not_expired: boolean;
-  liasse_generated: boolean;
-};
-
-export type LiasseFiscalePayload = {
-  fiscal_year: number;
-  company_name: string;
-  generated_at: string;
-  bank: LiasseBankSummary;
-  payroll: LiassePayrollSummary;
-  accounting: {
-    total_debit: number;
-    total_credit: number;
-    bilan_actif: number;
-    bilan_passif: number;
-    bilan_balanced: boolean;
+export type LiasseFiscaleRecord = {
+  id: string;
+  companyId: string | null;
+  fiscalYear: number;
+  status: LiasseStatus;
+  readinessScore: number;
+  payload: Record<string, unknown>;
+  validationResult: {
+    checks: LiasseValidationCheck[];
+    readiness_breakdown: Record<string, number>;
   };
-  tva: {
-    collected: number;
-    deductible: number;
-    inconsistencies: number;
-  };
-  checks: LiasseCheck[];
-  readiness_score: number;
-  readiness_factors: LiasseReadinessFactors;
+  blockingIssues: LiasseValidationCheck[];
+  adminOverrideReason: string | null;
+  generatedAt: string | null;
+  validatedAt: string | null;
+  filedAt: string | null;
+  createdAt: string;
 };
 
 export type LiasseAuditPackage = {
   exported_at: string;
   fiscal_year: number;
-  company_name: string;
+  company_id: string | null;
   readiness_score: number;
-  status: string;
+  status: LiasseStatus;
   bank_reconciliation_summary: LiasseBankSummary;
-  unreconciled_transactions: { id: string; date: string | null; description: string | null; amount: number }[];
+  unreconciled_transactions: unknown[];
   payroll_summary: LiassePayrollSummary;
-  cnss_summary: { total_cnss: number; pending: number };
-  ir_summary: { retained_ir: number };
-  validation_alerts: LiasseCheck[];
-  audit_logs_sample: { action: string; entity_type: string; created_at: string }[];
-  source_documents_count: number;
+  cnss_summary: Record<string, unknown>;
+  ir_summary: Record<string, unknown>;
+  validation_alerts: LiasseValidationCheck[];
+  bilan_excerpt: Record<string, unknown>;
+  audit_logs_sample: unknown[];
+  source_documents: unknown[];
 };
