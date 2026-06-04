@@ -23,8 +23,8 @@ import {
   UploadCloud,
   XCircle,
 } from 'lucide-react';
-import type { AuditAction } from '@/app/lib/atlas-audit-log';
-import { AUDIT_ACTION_LABELS, AUDIT_ACTION_COLORS } from '@/app/lib/atlas-audit-log';
+import type { AuditAction } from '@/app/lib/atlas-audit-log-constants';
+import { AUDIT_ACTION_LABELS, AUDIT_ACTION_COLORS } from '@/app/lib/atlas-audit-log-constants';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
