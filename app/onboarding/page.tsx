@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import { Building2, Phone, User } from 'lucide-react';
 import { ZafirixLogo } from '@/app/components/branding/ZafirixLogo';
 import { isAtlasSupabaseDataEnabled } from '@/app/lib/atlas-data-source';
+import { trackOnboardingStarted } from '@/app/lib/atlas-onboarding-analytics';
 import { supabase } from '@/app/lib/supabase';
 
 export default function OnboardingPage() {
@@ -94,7 +95,8 @@ export default function OnboardingPage() {
         return;
       }
 
-      router.push('/');
+      trackOnboardingStarted('profile_onboarding');
+      router.push('/setup');
     } finally {
       setSaving(false);
     }

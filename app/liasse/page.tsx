@@ -6,6 +6,7 @@ import {
   Globe, Loader2, ShieldAlert,
 } from 'lucide-react';
 import { AppSidebar } from '@/app/components/shell/AppSidebar';
+import { ModuleEmptyState } from '@/app/components/onboarding/ModuleEmptyState';
 import { BetaSurfaceBadge } from '@/app/components/safety/BetaSurfaceBadge';
 import { ExportMenu } from '@/app/components/ExportMenu';
 import type { ExportColumn } from '@/app/components/ExportMenu';
@@ -274,7 +275,9 @@ export default function LiassePage() {
             </div>
             <div className="divide-y max-h-80 overflow-y-auto">
               {checks.length === 0 && (
-                <p className="px-4 py-6 text-sm text-gray-400 text-center">Générez la liasse pour lancer les contrôles.</p>
+                <div className="px-4 py-2">
+                  <ModuleEmptyState module="liasse" />
+                </div>
               )}
               {checks.map((c) => (
                 <div key={c.id} className={`px-4 py-3 text-sm border-l-4 ${severityClass(c.severity)}`}>

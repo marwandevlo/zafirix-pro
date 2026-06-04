@@ -19,6 +19,8 @@ import {
   Tags,
   ClipboardList,
   Sparkles,
+  CircleHelp,
+  Wrench,
 } from 'lucide-react';
 
 export type AtlasNavItemId =
@@ -47,7 +49,9 @@ export type AtlasNavItemId =
   | 'billing'
   | 'pricing'
   | 'settings'
-  | 'admin';
+  | 'admin'
+  | 'setup'
+  | 'help';
 
 export type AtlasAppNavItem = {
   id: AtlasNavItemId;
@@ -62,6 +66,8 @@ export type AtlasAppNavItem = {
  */
 export const ATLAS_APP_NAV_ITEMS: AtlasAppNavItem[] = [
   { id: 'dashboard', label: 'Dashboard', labelAr: 'الرئيسية', icon: LayoutDashboard, href: '/' },
+  { id: 'setup', label: 'Configuration', labelAr: 'الإعداد', icon: Wrench, href: '/setup' },
+  { id: 'help', label: 'Aide', labelAr: 'المساعدة', icon: CircleHelp, href: '/help' },
   { id: 'companies', label: 'Mes sociétés', labelAr: 'شركاتي', icon: Building2, href: '/companies' },
   { id: 'cabinet', label: 'Portfolio cabinet', labelAr: 'محفظة المكتب', icon: Users, href: '/cabinet' },
   { id: 'clients', label: 'Clients', labelAr: 'العملاء', icon: Users, href: '/clients' },

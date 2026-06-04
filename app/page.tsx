@@ -18,6 +18,11 @@ import { GlobalSearchButton } from '@/app/components/search/GlobalSearchButton';
 import { UsageWidget } from '@/app/components/usage/UsageWidget';
 import { TrialUpgradeBanner } from '@/app/components/trial/TrialUpgradeBanner';
 import { TrialOnboardingChecklist } from '@/app/components/trial/TrialOnboardingChecklist';
+import { GettingStartedWidget } from '@/app/components/onboarding/GettingStartedWidget';
+import { OnboardingChecklistWidget } from '@/app/components/onboarding/OnboardingChecklistWidget';
+import { SmartRecommendationsWidget } from '@/app/components/onboarding/SmartRecommendationsWidget';
+import { GuidedTourEngine } from '@/app/components/onboarding/GuidedTourEngine';
+import { FeedbackWidget } from '@/app/components/onboarding/FeedbackWidget';
 import { DashboardFunnelInsights } from '@/app/components/conversion/DashboardFunnelInsights';
 import { AppSidebar, AppSidebarMobileOverlay } from '@/app/components/shell/AppSidebar';
 import { ReferralDashboardCard } from '@/app/components/referral/ReferralDashboardCard';
@@ -171,7 +176,7 @@ export default function Home() {
           </div>
         </header>
 
-        <div className="flex-1 overflow-y-auto px-4 lg:px-8 py-4 lg:py-6 space-y-4 lg:space-y-6">
+        <div className="flex-1 overflow-y-auto px-4 lg:px-8 py-4 lg:py-6 space-y-4 lg:space-y-6" data-tour="dashboard">
           <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-xs sm:text-sm text-amber-950 flex gap-2 items-start">
             <Shield size={16} className="shrink-0 mt-0.5 text-amber-700" aria-hidden />
             <p>
@@ -183,6 +188,9 @@ export default function Home() {
           </div>
           <ReferralPostOnboardingModal lang={lang} />
           <TrialUpgradeBanner />
+          <GettingStartedWidget lang={lang} />
+          <OnboardingChecklistWidget lang={lang} />
+          <SmartRecommendationsWidget lang={lang} />
           <ReferralDashboardCard lang={lang} />
           <TrialOnboardingChecklist lang={lang} />
           <DashboardFunnelInsights lang={lang} pendingDeclarationsCount={pendingFiscalCount} />
@@ -334,6 +342,8 @@ export default function Home() {
           </div>
         </div>
       </main>
+      <GuidedTourEngine lang={lang} autoStart />
+      <FeedbackWidget lang={lang} />
     </div>
   );
 }

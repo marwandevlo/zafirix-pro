@@ -13,6 +13,7 @@ import {
   ShoppingCart,
 } from 'lucide-react';
 import { AppSidebar } from '@/app/components/shell/AppSidebar';
+import { ModuleEmptyState } from '@/app/components/onboarding/ModuleEmptyState';
 import { BetaSurfaceBadge } from '@/app/components/safety/BetaSurfaceBadge';
 import { ExportMenu } from '@/app/components/ExportMenu';
 import type { ExportColumn } from '@/app/components/ExportMenu';
@@ -438,8 +439,8 @@ function InvoiceTable({
         <tbody>
           {lines.length === 0 && (
             <tr>
-              <td colSpan={7} className="px-4 py-8 text-center text-gray-400">
-                Aucune facture sur cette période. Ajoutez des factures dans Factures ou Documents.
+              <td colSpan={7}>
+                <ModuleEmptyState module="tva" />
               </td>
             </tr>
           )}

@@ -6,6 +6,7 @@ import { GlobalSearchOverlay } from "@/app/components/search/GlobalSearchOverlay
 import { EmailLifecycleBootstrap } from "@/app/components/lifecycle/EmailLifecycleBootstrap";
 import { RecoveryHashRedirectScript } from "@/app/components/auth/RecoveryHashRedirectScript";
 import { AppSubscriptionProviders } from "@/app/components/subscription/AppSubscriptionProviders";
+import { FirstRunManager } from "@/app/components/onboarding/FirstRunManager";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -56,6 +57,7 @@ export default function RootLayout({
         <RecoveryHashRedirectScript />
         <EmailLifecycleBootstrap />
         <AppSubscriptionProviders>{children}</AppSubscriptionProviders>
+        <FirstRunManager />
         {enableGlobalSearchOverlay ? <GlobalSearchOverlay /> : null}
         {enableAssistantOverlay ? <AssistantOverlay /> : null}
       </body>

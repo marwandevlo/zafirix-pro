@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { AlertTriangle, Download, Loader2, Shield } from 'lucide-react';
 import { AppSidebar } from '@/app/components/shell/AppSidebar';
+import { ModuleEmptyState } from '@/app/components/onboarding/ModuleEmptyState';
 import { ExportMenu } from '@/app/components/ExportMenu';
 import type { ExportColumn } from '@/app/components/ExportMenu';
 import { getActiveCompanyDbRowId } from '@/app/lib/atlas-active-company';
@@ -167,7 +168,7 @@ export default function AuditPage() {
               )}
             </>
           ) : (
-            <p className="text-sm text-gray-500">Impossible de charger le rapport.</p>
+            <ModuleEmptyState module="audit" />
           )}
         </div>
       </main>

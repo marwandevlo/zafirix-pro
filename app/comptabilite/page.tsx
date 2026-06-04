@@ -11,6 +11,7 @@ import { listAtlasPayments } from '@/app/lib/atlas-payments-repository';
 import type { AtlasPayment } from '@/app/types/atlas-payment';
 import { fetchAi } from '@/app/lib/fetch-ai';
 import { AppSidebar } from '@/app/components/shell/AppSidebar';
+import { ModuleEmptyState } from '@/app/components/onboarding/ModuleEmptyState';
 import { formatMadAmountLabel } from '@/app/lib/atlas-format';
 import { SourceDocumentBadge } from '@/app/components/SourceDocumentBadge';
 import { ValidationStatusBadge } from '@/app/components/validation/ValidationStatusBadge';
@@ -397,8 +398,8 @@ export default function ComptabilitePage() {
               <tbody>
                 {ecritures.length === 0 ? (
                   <tr>
-                    <td colSpan={5} className="px-4 py-8 text-center text-sm text-gray-400">
-                      Aucune écriture enregistrée. Ajoutez une ligne pour démarrer le journal.
+                    <td colSpan={5}>
+                      <ModuleEmptyState module="accounting" />
                     </td>
                   </tr>
                 ) : (

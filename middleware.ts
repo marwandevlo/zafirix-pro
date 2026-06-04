@@ -49,6 +49,7 @@ const PUBLIC_PATHS = new Set([
 
 function isPublicPath(pathname: string): boolean {
   if (PUBLIC_PATHS.has(pathname)) return true;
+  if (pathname === '/legal' || pathname.startsWith('/legal/')) return true;
   // allow next internals + static
   if (pathname.startsWith('/_next')) return true;
   if (pathname.startsWith('/zafirix-')) return true;

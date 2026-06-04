@@ -6,6 +6,7 @@ import { documentUploadSessionUserId } from '@/app/lib/atlas-document-upload-aut
 import { refreshAtlasAiContext, contextToPromptBlock } from '@/app/lib/atlas-ai-context';
 import { buildCabinetAiContext, cabinetContextToPromptBlock } from '@/app/lib/atlas-ai-cabinet-context';
 import { buildBillingAiContext, billingContextToPromptBlock } from '@/app/lib/atlas-ai-billing-context';
+import { buildOnboardingAiPromptBlock, isOnboardingQuestion } from '@/app/lib/atlas-ai-onboarding-context';
 import { runAtlasAiCopilot, streamAtlasAiCopilot, COPILOT_SYSTEM, formatSourcesFooter } from '@/app/lib/atlas-ai-copilot';
 import { createSseStream } from '@/app/lib/atlas-ai-provider';
 import {
@@ -68,7 +69,8 @@ export async function POST(request: NextRequest) {
 
   const cabinetCtx = await buildCabinetAiContext(db, userId).catch(() => null);
   const billingCtx = await buildBillingAiContext(db, userId).catch(() => null);
-  const contextBlock = `${contextToPromptBlock(snapshot)}${cabinetCtx ? `\n\n${cabinetContextToPromptBlock(cabinetCtx)}` : ''}${billingCtx ? `\n\n${billingContextToPromptBlock(billingCtx)}` : ''}`;
+  const onboardingBlock = isOnboardingQuestion(message) ? `\n\n${buildOnboardingAiPromptBlock()}` : '';
+  const contextBlock = `${contextToPromptBlock(snapshot)}${cabinetCtx ? `\n\n${cabinetContextToPromptBlock(cabinetCtx)}` : ''}${billingCtx ? `\n\n${billingContextToPromptBlock(billingCtx)}` : ''}${onboardingBlock}`;
 
   const conversationId = await getOrCreateConversation(db, userId, companyId, body.conversationId);
   const history = await listConversationHistory(db, userId, conversationId);

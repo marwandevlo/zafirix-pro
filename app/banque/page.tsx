@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Building2, Loader2, RefreshCcw, Search } from 'lucide-react';
 import { AppSidebar } from '@/app/components/shell/AppSidebar';
+import { ModuleEmptyState } from '@/app/components/onboarding/ModuleEmptyState';
 import { BetaSurfaceBadge } from '@/app/components/safety/BetaSurfaceBadge';
 import { ExportMenu } from '@/app/components/ExportMenu';
 import type { ExportColumn } from '@/app/components/ExportMenu';
@@ -168,9 +169,7 @@ export default function BanquePage() {
             {loading ? (
               <div className="flex justify-center py-12"><Loader2 size={24} className="animate-spin text-gray-400" /></div>
             ) : filtered.length === 0 ? (
-              <div className="px-4 py-12 text-center text-sm text-gray-400">
-                Aucune opération. Importez un relevé via Documents IA → Routage Banque.
-              </div>
+              <ModuleEmptyState module="bank" />
             ) : (
               <table className="w-full text-sm">
                 <thead>

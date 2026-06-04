@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { CreditCard, RefreshCw, ArrowUpRight } from 'lucide-react';
 import { AppSidebar } from '@/app/components/shell/AppSidebar';
+import { ModuleEmptyState } from '@/app/components/onboarding/ModuleEmptyState';
 import { ExportMenu } from '@/app/components/ExportMenu';
 import type { ExportColumn } from '@/app/components/ExportMenu';
 import { UpgradeModal } from '@/app/components/billing/UpgradeModal';
@@ -152,7 +153,7 @@ export default function BillingPage() {
               </section>
             </>
           ) : (
-            <p className="text-gray-500">Impossible de charger la facturation.</p>
+            <ModuleEmptyState module="billing" />
           )}
         </div>
       </main>
