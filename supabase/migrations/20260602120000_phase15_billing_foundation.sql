@@ -1,6 +1,6 @@
 -- Phase 15: SaaS billing foundation (plans, workspace subscriptions, features, usage)
 
--- ── 1. Subscription plans ─────────────────────────────────────────────────────
+-- 1. Subscription plans
 create table if not exists public.atlas_subscription_plans (
   id uuid primary key default gen_random_uuid(),
   code text not null unique,
@@ -16,7 +16,7 @@ create table if not exists public.atlas_subscription_plans (
 create index if not exists idx_subscription_plans_code on public.atlas_subscription_plans (code);
 create index if not exists idx_subscription_plans_active on public.atlas_subscription_plans (active);
 
--- ── 2. Plan features (null limit_value = unlimited) ───────────────────────────
+-- 2. Plan features (null limit_value = unlimited)
 create table if not exists public.atlas_plan_features (
   id uuid primary key default gen_random_uuid(),
   plan_id uuid not null references public.atlas_subscription_plans (id) on delete cascade,
@@ -29,13 +29,12 @@ create table if not exists public.atlas_plan_features (
 create index if not exists idx_plan_features_plan on public.atlas_plan_features (plan_id);
 create index if not exists idx_plan_features_code on public.atlas_plan_features (feature_code);
 
--- ── 3. Workspace subscriptions ────────────────────────────────────────────────
+-- 3. Workspace subscriptions
 create table if not exists public.atlas_workspace_subscriptions (
   id uuid primary key default gen_random_uuid(),
   workspace_id uuid not null references public.atlas_workspaces (id) on delete cascade,
   plan_id uuid not null references public.atlas_subscription_plans (id) on delete restrict,
-  status text not null default 'trial'
-    check (status in ('trial', 'active', 'suspended', 'cancelled', 'expired')),
+  status text not null default 'trial' check (status in ('trial', 'active', 'suspended', 'cancelled', 'expired')),
   started_at timestamptz not null default now(),
   expires_at timestamptz,
   cancelled_at timestamptz,
@@ -47,7 +46,7 @@ create index if not exists idx_workspace_subscriptions_workspace on public.atlas
 create index if not exists idx_workspace_subscriptions_plan on public.atlas_workspace_subscriptions (plan_id);
 create index if not exists idx_workspace_subscriptions_status on public.atlas_workspace_subscriptions (status);
 
--- ── 4. Usage events ───────────────────────────────────────────────────────────
+-- 4. Usage events
 create table if not exists public.atlas_usage_events (
   id uuid primary key default gen_random_uuid(),
   workspace_id uuid not null references public.atlas_workspaces (id) on delete cascade,
@@ -65,7 +64,7 @@ create index if not exists idx_usage_events_user on public.atlas_usage_events (u
 create index if not exists idx_usage_events_feature on public.atlas_usage_events (feature_code);
 create index if not exists idx_usage_events_created on public.atlas_usage_events (workspace_id, feature_code, created_at);
 
--- ── 5. Seed plans ─────────────────────────────────────────────────────────────
+-- 5. Seed plans
 insert into public.atlas_subscription_plans (code, name, description, monthly_price, yearly_price, currency, active)
 values
   ('FREE', 'Free', 'Découverte avec limites de base.', 0, 0, 'MAD', true),
@@ -80,11 +79,11 @@ on conflict (code) do update set
   yearly_price = excluded.yearly_price,
   active = excluded.active;
 
--- ── 6. Seed plan features ─────────────────────────────────────────────────────
+-- 6. Seed plan features
 insert into public.atlas_plan_features (plan_id, feature_code, limit_value)
 select p.id, f.feature_code, f.limit_value
 from public.atlas_subscription_plans p
-cross join (
+inner join (
   values
     ('FREE', 'documents_per_month', 100),
     ('FREE', 'ai_requests_limit', 20),
@@ -126,11 +125,10 @@ cross join (
     ('ENTERPRISE', 'storage_limit_gb', null),
     ('ENTERPRISE', 'bank_accounts_limit', null),
     ('ENTERPRISE', 'payroll_limit', null)
-) as f(plan_code, feature_code, limit_value)
-where p.code = f.plan_code
+) as f(plan_code, feature_code, limit_value) on p.code = f.plan_code
 on conflict (plan_id, feature_code) do update set limit_value = excluded.limit_value;
 
--- ── 7. RLS ────────────────────────────────────────────────────────────────────
+-- 7. RLS
 alter table public.atlas_subscription_plans enable row level security;
 alter table public.atlas_plan_features enable row level security;
 alter table public.atlas_workspace_subscriptions enable row level security;
@@ -146,7 +144,14 @@ create policy "plan_features_read" on public.atlas_plan_features
 
 drop policy if exists "workspace_subscriptions_owner" on public.atlas_workspace_subscriptions;
 create policy "workspace_subscriptions_owner" on public.atlas_workspace_subscriptions
-  for all using (
+  for all
+  using (
+    exists (
+      select 1 from public.atlas_workspaces w
+      where w.id = atlas_workspace_subscriptions.workspace_id and w.owner_user_id = auth.uid()
+    )
+  )
+  with check (
     exists (
       select 1 from public.atlas_workspaces w
       where w.id = atlas_workspace_subscriptions.workspace_id and w.owner_user_id = auth.uid()
@@ -164,7 +169,18 @@ create policy "workspace_subscriptions_member" on public.atlas_workspace_subscri
 
 drop policy if exists "usage_events_workspace" on public.atlas_usage_events;
 create policy "usage_events_workspace" on public.atlas_usage_events
-  for all using (
+  for all
+  using (
+    exists (
+      select 1 from public.atlas_workspaces w
+      where w.id = atlas_usage_events.workspace_id
+        and (w.owner_user_id = auth.uid() or exists (
+          select 1 from public.atlas_user_roles ur
+          where ur.workspace_id = w.id and ur.user_id = auth.uid()
+        ))
+    )
+  )
+  with check (
     exists (
       select 1 from public.atlas_workspaces w
       where w.id = atlas_usage_events.workspace_id
