@@ -63,6 +63,11 @@ export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
   if (isPublicPath(pathname)) return NextResponse.next();
 
+  // Liveness / readiness probes (load balancers, monitoring).
+  if (pathname === '/api/health' || pathname === '/api/health/dependencies') {
+    return NextResponse.next();
+  }
+
   // Anonymous analytics (POST + preflight) — must not require a logged-in session.
   if (pathname === '/api/analytics/track' || pathname === '/api/funnel/track') {
     return NextResponse.next();

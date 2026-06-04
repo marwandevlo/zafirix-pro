@@ -5,6 +5,10 @@ import { atlasDataBackend } from '@/app/lib/atlas-data-source';
 import { logAtlasServerEvent } from '@/app/lib/atlas-server-log';
 import { scheduleVercelBackground } from '@/app/lib/atlas-vercel-background';
 import { OCR_PROVIDER } from '@/app/lib/atlas-ocr';
+import { getSupabaseServiceRoleClient } from '@/app/lib/supabase-admin';
+import { checkWorkspaceRateLimit, rateLimitResponse } from '@/app/lib/atlas-rate-limit';
+import { meterFeatureUsage } from '@/app/lib/atlas-usage-meter';
+import { ensureWorkspaceSubscription } from '@/app/lib/atlas-billing-server';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -64,6 +68,18 @@ export async function POST(
   const { id: documentId } = await context.params;
   if (!documentId) {
     return NextResponse.json({ error: 'document_required', code: 'document_required' }, { status: 400 });
+  }
+
+  const adminDb = getSupabaseServiceRoleClient();
+  const { workspaceId } = await ensureWorkspaceSubscription(adminDb, userId);
+  const wsRate = checkWorkspaceRateLimit(workspaceId, 'ocr', userId);
+  if (!wsRate.ok) {
+    const rl = rateLimitResponse(wsRate);
+    return NextResponse.json(rl.body, { status: rl.status });
+  }
+  const meter = await meterFeatureUsage(adminDb, userId, 'ocr_request');
+  if (!meter.ok) {
+    return NextResponse.json({ error: meter.code, message: meter.messageFr }, { status: meter.status });
   }
 
   logAtlasServerEvent('documents/ocr', 'info', 'ocr_run_accepted', { documentId, userId });

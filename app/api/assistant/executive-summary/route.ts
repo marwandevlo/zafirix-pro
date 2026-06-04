@@ -8,6 +8,9 @@ import { generateExecutiveSummary, streamExecutiveSummaryNarrative, type Executi
 import { logAtlasAiInteraction } from '@/app/lib/atlas-ai-interactions';
 import { createSseStream } from '@/app/lib/atlas-ai-provider';
 import { getSupabaseServiceRoleClient } from '@/app/lib/supabase-admin';
+import { checkWorkspaceRateLimit, rateLimitResponse } from '@/app/lib/atlas-rate-limit';
+import { meterFeatureUsage } from '@/app/lib/atlas-usage-meter';
+import { ensureWorkspaceSubscription } from '@/app/lib/atlas-billing-server';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -25,6 +28,17 @@ export async function GET(request: NextRequest) {
   const stream = sp.get('stream') === '1';
 
   const db = getSupabaseServiceRoleClient();
+  const { workspaceId } = await ensureWorkspaceSubscription(db, userId);
+  const wsRate = checkWorkspaceRateLimit(workspaceId, 'ai_executive', userId);
+  if (!wsRate.ok) {
+    const rl = rateLimitResponse(wsRate);
+    return NextResponse.json(rl.body, { status: rl.status });
+  }
+  const meter = await meterFeatureUsage(db, userId, 'ai_request', { companyId });
+  if (!meter.ok) {
+    return NextResponse.json({ error: meter.code, message: meter.messageFr }, { status: meter.status });
+  }
+
   const opts = { period, year, month, quarter };
 
   if (stream) {

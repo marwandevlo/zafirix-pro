@@ -142,6 +142,7 @@ export default function AdminShell(props: { title: string; children: React.React
             <SidebarLink href="/admin/manual-payments" icon={<Banknote size={16} />} label="Manuel (MA)" />
             <SidebarLink href="/admin/analytics" icon={<BarChart3 size={16} />} label="Analytics" />
             <SidebarLink href="/admin/logs" icon={<ScrollText size={16} />} label="Logs" />
+            <SidebarLink href="/admin/security" icon={<ShieldCheck size={16} />} label="Security" />
           </div>
         </div>
         <aside className="hidden lg:block w-64 shrink-0">
@@ -168,6 +169,7 @@ export default function AdminShell(props: { title: string; children: React.React
               <SidebarLink href="/admin/manual-payments" icon={<Banknote size={16} />} label="Manuel (MA)" />
               <SidebarLink href="/admin/analytics" icon={<BarChart3 size={16} />} label="Analytics" />
               <SidebarLink href="/admin/logs" icon={<ScrollText size={16} />} label="Logs" />
+              <SidebarLink href="/admin/security" icon={<ShieldCheck size={16} />} label="Security" />
             </nav>
           </div>
         </aside>

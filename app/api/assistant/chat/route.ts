@@ -17,7 +17,9 @@ import {
 } from '@/app/lib/atlas-ai-interactions';
 import { computeCopilotConfidence } from '@/app/lib/atlas-ai-confidence';
 import { getSupabaseServiceRoleClient } from '@/app/lib/supabase-admin';
-import { checkAiRateLimit } from '@/app/lib/ai-rate-limit';
+import { checkAiEndpointRateLimit, checkWorkspaceRateLimit, rateLimitResponse } from '@/app/lib/atlas-rate-limit';
+import { meterFeatureUsage } from '@/app/lib/atlas-usage-meter';
+import { ensureWorkspaceSubscription } from '@/app/lib/atlas-billing-server';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -26,9 +28,23 @@ export async function POST(request: NextRequest) {
   const userId = await documentUploadSessionUserId(request);
   if (!userId) return NextResponse.json({ error: 'auth_required' }, { status: 401 });
 
-  const rate = checkAiRateLimit(`assistant:${userId}`);
+  const rate = checkAiEndpointRateLimit(`assistant:${userId}`);
   if (!rate.ok) {
-    return NextResponse.json({ error: 'rate_limited' }, { status: 429 });
+    const rl = rateLimitResponse(rate);
+    return NextResponse.json(rl.body, { status: rl.status });
+  }
+
+  const db = getSupabaseServiceRoleClient();
+  const { workspaceId } = await ensureWorkspaceSubscription(db, userId);
+  const wsRate = checkWorkspaceRateLimit(workspaceId, 'ai_chat', userId);
+  if (!wsRate.ok) {
+    const rl = rateLimitResponse(wsRate);
+    return NextResponse.json(rl.body, { status: rl.status });
+  }
+
+  const meter = await meterFeatureUsage(db, userId, 'ai_request');
+  if (!meter.ok) {
+    return NextResponse.json({ error: meter.code, message: meter.messageFr }, { status: meter.status });
   }
 
   const body = (await request.json().catch(() => ({}))) as {
@@ -43,7 +59,6 @@ export async function POST(request: NextRequest) {
   if (!message) return NextResponse.json({ error: 'message_required' }, { status: 400 });
 
   const companyId = body.companyId?.trim() || null;
-  const db = getSupabaseServiceRoleClient();
 
   const { snapshot, sources } = await refreshAtlasAiContext(db, {
     userId,

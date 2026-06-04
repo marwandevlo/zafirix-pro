@@ -8,6 +8,11 @@ import {
 } from '@/app/lib/atlas-document-upload-auth';
 import { logUploadStep } from '@/app/lib/atlas-document-upload-core';
 import { registerStoredDocument, removeOrphanStorageObject } from '@/app/lib/atlas-document-upload-register';
+import { canAccessCompany } from '@/app/lib/atlas-permissions';
+import { checkWorkspaceRateLimit, rateLimitResponse } from '@/app/lib/atlas-rate-limit';
+import { meterFeatureUsage } from '@/app/lib/atlas-usage-meter';
+import { ensureWorkspaceSubscription } from '@/app/lib/atlas-billing-server';
+import { getSupabaseServiceRoleClient } from '@/app/lib/supabase-admin';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -78,6 +83,26 @@ export async function POST(request: NextRequest) {
   }
   if (!mimeType || !Number.isFinite(sizeBytes) || sizeBytes <= 0) {
     return uploadErrorResponse(400, 'validation', 'file_required', 'mimeType and sizeBytes required');
+  }
+
+  const adminDb = getSupabaseServiceRoleClient();
+  const allowed = await canAccessCompany(adminDb, userId, companyId);
+  if (!allowed) {
+    return uploadErrorResponse(403, 'auth', 'company_forbidden', 'Accès société refusé.');
+  }
+
+  const { workspaceId } = await ensureWorkspaceSubscription(adminDb, userId);
+  const wsRate = checkWorkspaceRateLimit(workspaceId, 'document_upload', userId);
+  if (!wsRate.ok) {
+    const rl = rateLimitResponse(wsRate);
+    return uploadErrorResponse(429, 'rate', rl.body.code, 'Trop de téléversements. Réessayez plus tard.', {
+      retryAfterSec: rl.body.retryAfterSec,
+    });
+  }
+
+  const meter = await meterFeatureUsage(adminDb, userId, 'document_upload', { companyId });
+  if (!meter.ok) {
+    return uploadErrorResponse(meter.status, 'quota', meter.code, meter.messageFr ?? 'Quota atteint.');
   }
 
   const supabase = await createDocumentUploadSupabaseClient();

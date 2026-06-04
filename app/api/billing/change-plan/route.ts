@@ -7,6 +7,7 @@ import { changeWorkspacePlan, ensureWorkspaceSubscription } from '@/app/lib/atla
 import type { PlanCode } from '@/app/types/atlas-billing';
 import { PLAN_CODES } from '@/app/types/atlas-billing';
 import { getSupabaseServiceRoleClient } from '@/app/lib/supabase-admin';
+import { requireWorkspaceRole, permissionJsonResponse } from '@/app/lib/atlas-permissions';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -23,6 +24,10 @@ export async function POST(request: NextRequest) {
 
   const db = getSupabaseServiceRoleClient();
   const { workspaceId } = await ensureWorkspaceSubscription(db, userId, body.workspaceId ?? null);
+
+  const perm = await requireWorkspaceRole(db, userId, workspaceId, 'manager');
+  if (!perm.ok) return permissionJsonResponse(perm);
+
   const subscription = await changeWorkspacePlan(db, userId, workspaceId, planCode);
 
   return NextResponse.json({

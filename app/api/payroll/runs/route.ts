@@ -2,6 +2,11 @@ import { NextRequest, NextResponse } from 'next/server';
 import { atlasDataBackend } from '@/app/lib/atlas-data-source';
 import { requireAgentsRouteDb } from '@/app/lib/atlas-agents-route-db';
 import { createOrRefreshPayrollRun, listPayrollRuns } from '@/app/lib/atlas-payroll-server';
+import { checkWorkspaceRateLimit, rateLimitResponse } from '@/app/lib/atlas-rate-limit';
+import { meterFeatureUsage } from '@/app/lib/atlas-usage-meter';
+import { ensureWorkspaceSubscription } from '@/app/lib/atlas-billing-server';
+import { requireCompanyRole, permissionJsonResponse } from '@/app/lib/atlas-permissions';
+import { getSupabaseServiceRoleClient } from '@/app/lib/supabase-admin';
 
 export async function GET(request: NextRequest) {
   if (atlasDataBackend() !== 'supabase') {
@@ -43,6 +48,21 @@ export async function POST(request: NextRequest) {
   const periodMonth = body.periodMonth ?? ref.getMonth() + 1;
 
   if (!companyId) return NextResponse.json({ error: 'company_required' }, { status: 400 });
+
+  const adminDb = getSupabaseServiceRoleClient();
+  const perm = await requireCompanyRole(adminDb, ctx.userId, companyId, 'payroll_manager');
+  if (!perm.ok) return permissionJsonResponse(perm);
+
+  const { workspaceId } = await ensureWorkspaceSubscription(adminDb, ctx.userId);
+  const wsRate = checkWorkspaceRateLimit(workspaceId, 'payroll_run', ctx.userId);
+  if (!wsRate.ok) {
+    const rl = rateLimitResponse(wsRate);
+    return NextResponse.json(rl.body, { status: rl.status });
+  }
+  const meter = await meterFeatureUsage(adminDb, ctx.userId, 'payroll_run', { companyId });
+  if (!meter.ok) {
+    return NextResponse.json({ error: meter.code, message: meter.messageFr }, { status: meter.status });
+  }
 
   try {
     const result = await createOrRefreshPayrollRun(ctx.db, ctx.userId, companyId, periodYear, periodMonth);

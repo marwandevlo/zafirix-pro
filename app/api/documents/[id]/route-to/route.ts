@@ -35,6 +35,9 @@ import {
 import { createBankStatementFromDocument } from '@/app/lib/atlas-bank-server';
 import { createPayslipExtractionFromDocument } from '@/app/lib/atlas-payslip-server';
 import { logAuditEvent } from '@/app/lib/atlas-audit-log';
+import { meterFeatureUsage } from '@/app/lib/atlas-usage-meter';
+import { checkWorkspaceRateLimit, rateLimitResponse } from '@/app/lib/atlas-rate-limit';
+import { ensureWorkspaceSubscription } from '@/app/lib/atlas-billing-server';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -392,6 +395,17 @@ export async function POST(
       });
 
     } else if (moduleGroup === 'banque') {
+      const { workspaceId } = await ensureWorkspaceSubscription(admin, userId);
+      const wsRate = checkWorkspaceRateLimit(workspaceId, 'bank_import', userId);
+      if (!wsRate.ok) {
+        const rl = rateLimitResponse(wsRate);
+        return NextResponse.json(rl.body, { status: rl.status });
+      }
+      const meter = await meterFeatureUsage(admin, userId, 'bank_import', { companyId });
+      if (!meter.ok) {
+        return NextResponse.json({ error: meter.code, message: meter.messageFr }, { status: meter.status });
+      }
+
       const r = await createBankStatementFromDocument(admin, {
         userId, companyId, documentId, extraction, metadata: meta,
       });
