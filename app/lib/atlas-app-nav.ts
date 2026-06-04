@@ -18,6 +18,7 @@ import {
   Shield,
   Tags,
   ClipboardList,
+  Sparkles,
 } from 'lucide-react';
 
 export type AtlasNavItemId =
@@ -25,6 +26,7 @@ export type AtlasNavItemId =
   | 'companies'
   | 'clients'
   | 'consultant'
+  | 'assistant'
   | 'agents'
   | 'documents'
   | 'validation'
@@ -59,7 +61,8 @@ export const ATLAS_APP_NAV_ITEMS: AtlasAppNavItem[] = [
   { id: 'dashboard', label: 'Dashboard', labelAr: 'الرئيسية', icon: LayoutDashboard, href: '/' },
   { id: 'companies', label: 'Mes sociétés', labelAr: 'شركاتي', icon: Building2, href: '/companies' },
   { id: 'clients', label: 'Clients', labelAr: 'العملاء', icon: Users, href: '/clients' },
-  { id: 'consultant', label: 'Assistant IA', labelAr: 'المساعد الذكي', icon: Brain, href: '/consultant' },
+  { id: 'consultant', label: 'Consultant IA', labelAr: 'المستشار الذكي', icon: Brain, href: '/consultant' },
+  { id: 'assistant', label: 'Assistant IA', labelAr: 'المساعد المحاسبي', icon: Sparkles, href: '/assistant' },
   { id: 'agents', label: 'Agents IA', labelAr: 'الوكلاء الذكيون', icon: Zap, href: '/agents' },
   { id: 'documents', label: 'Documents IA', labelAr: 'وثائق ذكية', icon: Upload, href: '/documents' },
   { id: 'validation', label: 'Validation', labelAr: 'التحقق', icon: ClipboardList, href: '/validation' },

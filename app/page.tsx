@@ -30,6 +30,7 @@ import { ReconciliationWidget } from '@/app/components/bank/ReconciliationWidget
 import { BankAlertCenter } from '@/app/components/bank/BankAlertCenter';
 import { PayrollDashboardSection } from '@/app/components/payroll/PayrollDashboardSection';
 import { LiasseReadinessWidget } from '@/app/components/liasse/LiasseReadinessWidget';
+import { AIInsightsWidget } from '@/app/components/assistant/AIInsightsWidget';
 
 const ReferralPostOnboardingModal = dynamic(
   () =>
@@ -299,6 +300,9 @@ export default function Home() {
             <BankAlertCenter compact />
           </div>
           <PayrollDashboardSection />
+
+          {/* ── AI Insights (Phase 13A) ───────────────────────────────────── */}
+          <AIInsightsWidget />
 
           {/* ── Documents IA — Validation KPIs + Queue ───────────────────── */}
           <DashboardIaSection />
