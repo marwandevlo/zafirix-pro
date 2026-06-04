@@ -35,6 +35,7 @@ import { FiscalClosingAssistantWidget } from '@/app/components/assistant/FiscalC
 import { ExecutiveSummaryWidget } from '@/app/components/assistant/ExecutiveSummaryWidget';
 import { CompanySwitcher } from '@/app/components/shell/CompanySwitcher';
 import { ConsolidatedDashboardWidget } from '@/app/components/cabinet/ConsolidatedDashboardWidget';
+import { SubscriptionWidget } from '@/app/components/billing/SubscriptionWidget';
 
 const ReferralPostOnboardingModal = dynamic(
   () =>
@@ -305,6 +306,9 @@ export default function Home() {
             <BankAlertCenter compact />
           </div>
           <PayrollDashboardSection />
+
+          {/* ── Subscription (Phase 15) ───────────────────────────────────── */}
+          <SubscriptionWidget />
 
           {/* ── Cabinet consolidated (Phase 14) ─────────────────────────── */}
           <ConsolidatedDashboardWidget />

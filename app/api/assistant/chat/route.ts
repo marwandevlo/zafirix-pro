@@ -5,6 +5,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { documentUploadSessionUserId } from '@/app/lib/atlas-document-upload-auth';
 import { refreshAtlasAiContext, contextToPromptBlock } from '@/app/lib/atlas-ai-context';
 import { buildCabinetAiContext, cabinetContextToPromptBlock } from '@/app/lib/atlas-ai-cabinet-context';
+import { buildBillingAiContext, billingContextToPromptBlock } from '@/app/lib/atlas-ai-billing-context';
 import { runAtlasAiCopilot, streamAtlasAiCopilot, COPILOT_SYSTEM, formatSourcesFooter } from '@/app/lib/atlas-ai-copilot';
 import { createSseStream } from '@/app/lib/atlas-ai-provider';
 import {
@@ -51,7 +52,8 @@ export async function POST(request: NextRequest) {
   });
 
   const cabinetCtx = await buildCabinetAiContext(db, userId).catch(() => null);
-  const contextBlock = `${contextToPromptBlock(snapshot)}${cabinetCtx ? `\n\n${cabinetContextToPromptBlock(cabinetCtx)}` : ''}`;
+  const billingCtx = await buildBillingAiContext(db, userId).catch(() => null);
+  const contextBlock = `${contextToPromptBlock(snapshot)}${cabinetCtx ? `\n\n${cabinetContextToPromptBlock(cabinetCtx)}` : ''}${billingCtx ? `\n\n${billingContextToPromptBlock(billingCtx)}` : ''}`;
 
   const conversationId = await getOrCreateConversation(db, userId, companyId, body.conversationId);
   const history = await listConversationHistory(db, userId, conversationId);
@@ -99,7 +101,7 @@ export async function POST(request: NextRequest) {
     prompt: message,
     answer,
     sourcesUsed: sources,
-    metadata: { confidence, provider: result.provider, workspace_id: cabinetCtx?.workspace_id ?? null },
+    metadata: { confidence, provider: result.provider, workspace_id: cabinetCtx?.workspace_id ?? billingCtx?.workspace_id ?? null, plan_code: billingCtx?.plan_code ?? null },
   });
 
   await touchConversation(db, conversationId);

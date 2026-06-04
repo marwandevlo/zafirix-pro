@@ -24,6 +24,7 @@ import { trackEvent } from '@/app/lib/analytics-track';
 import type { FunnelPlanPresentation } from '@/app/lib/atlas-pricing-funnel';
 import { ATLAS_INCIDENT_HOTFIX_GROWTH } from '@/app/lib/atlas-hotfix';
 import { ManualPaymentModal } from '@/app/components/pricing/ManualPaymentModal';
+import { PlanComparisonTable } from '@/app/components/billing/PlanComparisonTable';
 
 const planIconById: Record<string, typeof Rocket> = {
   starter: Rocket,
@@ -215,6 +216,12 @@ export default function PricingPage() {
               </tbody>
             </table>
           </div>
+        </div>
+
+        {/* Phase 15 — DB-driven plan comparison */}
+        <div className="mt-10">
+          <h2 className="text-lg font-bold text-slate-900 mb-3 text-center">Comparatif commercial (Phase 15)</h2>
+          <PlanComparisonTable />
         </div>
 
         {/* FAQ */}

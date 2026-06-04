@@ -44,6 +44,7 @@ export type AtlasNavItemId =
   | 'liasse'
   | 'ir'
   | 'subscription'
+  | 'billing'
   | 'pricing'
   | 'settings'
   | 'admin';
@@ -81,6 +82,7 @@ export const ATLAS_APP_NAV_ITEMS: AtlasAppNavItem[] = [
   { id: 'is', label: 'IS Fiscal', labelAr: 'ضريبة الشركات', icon: Calculator, href: '/is' },
   { id: 'liasse', label: 'Liasse fiscale', labelAr: 'الحزمة الضريبية', icon: ClipboardList, href: '/liasse' },
   { id: 'ir', label: 'IR / Salaires', labelAr: 'الرواتب والضرائب', icon: TrendingUp, href: '/ir' },
+  { id: 'billing', label: 'Facturation', labelAr: 'الفوترة', icon: CreditCard, href: '/billing' },
   { id: 'subscription', label: 'Abonnement', labelAr: 'الاشتراك', icon: CreditCard, href: '/subscription' },
   { id: 'pricing', label: 'Tarifs', labelAr: 'الأسعار', icon: Tags, href: '/pricing' },
   { id: 'settings', label: 'Paramètres', labelAr: 'الإعدادات', icon: Settings, href: '/settings' },

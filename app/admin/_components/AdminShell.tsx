@@ -133,6 +133,7 @@ export default function AdminShell(props: { title: string; children: React.React
           <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-3 flex flex-wrap gap-2">
             <SidebarLink href="/admin/overview" icon={<TrendingUp size={16} />} label="Overview" />
             <SidebarLink href="/admin" icon={<LayoutDashboard size={16} />} label="Dashboard" />
+            <SidebarLink href="/admin/billing" icon={<CreditCard size={16} />} label="Billing" />
             <SidebarLink href="/admin/subscriptions" icon={<CreditCard size={16} />} label="Subscriptions" />
             <SidebarLink href="/admin/users" icon={<Users size={16} />} label="Users" />
             <SidebarLink href="/admin/companies" icon={<Building2 size={16} />} label="Companies" />
@@ -158,6 +159,7 @@ export default function AdminShell(props: { title: string; children: React.React
             <nav className="mt-4 space-y-1">
               <SidebarLink href="/admin/overview" icon={<TrendingUp size={16} />} label="Overview" />
             <SidebarLink href="/admin" icon={<LayoutDashboard size={16} />} label="Dashboard" />
+              <SidebarLink href="/admin/billing" icon={<CreditCard size={16} />} label="Billing" />
               <SidebarLink href="/admin/subscriptions" icon={<CreditCard size={16} />} label="Subscriptions" />
               <SidebarLink href="/admin/users" icon={<Users size={16} />} label="Users" />
               <SidebarLink href="/admin/companies" icon={<Building2 size={16} />} label="Companies" />
