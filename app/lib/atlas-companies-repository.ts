@@ -25,10 +25,23 @@ type AtlasCompanyRow = {
   is_active: boolean;
   created_at: string;
   updated_at: string;
+  legal_name?: string | null;
+  trade_name?: string | null;
+  if_number?: string | null;
+  cnss_number?: string | null;
+  address?: string | null;
+  city?: string | null;
+  country?: string | null;
+  phone?: string | null;
+  email?: string | null;
+  website?: string | null;
+  logo_url?: string | null;
+  status?: string | null;
+  workspace_id?: string | null;
 };
 
 const COMPANY_SELECT =
-  'id, user_id, name, legal_form, if_fiscal, ice, rc, company_json, legacy_local_id, is_active, created_at, updated_at';
+  'id, user_id, name, legal_form, if_fiscal, ice, rc, company_json, legacy_local_id, is_active, created_at, updated_at, legal_name, trade_name, if_number, cnss_number, address, city, country, phone, email, website, logo_url, status, workspace_id';
 
 export function readCompaniesFromLocalStorage(): AtlasCompany[] {
   if (blockCriticalLocalStorageInProduction('atlas_companies')) return [];
@@ -86,6 +99,13 @@ function rowToCompany(row: AtlasCompanyRow): AtlasCompany {
     ice: row.ice || j.ice || '',
     rc: row.rc || j.rc || '',
     actif: row.is_active,
+    legalName: row.legal_name ?? j.legalName ?? raisonSociale,
+    tradeName: row.trade_name ?? j.tradeName ?? raisonSociale,
+    country: row.country ?? j.country ?? 'MA',
+    website: row.website ?? j.website ?? '',
+    logoUrl: row.logo_url ?? j.logoUrl ?? '',
+    status: (row.status ?? (j as { status?: string }).status ?? 'active') as AtlasCompany['status'],
+    workspaceId: row.workspace_id ?? j.workspaceId ?? null,
   };
 }
 
@@ -104,7 +124,19 @@ function companyRowPayload(company: AtlasCompany): {
   is_active: boolean;
   legacy_local_id: number | null;
   updated_at: string;
+  legal_name: string | null;
+  trade_name: string | null;
+  if_number: string | null;
+  cnss_number: string | null;
+  address: string | null;
+  city: string | null;
+  country: string | null;
+  phone: string | null;
+  email: string | null;
+  website: string | null;
+  logo_url: string | null;
 } {
+  const ext = company as AtlasCompany & Record<string, string | undefined>;
   const name = (company.raisonSociale || '').trim();
   const legal_form = company.formeJuridique?.trim() || null;
   const if_fiscal = company.if_fiscal?.trim() || null;
@@ -128,6 +160,17 @@ function companyRowPayload(company: AtlasCompany): {
     is_active: company.actif,
     legacy_local_id: typeof company.id === 'number' ? company.id : null,
     updated_at: new Date().toISOString(),
+    legal_name: (ext.legalName ?? name) || null,
+    trade_name: (ext.tradeName ?? name) || null,
+    if_number: if_fiscal,
+    cnss_number: company.cnss?.trim() || null,
+    address: company.adresse?.trim() || null,
+    city: company.ville?.trim() || null,
+    country: ext.country?.trim() || 'MA',
+    phone: company.telephone?.trim() || null,
+    email: company.email?.trim() || null,
+    website: ext.website?.trim() || null,
+    logo_url: ext.logoUrl?.trim() || null,
   };
 }
 

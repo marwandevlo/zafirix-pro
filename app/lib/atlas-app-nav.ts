@@ -24,6 +24,7 @@ import {
 export type AtlasNavItemId =
   | 'dashboard'
   | 'companies'
+  | 'cabinet'
   | 'clients'
   | 'consultant'
   | 'assistant'
@@ -61,6 +62,7 @@ export type AtlasAppNavItem = {
 export const ATLAS_APP_NAV_ITEMS: AtlasAppNavItem[] = [
   { id: 'dashboard', label: 'Dashboard', labelAr: 'الرئيسية', icon: LayoutDashboard, href: '/' },
   { id: 'companies', label: 'Mes sociétés', labelAr: 'شركاتي', icon: Building2, href: '/companies' },
+  { id: 'cabinet', label: 'Portfolio cabinet', labelAr: 'محفظة المكتب', icon: Users, href: '/cabinet' },
   { id: 'clients', label: 'Clients', labelAr: 'العملاء', icon: Users, href: '/clients' },
   { id: 'consultant', label: 'Consultant IA', labelAr: 'المستشار الذكي', icon: Brain, href: '/consultant' },
   { id: 'assistant', label: 'Assistant IA', labelAr: 'المساعد المحاسبي', icon: Sparkles, href: '/assistant' },

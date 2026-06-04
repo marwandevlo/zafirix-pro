@@ -4,6 +4,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { documentUploadSessionUserId } from '@/app/lib/atlas-document-upload-auth';
 import { refreshAtlasAiContext, contextToPromptBlock } from '@/app/lib/atlas-ai-context';
+import { buildCabinetAiContext, cabinetContextToPromptBlock } from '@/app/lib/atlas-ai-cabinet-context';
 import { runAtlasAiCopilot, streamAtlasAiCopilot, COPILOT_SYSTEM, formatSourcesFooter } from '@/app/lib/atlas-ai-copilot';
 import { createSseStream } from '@/app/lib/atlas-ai-provider';
 import {
@@ -49,6 +50,9 @@ export async function POST(request: NextRequest) {
     companyProfile: body.companyProfile ?? null,
   });
 
+  const cabinetCtx = await buildCabinetAiContext(db, userId).catch(() => null);
+  const contextBlock = `${contextToPromptBlock(snapshot)}${cabinetCtx ? `\n\n${cabinetContextToPromptBlock(cabinetCtx)}` : ''}`;
+
   const conversationId = await getOrCreateConversation(db, userId, companyId, body.conversationId);
   const history = await listConversationHistory(db, userId, conversationId);
   const copilotHistory = history.flatMap((h) => [
@@ -61,7 +65,7 @@ export async function POST(request: NextRequest) {
   if (stream) {
     const gen = streamAtlasAiCopilot({
       system: COPILOT_SYSTEM,
-      contextBlock: contextToPromptBlock(snapshot),
+      contextBlock: contextBlock,
       sources,
       history: copilotHistory,
       userMessage: message,
@@ -73,7 +77,7 @@ export async function POST(request: NextRequest) {
 
   const result = await runAtlasAiCopilot({
     system: COPILOT_SYSTEM,
-    contextBlock: contextToPromptBlock(snapshot),
+    contextBlock: contextBlock,
     sources,
     history: copilotHistory,
     userMessage: message,
@@ -95,7 +99,7 @@ export async function POST(request: NextRequest) {
     prompt: message,
     answer,
     sourcesUsed: sources,
-    metadata: { confidence, provider: result.provider },
+    metadata: { confidence, provider: result.provider, workspace_id: cabinetCtx?.workspace_id ?? null },
   });
 
   await touchConversation(db, conversationId);

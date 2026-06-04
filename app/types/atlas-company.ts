@@ -27,4 +27,13 @@ export type AtlasCompany = {
 
   /** Current balance snapshot (MAD). */
   balance?: number;
+
+  /** Phase 14 — enterprise registry (columns + company_json). */
+  legalName?: string;
+  tradeName?: string;
+  country?: string;
+  website?: string;
+  logoUrl?: string;
+  status?: 'active' | 'inactive' | 'archived';
+  workspaceId?: string | null;
 };

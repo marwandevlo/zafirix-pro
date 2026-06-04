@@ -33,6 +33,8 @@ import { LiasseReadinessWidget } from '@/app/components/liasse/LiasseReadinessWi
 import { AIInsightsWidget } from '@/app/components/assistant/AIInsightsWidget';
 import { FiscalClosingAssistantWidget } from '@/app/components/assistant/FiscalClosingAssistantWidget';
 import { ExecutiveSummaryWidget } from '@/app/components/assistant/ExecutiveSummaryWidget';
+import { CompanySwitcher } from '@/app/components/shell/CompanySwitcher';
+import { ConsolidatedDashboardWidget } from '@/app/components/cabinet/ConsolidatedDashboardWidget';
 
 const ReferralPostOnboardingModal = dynamic(
   () =>
@@ -151,6 +153,7 @@ export default function Home() {
             </div>
           </div>
           <div className="flex items-center gap-2">
+            <CompanySwitcher className="hidden sm:block" />
             <button onClick={() => navigate('/consultant')} className="hidden sm:flex items-center gap-2 px-3 py-2 bg-indigo-50 text-indigo-600 rounded-lg text-sm font-medium hover:bg-indigo-100 transition-colors">
               <Brain size={16} />
               <span className="hidden md:inline">{t('Consultant IA', 'المستشار')}</span>
@@ -302,6 +305,9 @@ export default function Home() {
             <BankAlertCenter compact />
           </div>
           <PayrollDashboardSection />
+
+          {/* ── Cabinet consolidated (Phase 14) ─────────────────────────── */}
+          <ConsolidatedDashboardWidget />
 
           {/* ── AI Insights + Closing + Executive (Phase 13) ──────────────── */}
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 lg:gap-6">
