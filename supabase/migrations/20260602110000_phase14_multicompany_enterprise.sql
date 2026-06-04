@@ -153,32 +153,93 @@ drop policy if exists "atlas_roles_read" on public.atlas_roles;
 create policy "atlas_roles_read" on public.atlas_roles
   for select using (auth.uid() is not null);
 
--- ── 11. Phase 11 banking RLS (gap fix) ────────────────────────────────────────
-drop policy if exists "bank_statements_own" on public.zafirix_bank_statements;
-create policy "bank_statements_own" on public.zafirix_bank_statements
-  for all using (auth.uid() = user_id) with check (auth.uid() = user_id);
+-- ── 11. Phase 11 banking RLS (gap fix — optional tables) ─────────────────────
+DO $$
+BEGIN
+  IF EXISTS (
+    SELECT 1 FROM pg_catalog.pg_class c
+    JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
+    WHERE n.nspname = 'public' AND c.relname = 'zafirix_bank_statements' AND c.relkind = 'r'
+  ) THEN
+    ALTER TABLE public.zafirix_bank_statements ENABLE ROW LEVEL SECURITY;
+    DROP POLICY IF EXISTS "bank_statements_own" ON public.zafirix_bank_statements;
+    CREATE POLICY "bank_statements_own" ON public.zafirix_bank_statements
+      FOR ALL USING (auth.uid() = user_id) WITH CHECK (auth.uid() = user_id);
+  END IF;
+END $$;
 
-drop policy if exists "bank_transactions_own" on public.zafirix_bank_transactions;
-create policy "bank_transactions_own" on public.zafirix_bank_transactions
-  for all using (auth.uid() = user_id) with check (auth.uid() = user_id);
+DO $$
+BEGIN
+  IF EXISTS (
+    SELECT 1 FROM pg_catalog.pg_class c
+    JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
+    WHERE n.nspname = 'public' AND c.relname = 'zafirix_bank_transactions' AND c.relkind = 'r'
+  ) THEN
+    ALTER TABLE public.zafirix_bank_transactions ENABLE ROW LEVEL SECURITY;
+    DROP POLICY IF EXISTS "bank_transactions_own" ON public.zafirix_bank_transactions;
+    CREATE POLICY "bank_transactions_own" ON public.zafirix_bank_transactions
+      FOR ALL USING (auth.uid() = user_id) WITH CHECK (auth.uid() = user_id);
+  END IF;
+END $$;
 
-drop policy if exists "bank_reconciliation_own" on public.atlas_bank_reconciliation;
-create policy "bank_reconciliation_own" on public.atlas_bank_reconciliation
-  for all using (auth.uid() = user_id) with check (auth.uid() = user_id);
+DO $$
+BEGIN
+  IF EXISTS (
+    SELECT 1 FROM pg_catalog.pg_class c
+    JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
+    WHERE n.nspname = 'public' AND c.relname = 'atlas_bank_reconciliation' AND c.relkind = 'r'
+  ) THEN
+    ALTER TABLE public.atlas_bank_reconciliation ENABLE ROW LEVEL SECURITY;
+    DROP POLICY IF EXISTS "bank_reconciliation_own" ON public.atlas_bank_reconciliation;
+    CREATE POLICY "bank_reconciliation_own" ON public.atlas_bank_reconciliation
+      FOR ALL USING (auth.uid() = user_id) WITH CHECK (auth.uid() = user_id);
+  END IF;
+END $$;
 
-drop policy if exists "payslip_extractions_own" on public.atlas_payslip_extractions;
-create policy "payslip_extractions_own" on public.atlas_payslip_extractions
-  for all using (auth.uid() = user_id) with check (auth.uid() = user_id);
+DO $$
+BEGIN
+  IF EXISTS (
+    SELECT 1 FROM pg_catalog.pg_class c
+    JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
+    WHERE n.nspname = 'public' AND c.relname = 'atlas_payslip_extractions' AND c.relkind = 'r'
+  ) THEN
+    ALTER TABLE public.atlas_payslip_extractions ENABLE ROW LEVEL SECURITY;
+    DROP POLICY IF EXISTS "payslip_extractions_own" ON public.atlas_payslip_extractions;
+    CREATE POLICY "payslip_extractions_own" ON public.atlas_payslip_extractions
+      FOR ALL USING (auth.uid() = user_id) WITH CHECK (auth.uid() = user_id);
+  END IF;
+END $$;
 
--- ── 12. Liasse RLS (gap fix) ──────────────────────────────────────────────────
-drop policy if exists "liasse_fiscale_own" on public.zafirix_liasse_fiscale;
-create policy "liasse_fiscale_own" on public.zafirix_liasse_fiscale
-  for all using (auth.uid() = user_id) with check (auth.uid() = user_id);
+-- ── 12. Liasse RLS (gap fix — optional table) ─────────────────────────────────
+DO $$
+BEGIN
+  IF EXISTS (
+    SELECT 1 FROM pg_catalog.pg_class c
+    JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
+    WHERE n.nspname = 'public' AND c.relname = 'zafirix_liasse_fiscale' AND c.relkind = 'r'
+  ) THEN
+    ALTER TABLE public.zafirix_liasse_fiscale ENABLE ROW LEVEL SECURITY;
+    DROP POLICY IF EXISTS "liasse_fiscale_own" ON public.zafirix_liasse_fiscale;
+    CREATE POLICY "liasse_fiscale_own" ON public.zafirix_liasse_fiscale
+      FOR ALL USING (auth.uid() = user_id) WITH CHECK (auth.uid() = user_id);
+  END IF;
+END $$;
 
 -- ── 13. Performance indexes (company_id + workspace) ──────────────────────────
 create index if not exists idx_invoices_company on public.atlas_invoices (company_id) where company_id is not null;
 create index if not exists idx_accounting_company on public.atlas_accounting_entries (company_id) where company_id is not null;
-create index if not exists idx_bank_tx_company on public.zafirix_bank_transactions (company_id) where company_id is not null;
+
+DO $$
+BEGIN
+  IF EXISTS (
+    SELECT 1 FROM pg_catalog.pg_class c
+    JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
+    WHERE n.nspname = 'public' AND c.relname = 'zafirix_bank_transactions' AND c.relkind = 'r'
+  ) THEN
+    CREATE INDEX IF NOT EXISTS idx_bank_tx_company ON public.zafirix_bank_transactions (company_id) WHERE company_id IS NOT NULL;
+  END IF;
+END $$;
+
 create index if not exists idx_tva_suggestions_company on public.zafirix_tva_suggestions (company_id);
 create index if not exists idx_ai_anomalies_company on public.atlas_ai_anomalies (company_id) where company_id is not null;
 create index if not exists idx_ai_context_company on public.atlas_ai_context (company_id) where company_id is not null;
