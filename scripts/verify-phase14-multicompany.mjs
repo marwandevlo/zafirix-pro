@@ -17,9 +17,27 @@ function has(file, text) {
   catch { return false; }
 }
 function exists(file) { return existsSync(path.join(ROOT, file)); }
-function mig() { return readFileSync(path.join(ROOT, 'supabase/migrations/20260602110000_phase14_multicompany_enterprise.sql'), 'utf8'); }
 
 const MIG = 'supabase/migrations/20260602110000_phase14_multicompany_enterprise.sql';
+const MIG_CORE = 'supabase/migrations/20260602110200_phase14_core_only_recovery.sql';
+const MIG_OPT = 'supabase/migrations/20260602110300_phase14_optional_rls_later.sql';
+const MIG_FILES = [MIG, MIG_CORE, MIG_OPT];
+
+function hasMig(text) {
+  return MIG_FILES.some((file) => has(file, text));
+}
+function mig() {
+  return MIG_FILES.filter(exists).map((file) => readFileSync(path.join(ROOT, file), 'utf8')).join('\n');
+}
+
+const FORBIDDEN_IN_CORE = [
+  'zafirix_bank_statements',
+  'zafirix_bank_transactions',
+  'atlas_bank_reconciliation',
+  'atlas_payslip_extractions',
+  'zafirix_liasse_fiscale',
+  'atlas_liasse_fiscale',
+];
 const WS = 'app/lib/atlas-workspace-server.ts';
 const HEALTH = 'app/lib/atlas-company-health-engine.ts';
 const CABCTX = 'app/lib/atlas-ai-cabinet-context.ts';
@@ -27,45 +45,50 @@ const TYPES = 'app/types/atlas-workspace.ts';
 
 console.log('\n[1] Migration file');
 check('phase14 migration exists', exists(MIG));
+check('phase14 core recovery migration exists', exists(MIG_CORE));
+check('phase14 optional RLS migration exists', exists(MIG_OPT));
+FORBIDDEN_IN_CORE.forEach((t) => check(`core recovery excludes ${t}`, !has(MIG_CORE, t)));
+check('optional migration uses to_regclass', has(MIG_OPT, 'to_regclass'));
+check('optional migration uses EXECUTE', has(MIG_OPT, 'EXECUTE'));
 
 console.log('\n[2] Workspace table');
-check('atlas_workspaces', has(MIG, 'atlas_workspaces'));
-check('workspace_type single_company', has(MIG, "'single_company'"));
-check('workspace_type accounting_firm', has(MIG, "'accounting_firm'"));
-check('workspace_type enterprise_group', has(MIG, "'enterprise_group'"));
-check('owner_user_id', has(MIG, 'owner_user_id'));
-check('idx_workspaces_owner', has(MIG, 'idx_workspaces_owner'));
+check('atlas_workspaces', hasMig('atlas_workspaces'));
+check('workspace_type single_company', hasMig("'single_company'"));
+check('workspace_type accounting_firm', hasMig("'accounting_firm'"));
+check('workspace_type enterprise_group', hasMig("'enterprise_group'"));
+check('owner_user_id', hasMig('owner_user_id'));
+check('idx_workspaces_owner', hasMig('idx_workspaces_owner'));
 
 console.log('\n[3] Company registry columns');
 ['legal_name', 'trade_name', 'if_number', 'cnss_number', 'address', 'city', 'country', 'phone', 'email', 'website', 'logo_url', 'status', 'workspace_id'].forEach(
-  (col) => check(`atlas_companies.${col}`, has(MIG, col)),
+  (col) => check(`atlas_companies.${col}`, hasMig(col)),
 );
-check("status active", has(MIG, "'active'"));
-check("status inactive", has(MIG, "'inactive'"));
-check("status archived", has(MIG, "'archived'"));
-check('idx_companies_workspace', has(MIG, 'idx_companies_workspace'));
-check('idx_companies_status', has(MIG, 'idx_companies_status'));
+check("status active", hasMig("'active'"));
+check("status inactive", hasMig("'inactive'"));
+check("status archived", hasMig("'archived'"));
+check('idx_companies_workspace', hasMig('idx_companies_workspace'));
+check('idx_companies_status', hasMig('idx_companies_status'));
 
 console.log('\n[4] Roles & permissions');
-check('atlas_roles table', has(MIG, 'atlas_roles'));
-check('atlas_user_roles table', has(MIG, 'atlas_user_roles'));
+check('atlas_roles table', hasMig('atlas_roles'));
+check('atlas_user_roles table', hasMig('atlas_user_roles'));
 ['super_admin', 'owner', 'manager', 'accountant', 'payroll_manager', 'auditor', 'viewer'].forEach(
-  (r) => check(`role ${r}`, has(MIG, `'${r}'`)),
+  (r) => check(`role ${r}`, hasMig(`'${r}'`)),
 );
-check('idx_user_roles_user', has(MIG, 'idx_user_roles_user'));
-check('idx_user_roles_workspace', has(MIG, 'idx_user_roles_workspace'));
-check('idx_user_roles_company', has(MIG, 'idx_user_roles_company'));
-check('unique user workspace company role', has(MIG, 'unique (user_id, workspace_id, company_id, role_slug)'));
+check('idx_user_roles_user', hasMig('idx_user_roles_user'));
+check('idx_user_roles_workspace', hasMig('idx_user_roles_workspace'));
+check('idx_user_roles_company', hasMig('idx_user_roles_company'));
+check('unique user workspace company role', hasMig('unique (user_id, workspace_id, company_id, role_slug)'));
 
 console.log('\n[5] Cabinet clients');
-check('atlas_cabinet_clients', has(MIG, 'atlas_cabinet_clients'));
-check('health_score column', has(MIG, 'health_score'));
-check('readiness_score column', has(MIG, 'readiness_score'));
-check('health_band column', has(MIG, 'health_band'));
-check('alert_count column', has(MIG, 'alert_count'));
-check('unique workspace company', has(MIG, 'unique (workspace_id, company_id)'));
-check('idx_cabinet_clients_workspace', has(MIG, 'idx_cabinet_clients_workspace'));
-check('idx_cabinet_clients_company', has(MIG, 'idx_cabinet_clients_company'));
+check('atlas_cabinet_clients', hasMig('atlas_cabinet_clients'));
+check('health_score column', hasMig('health_score'));
+check('readiness_score column', hasMig('readiness_score'));
+check('health_band column', hasMig('health_band'));
+check('alert_count column', hasMig('alert_count'));
+check('unique workspace company', hasMig('unique (workspace_id, company_id)'));
+check('idx_cabinet_clients_workspace', hasMig('idx_cabinet_clients_workspace'));
+check('idx_cabinet_clients_company', hasMig('idx_cabinet_clients_company'));
 
 console.log('\n[6] RLS policies');
 [
@@ -80,7 +103,7 @@ console.log('\n[6] RLS policies');
   'bank_reconciliation_own',
   'payslip_extractions_own',
   'liasse_fiscale_own',
-].forEach((p) => check(`RLS policy ${p}`, has(MIG, p)));
+].forEach((p) => check(`RLS policy ${p}`, hasMig(p)));
 
 console.log('\n[7] Performance indexes');
 [
@@ -90,7 +113,7 @@ console.log('\n[7] Performance indexes');
   'idx_tva_suggestions_company',
   'idx_ai_anomalies_company',
   'idx_ai_context_company',
-].forEach((i) => check(`index ${i}`, has(MIG, i)));
+].forEach((i) => check(`index ${i}`, hasMig(i)));
 
 console.log('\n[8] Types');
 check('atlas-workspace.ts', exists(TYPES));
@@ -231,20 +254,20 @@ const tablesWithCompany = [
   'atlas_ai_context',
   'zafirix_routing_records',
 ];
-tablesWithCompany.forEach((t) => check(`company_id usage ${t}`, has('app/lib/atlas-ai-context.ts', t) || has(MIG, t) || has(HEALTH, t) || has(WS, t)));
+tablesWithCompany.forEach((t) => check(`company_id usage ${t}`, has('app/lib/atlas-ai-context.ts', t) || hasMig(t) || has(HEALTH, t) || has(WS, t)));
 
 console.log('\n[24] RLS audit report markers');
-check('workspaces RLS enabled', has(MIG, 'alter table public.atlas_workspaces enable row level security'));
-check('user_roles RLS enabled', has(MIG, 'alter table public.atlas_user_roles enable row level security'));
-check('cabinet_clients RLS enabled', has(MIG, 'alter table public.atlas_cabinet_clients enable row level security'));
-check('roles RLS enabled', has(MIG, 'alter table public.atlas_roles enable row level security'));
-check('banking RLS gap fix', has(MIG, 'bank_statements_own'));
-check('liasse RLS gap fix', has(MIG, 'liasse_fiscale_own'));
+check('workspaces RLS enabled', hasMig('alter table public.atlas_workspaces enable row level security'));
+check('user_roles RLS enabled', hasMig('alter table public.atlas_user_roles enable row level security'));
+check('cabinet_clients RLS enabled', hasMig('alter table public.atlas_cabinet_clients enable row level security'));
+check('roles RLS enabled', hasMig('alter table public.atlas_roles enable row level security'));
+check('banking RLS gap fix', hasMig('bank_statements_own'));
+check('liasse RLS gap fix', hasMig('liasse_fiscale_own'));
 
 console.log('\n[25] Enterprise foundations — no billing');
-check('no stripe in phase14 migration', !has(MIG, 'stripe'));
-check('no subscription table in phase14', !has(MIG, 'atlas_subscriptions'));
-check('no payment in phase14 migration', !has(MIG, 'atlas_payments'));
+check('no stripe in phase14 migration', !hasMig('stripe'));
+check('no subscription table in phase14', !hasMig('atlas_subscriptions'));
+check('no payment in phase14 migration', !hasMig('atlas_payments'));
 
 console.log('\n[26] Workspace types in server');
 check('single_company default', has(WS, "'single_company'"));
@@ -274,7 +297,7 @@ check('ensureValidActiveCompany', has(repo, 'ensureValidActiveCompany'));
 
 // Extra granular checks to reach 320+
 console.log('\n[31] Migration SQL depth');
-const sql = exists(MIG) ? mig() : '';
+const sql = mig();
 [
   'gen_random_uuid()',
   'on delete cascade',
@@ -331,7 +354,7 @@ check('verify-phase14 script', exists('scripts/verify-phase14-multicompany.mjs')
 
 console.log('\n[40] Phase 14 file inventory');
 [
-  MIG, WS, HEALTH, CABCTX, TYPES,
+  MIG, MIG_CORE, MIG_OPT, WS, HEALTH, CABCTX, TYPES,
   'app/api/workspaces/route.ts',
   'app/api/cabinet/portfolio/route.ts',
   'app/api/cabinet/consolidated/route.ts',
@@ -390,15 +413,15 @@ check('factors record', has(HEALTH, 'factors:'));
 console.log('\n[51] Additional isolation references');
 [
   ['atlas_invoices', 'app/lib/atlas-workspace-server.ts'],
-  ['atlas_accounting_entries', MIG],
-  ['zafirix_bank_transactions', MIG],
-  ['atlas_payslip_extractions', MIG],
-  ['zafirix_liasse_fiscale', MIG],
-  ['atlas_ai_anomalies', MIG],
-  ['atlas_ai_context', MIG],
+  ['atlas_accounting_entries', MIG_CORE],
+  ['zafirix_bank_transactions', MIG_OPT],
+  ['atlas_payslip_extractions', MIG_OPT],
+  ['zafirix_liasse_fiscale', MIG_OPT],
+  ['atlas_ai_anomalies', MIG_CORE],
+  ['atlas_ai_context', MIG_CORE],
   ['zafirix_routing_records', HEALTH],
   ['zafirix_tva_suggestions', HEALTH],
-  ['atlas_bank_reconciliation', MIG],
+  ['atlas_bank_reconciliation', MIG_OPT],
 ].forEach(([t, f]) => check(`${t} in ${path.basename(f)}`, has(f, t)));
 
 console.log('\n[52] Company switcher UI');
