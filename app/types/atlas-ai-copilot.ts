@@ -50,6 +50,25 @@ export type AtlasAiRecommendation = {
   href?: string;
 };
 
+export type AtlasAiConversation = {
+  id: string;
+  title: string;
+  status: string;
+  companyId: string | null;
+  createdAt: string;
+  updatedAt: string;
+  messageCount?: number;
+  lastMessage?: string | null;
+};
+
+export type AtlasAiChatResponse = {
+  answer: string;
+  sources: AiSourceRef[];
+  confidence: number;
+  conversationId: string;
+  interactionId: string;
+};
+
 export type AtlasAiInteraction = {
   id: string;
   conversationId: string | null;

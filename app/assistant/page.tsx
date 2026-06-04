@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
-  Brain, Download, Loader2, Send, Sparkles, User, AlertTriangle, MessageSquare,
+  Brain, Download, Loader2, Send, Sparkles, User, AlertTriangle,
 } from 'lucide-react';
 import { AppSidebar } from '@/app/components/shell/AppSidebar';
 import { BetaSurfaceBadge } from '@/app/components/safety/BetaSurfaceBadge';
@@ -10,22 +10,28 @@ import { ExportMenu } from '@/app/components/ExportMenu';
 import type { ExportColumn } from '@/app/components/ExportMenu';
 import { FiscalClosingAssistant } from '@/app/components/assistant/FiscalClosingAssistant';
 import { AiActionBar } from '@/app/components/assistant/AiActionBar';
+import { AssistantConversationList } from '@/app/components/assistant/AssistantConversationList';
+import { AssistantSourcesPanel } from '@/app/components/assistant/AssistantSourcesPanel';
+import { AssistantSuggestedQuestions } from '@/app/components/assistant/AssistantSuggestedQuestions';
 import { getActiveCompanyDbRowId } from '@/app/lib/atlas-active-company';
 import { isAtlasSupabaseDataEnabled } from '@/app/lib/atlas-data-source';
-import type { AtlasAiAnomaly } from '@/app/types/atlas-ai-copilot';
+import type { AiSourceRef, AtlasAiAnomaly } from '@/app/types/atlas-ai-copilot';
 
-type Message = { role: 'user' | 'assistant'; content: string };
+type Message = {
+  role: 'user' | 'assistant';
+  content: string;
+  sources?: AiSourceRef[];
+  confidence?: number;
+};
 
-const SUGGESTIONS = [
-  'Pourquoi mon IS est élevé ?',
-  'Quelles charges ont augmenté ce mois ?',
-  'Pourquoi ma readiness fiscale est basse ?',
-  'Montre-moi les factures non payées.',
-  'Quels clients me doivent de l\'argent ?',
-  'Quelles anomalies existent actuellement ?',
-  'Quelle TVA vais-je payer ?',
-  'Résume mon activité de ce mois.',
-];
+const WELCOME: Message = {
+  role: 'assistant',
+  content:
+    'Bonjour — je suis votre Assistant IA Expert-Comptable & Fiscal.\n\n' +
+    'Je m\'appuie sur vos données réelles Atlas (factures, comptabilité, TVA, paie, banque, liasse). ' +
+    'Chaque réponse cite les sources utilisées — je n\'invente pas de chiffres.\n\n' +
+    'Posez une question ou choisissez une suggestion.',
+};
 
 const ANOMALY_COLS: ExportColumn[] = [
   { key: 'category', label: 'Catégorie' },
@@ -35,21 +41,15 @@ const ANOMALY_COLS: ExportColumn[] = [
 ];
 
 export default function AssistantPage() {
-  const [messages, setMessages] = useState<Message[]>([
-    {
-      role: 'assistant',
-      content:
-        'Bonjour — je suis votre **Assistant IA** Expert-Comptable & Fiscal.\n\n' +
-        'Je m\'appuie sur vos données réelles Atlas (factures, comptabilité, TVA, paie, banque, liasse). ' +
-        'Chaque réponse cite les sources utilisées — je n\'invente pas de chiffres.\n\n' +
-        'Posez une question ou choisissez une suggestion.',
-    },
-  ]);
+  const [messages, setMessages] = useState<Message[]>([WELCOME]);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
   const [conversationId, setConversationId] = useState<string | null>(null);
   const [companyId, setCompanyId] = useState<string | null>(null);
   const [anomalies, setAnomalies] = useState<AtlasAiAnomaly[]>([]);
+  const [lastSources, setLastSources] = useState<AiSourceRef[]>([]);
+  const [lastConfidence, setLastConfidence] = useState<number | null>(null);
+  const [convRefreshKey, setConvRefreshKey] = useState(0);
   const endRef = useRef<HTMLDivElement>(null);
 
   const loadAnomalies = useCallback(async (cid: string | null) => {
@@ -74,6 +74,35 @@ export default function AssistantPage() {
     endRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages, loading]);
 
+  const openConversation = async (id: string) => {
+    setLoading(true);
+    try {
+      const res = await fetch(`/api/assistant/conversations/${id}`, { credentials: 'include' });
+      if (!res.ok) return;
+      const data = await res.json() as {
+        messages?: Array<{ role: 'user' | 'assistant'; content: string; sources?: AiSourceRef[] }>;
+        conversation?: { id: string };
+      };
+      setConversationId(data.conversation?.id ?? id);
+      const restored: Message[] = [WELCOME];
+      for (const m of data.messages ?? []) {
+        restored.push({ role: m.role, content: m.content, sources: m.sources });
+      }
+      setMessages(restored);
+      const lastAssistant = [...(data.messages ?? [])].reverse().find((m) => m.role === 'assistant');
+      setLastSources(lastAssistant?.sources ?? []);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const startNewConversation = () => {
+    setConversationId(null);
+    setMessages([WELCOME]);
+    setLastSources([]);
+    setLastConfidence(null);
+  };
+
   const send = async (text: string) => {
     const trimmed = text.trim();
     if (!trimmed || loading) return;
@@ -89,11 +118,27 @@ export default function AssistantPage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ message: trimmed, companyId, conversationId }),
       });
-      const data = await res.json() as { answer?: string; error?: string; conversationId?: string };
+      const data = await res.json() as {
+        answer?: string;
+        error?: string;
+        conversationId?: string;
+        sources?: AiSourceRef[];
+        confidence?: number;
+      };
       if (data.conversationId) setConversationId(data.conversationId);
+      const sources = data.sources ?? [];
+      const confidence = data.confidence ?? null;
+      setLastSources(sources);
+      setLastConfidence(confidence);
+      setConvRefreshKey((k) => k + 1);
       setMessages((m) => [
         ...m,
-        { role: 'assistant', content: data.answer ?? data.error ?? 'Réponse indisponible' },
+        {
+          role: 'assistant',
+          content: data.answer ?? data.error ?? 'Réponse indisponible',
+          sources,
+          confidence: confidence ?? undefined,
+        },
       ]);
     } catch {
       setMessages((m) => [...m, { role: 'assistant', content: 'Erreur réseau.' }]);
@@ -152,6 +197,16 @@ export default function AssistantPage() {
         </header>
 
         <div className="flex-1 flex min-h-0">
+          <aside className="w-56 shrink-0 hidden xl:flex flex-col min-h-0">
+            <AssistantConversationList
+              companyId={companyId}
+              activeId={conversationId}
+              onSelect={(id) => id && void openConversation(id)}
+              onNew={startNewConversation}
+              refreshKey={convRefreshKey}
+            />
+          </aside>
+
           <div className="flex-1 flex flex-col min-w-0">
             <div className="px-4 py-2 border-b bg-white">
               <AiActionBar companyId={companyId} contextLabel="Actions contextuelles" />
@@ -171,6 +226,9 @@ export default function AssistantPage() {
                     }`}
                   >
                     {msg.content.replace(/\*\*(.*?)\*\*/g, '$1')}
+                    {msg.confidence != null && msg.role === 'assistant' && (
+                      <p className="text-[10px] text-gray-400 mt-2">Confiance: {Math.round(msg.confidence * 100)}%</p>
+                    )}
                   </div>
                   {msg.role === 'user' && (
                     <div className="w-8 h-8 rounded-lg bg-gray-200 flex items-center justify-center shrink-0">
@@ -189,18 +247,7 @@ export default function AssistantPage() {
             </div>
 
             <div className="p-4 border-t bg-white">
-              <div className="flex flex-wrap gap-1.5 mb-2">
-                {SUGGESTIONS.slice(0, 4).map((s) => (
-                  <button
-                    key={s}
-                    type="button"
-                    onClick={() => void send(s)}
-                    className="text-[10px] px-2 py-1 bg-violet-50 text-violet-700 rounded-full hover:bg-violet-100"
-                  >
-                    {s}
-                  </button>
-                ))}
-              </div>
+              <AssistantSuggestedQuestions onSelect={(q) => void send(q)} disabled={loading} />
               <div className="flex gap-2">
                 <input
                   value={input}
@@ -222,6 +269,7 @@ export default function AssistantPage() {
           </div>
 
           <aside className="w-80 border-l bg-white overflow-y-auto p-4 space-y-4 hidden lg:block">
+            <AssistantSourcesPanel sources={lastSources} confidence={lastConfidence} />
             <FiscalClosingAssistant />
             <div>
               <h3 className="text-xs font-semibold text-gray-500 uppercase flex items-center gap-1 mb-2">
@@ -243,10 +291,6 @@ export default function AssistantPage() {
               >
                 Actualiser détection
               </button>
-            </div>
-            <div className="text-xs text-gray-400 flex items-start gap-2">
-              <MessageSquare size={14} className="shrink-0" />
-              Toutes les réponses sont journalisées (atlas_ai_interactions) avec sources traçables.
             </div>
           </aside>
         </div>

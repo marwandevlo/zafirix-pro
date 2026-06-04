@@ -11,6 +11,7 @@ import {
   validationStatusFromDocument,
 } from '@/app/lib/atlas-documents-repository';
 import { documentTypeLabel } from '@/app/lib/atlas-document-routing';
+import { DocumentExplainerButton } from '@/app/components/assistant/DocumentExplainerButton';
 import { ExportMenu } from '@/app/components/ExportMenu';
 import type { ExportColumn } from '@/app/components/ExportMenu';
 
@@ -1000,6 +1001,9 @@ export default function DocumentsPage() {
                           <p className="text-lg font-bold text-gray-900 truncate">{selectedDoc.title}</p>
                           <p className="text-xs text-gray-400">{selectedDoc.type} · {new Date(selectedDoc.createdAt).toLocaleString('fr-FR')}</p>
                         </div>
+                        {supabaseMode && (
+                          <DocumentExplainerButton documentId={String(selectedDoc.id)} companyId={linkCompanyId || undefined} />
+                        )}
                       </div>
 
                       <div className="mt-4 grid grid-cols-1 md:grid-cols-3 gap-3">
@@ -1268,7 +1272,10 @@ export default function DocumentsPage() {
                         </div>
                       </td>
                       <td className="px-4 py-3">
-                        <div className="flex items-center justify-end gap-2">
+                        <div className="flex items-center justify-end gap-2 flex-wrap">
+                          {supabaseMode && d.statut === 'analysé' && d.supabaseId && (
+                            <DocumentExplainerButton documentId={d.supabaseId} className="inline-block" />
+                          )}
                           {supabaseMode && d.statut === 'analysé' && d.supabaseId && (
                             <button
                               onClick={() => setValidationDocId(d.supabaseId!)}

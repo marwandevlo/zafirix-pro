@@ -5,7 +5,14 @@ import { NextRequest, NextResponse } from 'next/server';
 import { documentUploadSessionUserId } from '@/app/lib/atlas-document-upload-auth';
 import { refreshAtlasAiContext, contextToPromptBlock } from '@/app/lib/atlas-ai-context';
 import { runAtlasAiCopilot, COPILOT_SYSTEM, formatSourcesFooter } from '@/app/lib/atlas-ai-copilot';
-import { getOrCreateConversation, logAtlasAiInteraction, touchConversation, listConversationHistory } from '@/app/lib/atlas-ai-interactions';
+import {
+  getOrCreateConversation,
+  logAtlasAiInteraction,
+  touchConversation,
+  listConversationHistory,
+  updateConversationTitleFromMessage,
+} from '@/app/lib/atlas-ai-interactions';
+import { computeCopilotConfidence } from '@/app/lib/atlas-ai-confidence';
 import { getSupabaseServiceRoleClient } from '@/app/lib/supabase-admin';
 import { checkAiRateLimit } from '@/app/lib/ai-rate-limit';
 
@@ -60,6 +67,12 @@ export async function POST(request: NextRequest) {
   }
 
   const answer = `${result.answer}${formatSourcesFooter(sources)}`;
+  const confidence = computeCopilotConfidence({
+    sources,
+    hasAnswer: true,
+    contextLoaded: true,
+    subjectLoaded: sources.length > 0,
+  });
 
   const interactionId = await logAtlasAiInteraction(db, {
     userId,
@@ -69,14 +82,19 @@ export async function POST(request: NextRequest) {
     prompt: message,
     answer,
     sourcesUsed: sources,
+    metadata: { confidence },
   });
 
   await touchConversation(db, conversationId);
+  if (history.length === 0) {
+    await updateConversationTitleFromMessage(db, conversationId, message).catch(() => undefined);
+  }
 
   return NextResponse.json({
     ok: true,
     answer,
     sources,
+    confidence,
     conversationId,
     interactionId,
     contextRefreshedAt: snapshot.refreshed_at,
