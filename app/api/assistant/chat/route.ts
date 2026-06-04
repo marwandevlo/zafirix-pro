@@ -4,7 +4,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { documentUploadSessionUserId } from '@/app/lib/atlas-document-upload-auth';
 import { refreshAtlasAiContext, contextToPromptBlock } from '@/app/lib/atlas-ai-context';
-import { runAtlasAiCopilot, COPILOT_SYSTEM, formatSourcesFooter } from '@/app/lib/atlas-ai-copilot';
+import { runAtlasAiCopilot, streamAtlasAiCopilot, COPILOT_SYSTEM, formatSourcesFooter } from '@/app/lib/atlas-ai-copilot';
+import { createSseStream } from '@/app/lib/atlas-ai-provider';
 import {
   getOrCreateConversation,
   logAtlasAiInteraction,
@@ -33,6 +34,7 @@ export async function POST(request: NextRequest) {
     companyId?: string | null;
     conversationId?: string | null;
     companyProfile?: Record<string, unknown>;
+    stream?: boolean;
   };
 
   const message = String(body.message ?? '').trim();
@@ -54,6 +56,21 @@ export async function POST(request: NextRequest) {
     { role: 'assistant' as const, content: h.answer },
   ]);
 
+  const stream = body.stream === true || request.nextUrl.searchParams.get('stream') === '1';
+
+  if (stream) {
+    const gen = streamAtlasAiCopilot({
+      system: COPILOT_SYSTEM,
+      contextBlock: contextToPromptBlock(snapshot),
+      sources,
+      history: copilotHistory,
+      userMessage: message,
+    });
+    return new Response(createSseStream(gen), {
+      headers: { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache' },
+    });
+  }
+
   const result = await runAtlasAiCopilot({
     system: COPILOT_SYSTEM,
     contextBlock: contextToPromptBlock(snapshot),
@@ -61,10 +78,6 @@ export async function POST(request: NextRequest) {
     history: copilotHistory,
     userMessage: message,
   });
-
-  if (!result.ok) {
-    return NextResponse.json({ error: result.error }, { status: 503 });
-  }
 
   const answer = `${result.answer}${formatSourcesFooter(sources)}`;
   const confidence = computeCopilotConfidence({
@@ -82,7 +95,7 @@ export async function POST(request: NextRequest) {
     prompt: message,
     answer,
     sourcesUsed: sources,
-    metadata: { confidence },
+    metadata: { confidence, provider: result.provider },
   });
 
   await touchConversation(db, conversationId);
@@ -97,6 +110,7 @@ export async function POST(request: NextRequest) {
     confidence,
     conversationId,
     interactionId,
+    provider: result.provider,
     contextRefreshedAt: snapshot.refreshed_at,
   });
 }

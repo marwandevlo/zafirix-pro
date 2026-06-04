@@ -31,6 +31,8 @@ import { BankAlertCenter } from '@/app/components/bank/BankAlertCenter';
 import { PayrollDashboardSection } from '@/app/components/payroll/PayrollDashboardSection';
 import { LiasseReadinessWidget } from '@/app/components/liasse/LiasseReadinessWidget';
 import { AIInsightsWidget } from '@/app/components/assistant/AIInsightsWidget';
+import { FiscalClosingAssistantWidget } from '@/app/components/assistant/FiscalClosingAssistantWidget';
+import { ExecutiveSummaryWidget } from '@/app/components/assistant/ExecutiveSummaryWidget';
 
 const ReferralPostOnboardingModal = dynamic(
   () =>
@@ -301,8 +303,12 @@ export default function Home() {
           </div>
           <PayrollDashboardSection />
 
-          {/* ── AI Insights (Phase 13A) ───────────────────────────────────── */}
-          <AIInsightsWidget />
+          {/* ── AI Insights + Closing + Executive (Phase 13) ──────────────── */}
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 lg:gap-6">
+            <AIInsightsWidget />
+            <FiscalClosingAssistantWidget />
+            <ExecutiveSummaryWidget />
+          </div>
 
           {/* ── Documents IA — Validation KPIs + Queue ───────────────────── */}
           <DashboardIaSection />

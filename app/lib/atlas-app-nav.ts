@@ -27,6 +27,7 @@ export type AtlasNavItemId =
   | 'clients'
   | 'consultant'
   | 'assistant'
+  | 'audit'
   | 'agents'
   | 'documents'
   | 'validation'
@@ -63,6 +64,7 @@ export const ATLAS_APP_NAV_ITEMS: AtlasAppNavItem[] = [
   { id: 'clients', label: 'Clients', labelAr: 'العملاء', icon: Users, href: '/clients' },
   { id: 'consultant', label: 'Consultant IA', labelAr: 'المستشار الذكي', icon: Brain, href: '/consultant' },
   { id: 'assistant', label: 'Assistant IA', labelAr: 'المساعد المحاسبي', icon: Sparkles, href: '/assistant' },
+  { id: 'audit', label: 'Audit IA', labelAr: 'التدقيق الذكي', icon: Shield, href: '/audit' },
   { id: 'agents', label: 'Agents IA', labelAr: 'الوكلاء الذكيون', icon: Zap, href: '/agents' },
   { id: 'documents', label: 'Documents IA', labelAr: 'وثائق ذكية', icon: Upload, href: '/documents' },
   { id: 'validation', label: 'Validation', labelAr: 'التحقق', icon: ClipboardList, href: '/validation' },

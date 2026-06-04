@@ -220,16 +220,6 @@ export async function runAtlasAiExplain(
     userMessage: question,
   });
 
-  if (!result.ok) {
-    return {
-      answer: subjectBlock ? `${ATLAS_AI_DATA_UNAVAILABLE} (${result.error})` : ATLAS_AI_DATA_UNAVAILABLE,
-      sources,
-      confidence: 0,
-      type: explainType,
-      structured,
-    };
-  }
-
   const answer = `${result.answer}${formatSourcesFooter(sources)}`;
   return {
     answer,

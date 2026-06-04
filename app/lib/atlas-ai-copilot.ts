@@ -1,11 +1,10 @@
 /**
- * AI Expert Comptable & Fiscal Copilot — prompts and Anthropic runner.
+ * AI Expert Comptable & Fiscal Copilot — prompts and provider-backed runner.
  */
 
-import Anthropic from '@anthropic-ai/sdk';
 import { ATLAS_AI_MULTILINGUAL_DARIJA } from '@/app/lib/atlas-ai-language';
 import { ATLAS_AI_SAFETY_NOTICE } from '@/app/lib/atlas-ai-safety';
-import { getAnthropicApiKey } from '@/app/lib/anthropic-env';
+import { runAtlasAiWithFallback, streamAtlasAiWithFallback } from '@/app/lib/atlas-ai-provider';
 import type { AiSourceRef } from '@/app/types/atlas-ai-copilot';
 
 export const COPILOT_SYSTEM = `Tu es l'Assistant IA Zafirix Atlas — Expert-Comptable, Fiscaliste, Contrôleur de Gestion et Auditeur interne (Maroc).
@@ -64,34 +63,37 @@ export async function runAtlasAiCopilot(params: {
   sources: AiSourceRef[];
   history: CopilotMessage[];
   userMessage: string;
-}): Promise<{ ok: true; answer: string } | { ok: false; error: string }> {
-  const apiKey = getAnthropicApiKey();
-  if (!apiKey) return { ok: false, error: 'ANTHROPIC_API_KEY missing' };
-
+  ruleBasedFallback?: () => string;
+}): Promise<{ answer: string; provider: string }> {
   const sourcesLine = `[SOURCES_DISPONIBLES]\n${JSON.stringify(params.sources.slice(0, 40), null, 2)}`;
-  const system = `${params.system}\n\n${params.contextBlock}\n\n${sourcesLine}`;
+  const result = await runAtlasAiWithFallback({
+    system: params.system,
+    contextBlock: params.contextBlock,
+    sourcesLine,
+    history: params.history,
+    userMessage: params.userMessage,
+    ruleBasedFallback: params.ruleBasedFallback,
+  });
+  return { answer: result.answer.trim() || '(Réponse vide)', provider: result.provider };
+}
 
-  const client = new Anthropic({ apiKey });
-  const messages: Anthropic.MessageParam[] = [
-    ...params.history.slice(-16).map((m) => ({
-      role: m.role as 'user' | 'assistant',
-      content: m.content,
-    })),
-    { role: 'user', content: params.userMessage },
-  ];
-
-  try {
-    const response = await client.messages.create({
-      model: 'claude-sonnet-4-5',
-      max_tokens: 4096,
-      system,
-      messages,
-    });
-    const text = response.content[0]?.type === 'text' ? response.content[0].text : '';
-    return { ok: true, answer: text.trim() || '(Réponse vide)' };
-  } catch (err) {
-    return { ok: false, error: err instanceof Error ? err.message : 'Erreur API' };
-  }
+export async function* streamAtlasAiCopilot(params: {
+  system: string;
+  contextBlock: string;
+  sources: AiSourceRef[];
+  history: CopilotMessage[];
+  userMessage: string;
+  ruleBasedFallback?: () => string;
+}): AsyncGenerator<string> {
+  const sourcesLine = `[SOURCES_DISPONIBLES]\n${JSON.stringify(params.sources.slice(0, 40), null, 2)}`;
+  yield* streamAtlasAiWithFallback({
+    system: params.system,
+    contextBlock: params.contextBlock,
+    sourcesLine,
+    history: params.history,
+    userMessage: params.userMessage,
+    ruleBasedFallback: params.ruleBasedFallback,
+  });
 }
 
 export function formatSourcesFooter(sources: AiSourceRef[]): string {
