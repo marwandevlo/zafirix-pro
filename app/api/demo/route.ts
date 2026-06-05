@@ -19,6 +19,14 @@ export async function GET() {
 export async function POST(request: NextRequest) {
   const body = (await request.json().catch(() => ({}))) as { action?: string };
   const action = String(body.action ?? 'generate');
+  if (action === 'exit') {
+    return NextResponse.json({
+      ok: true,
+      action: 'exit',
+      isolated: true,
+      note: 'Client must call exitDemoMode() to clear sessionStorage keys.',
+    });
+  }
   return NextResponse.json({
     ok: true,
     action,

@@ -2,8 +2,12 @@
  * Phase 17 — Isolated demo data (never mixes with real Supabase rows).
  */
 
+import { loadOnboardingProgress, saveOnboardingProgress } from '@/app/lib/atlas-onboarding-engine';
+
 const DEMO_FLAG = 'atlas_demo_mode_v1';
 const DEMO_DATA_KEY = 'atlas_demo_workspace_data_v1';
+
+export const DEMO_MODE_UPDATED_EVENT = 'atlas-demo-mode-updated';
 
 export type DemoWorkspaceData = {
   invoices: Array<{ id: string; client: string; amount: number; status: string }>;
@@ -13,6 +17,25 @@ export type DemoWorkspaceData = {
   bankTx: Array<{ id: string; date: string; label: string; amount: number }>;
   generatedAt: string;
 };
+
+function notifyDemoModeChange(active: boolean): void {
+  if (typeof window === 'undefined') return;
+  try {
+    window.dispatchEvent(new CustomEvent(DEMO_MODE_UPDATED_EVENT, { detail: { active } }));
+  } catch {
+    /* ignore */
+  }
+}
+
+function syncOnboardingDemoFlag(active: boolean): void {
+  if (typeof window === 'undefined') return;
+  try {
+    const p = loadOnboardingProgress();
+    saveOnboardingProgress({ ...p, demoMode: active });
+  } catch {
+    /* ignore */
+  }
+}
 
 export function isDemoModeActive(): boolean {
   if (typeof window === 'undefined') return false;
@@ -38,9 +61,7 @@ export function generateDemoWorkspace(): DemoWorkspaceData {
       { id: 'demo-tva-1', rate: 20, base: 10000, tva: 2000 },
       { id: 'demo-tva-2', rate: 14, base: 5000, tva: 700 },
     ],
-    payrollRuns: [
-      { id: 'demo-pay-1', period: '2026-05', employees: 3, total: 45000 },
-    ],
+    payrollRuns: [{ id: 'demo-pay-1', period: '2026-05', employees: 3, total: 45000 }],
     bankTx: [
       { id: 'demo-bnk-1', date: '2026-05-01', label: 'Virement client', amount: 12500 },
       { id: 'demo-bnk-2', date: '2026-05-03', label: 'CNSS', amount: -3200 },
@@ -50,6 +71,8 @@ export function generateDemoWorkspace(): DemoWorkspaceData {
     try {
       sessionStorage.setItem(DEMO_FLAG, '1');
       sessionStorage.setItem(DEMO_DATA_KEY, JSON.stringify(data));
+      syncOnboardingDemoFlag(true);
+      notifyDemoModeChange(true);
     } catch {
       /* ignore */
     }
@@ -73,7 +96,19 @@ export function exitDemoMode(): void {
   try {
     sessionStorage.removeItem(DEMO_FLAG);
     sessionStorage.removeItem(DEMO_DATA_KEY);
+    syncOnboardingDemoFlag(false);
+    notifyDemoModeChange(false);
   } catch {
     /* ignore */
   }
+}
+
+/** Enable demo if off, disable if on. Returns new active state. */
+export function toggleDemoMode(): boolean {
+  if (isDemoModeActive()) {
+    exitDemoMode();
+    return false;
+  }
+  generateDemoWorkspace();
+  return true;
 }

@@ -1,8 +1,8 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { Sparkles, Clock, PlayCircle } from 'lucide-react';
+import { Sparkles, Clock, PlayCircle, XCircle } from 'lucide-react';
 import { listAtlasCompanies } from '@/app/lib/atlas-companies-repository';
 import { listAtlasInvoices } from '@/app/lib/atlas-invoices-repository';
 import { isAtlasSupabaseDataEnabled } from '@/app/lib/atlas-data-source';
@@ -14,7 +14,11 @@ import {
   type ChecklistSignals,
 } from '@/app/lib/atlas-onboarding-engine';
 import { buildSmartRecommendations } from '@/app/lib/atlas-smart-recommendations';
-import { generateDemoWorkspace, isDemoModeActive } from '@/app/lib/atlas-demo-workspace';
+import {
+  DEMO_MODE_UPDATED_EVENT,
+  isDemoModeActive,
+  toggleDemoMode,
+} from '@/app/lib/atlas-demo-workspace';
 
 type Props = { lang: 'fr' | 'ar' };
 
@@ -33,30 +37,38 @@ export function GettingStartedWidget({ lang }: Props) {
   const [demoActive, setDemoActive] = useState(false);
   const t = useMemo(() => (fr: string, ar: string) => (lang === 'ar' ? ar : fr), [lang]);
 
-  useEffect(() => {
-    setDemoActive(isDemoModeActive());
-    void (async () => {
-      const progress = loadOnboardingProgress();
-      let hasCompany = false;
-      let hasInvoice = false;
-      if (isAtlasSupabaseDataEnabled()) {
-        const [companies, inv] = await Promise.all([listAtlasCompanies(), listAtlasInvoices()]);
-        hasCompany = companies.length > 0;
-        hasInvoice = inv.length > 0;
-      }
-      const stepTva = progress.stepData.tva as { configured?: boolean } | undefined;
-      setSignals({
-        hasCompany,
-        tvaConfigured: Boolean(stepTva?.configured),
-        hasDocument: Boolean(progress.stepData.company?.firstDocument),
-        hasInvoice,
-        hasAiAnalysis: Boolean(progress.stepData.finish?.aiDone),
-        hasBankImport: Boolean(progress.stepData.banking?.imported),
-        hasPayrollRun: Boolean(progress.stepData.payroll?.runDone),
-        wizardCompleted: progress.wizardCompleted,
-      });
-    })();
+  const refreshSignals = useCallback(async () => {
+    const progress = loadOnboardingProgress();
+    let hasCompany = false;
+    let hasInvoice = false;
+    if (isAtlasSupabaseDataEnabled()) {
+      const [companies, inv] = await Promise.all([listAtlasCompanies(), listAtlasInvoices()]);
+      hasCompany = companies.length > 0;
+      hasInvoice = inv.length > 0;
+    }
+    const stepTva = progress.stepData.tva as { configured?: boolean } | undefined;
+    setSignals({
+      hasCompany,
+      tvaConfigured: Boolean(stepTva?.configured),
+      hasDocument: Boolean(progress.stepData.company?.firstDocument),
+      hasInvoice,
+      hasAiAnalysis: Boolean(progress.stepData.finish?.aiDone),
+      hasBankImport: Boolean(progress.stepData.banking?.imported),
+      hasPayrollRun: Boolean(progress.stepData.payroll?.runDone),
+      wizardCompleted: progress.wizardCompleted,
+    });
   }, []);
+
+  const syncDemoState = useCallback(() => {
+    setDemoActive(isDemoModeActive());
+  }, []);
+
+  useEffect(() => {
+    syncDemoState();
+    void refreshSignals();
+    window.addEventListener(DEMO_MODE_UPDATED_EVENT, syncDemoState);
+    return () => window.removeEventListener(DEMO_MODE_UPDATED_EVENT, syncDemoState);
+  }, [syncDemoState, refreshSignals]);
 
   const progress = loadOnboardingProgress();
   const checklistItems = buildChecklistItems(signals);
@@ -66,9 +78,10 @@ export function GettingStartedWidget({ lang }: Props) {
   const next = recs[0];
   const estMin = Math.max(2, Math.round((100 - percent) / 10));
 
-  const startDemo = () => {
-    generateDemoWorkspace();
-    setDemoActive(true);
+  const handleDemoClick = () => {
+    toggleDemoMode();
+    setDemoActive(isDemoModeActive());
+    void refreshSignals();
   };
 
   return (
@@ -117,11 +130,16 @@ export function GettingStartedWidget({ lang }: Props) {
         </button>
         <button
           type="button"
-          onClick={startDemo}
-          className="text-xs font-medium text-indigo-700 hover:underline flex items-center gap-1"
+          onClick={handleDemoClick}
+          className={`text-xs font-medium flex items-center gap-1 ${
+            demoActive ? 'text-violet-700 hover:text-violet-900' : 'text-indigo-700 hover:underline'
+          }`}
+          aria-pressed={demoActive}
         >
-          <PlayCircle size={12} />
-          {demoActive ? t('Mode démo actif', 'وضع تجريبي نشط') : t('Explorer en démo', 'استكشف تجريبياً')}
+          {demoActive ? <XCircle size={12} /> : <PlayCircle size={12} />}
+          {demoActive
+            ? t('Quitter le mode démo', 'إيقاف الوضع التجريبي')
+            : t('Explorer en démo', 'استكشف تجريبياً')}
         </button>
       </div>
     </div>

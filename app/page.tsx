@@ -19,6 +19,7 @@ import { UsageWidget } from '@/app/components/usage/UsageWidget';
 import { TrialUpgradeBanner } from '@/app/components/trial/TrialUpgradeBanner';
 import { TrialOnboardingChecklist } from '@/app/components/trial/TrialOnboardingChecklist';
 import { GettingStartedWidget } from '@/app/components/onboarding/GettingStartedWidget';
+import { DemoModeBanner } from '@/app/components/onboarding/DemoModeBanner';
 import { OnboardingChecklistWidget } from '@/app/components/onboarding/OnboardingChecklistWidget';
 import { SmartRecommendationsWidget } from '@/app/components/onboarding/SmartRecommendationsWidget';
 import { GuidedTourEngine } from '@/app/components/onboarding/GuidedTourEngine';
@@ -188,6 +189,7 @@ export default function Home() {
           </div>
           <ReferralPostOnboardingModal lang={lang} />
           <TrialUpgradeBanner />
+          <DemoModeBanner lang={lang} />
           <GettingStartedWidget lang={lang} />
           <OnboardingChecklistWidget lang={lang} />
           <SmartRecommendationsWidget lang={lang} />
