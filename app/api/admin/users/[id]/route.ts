@@ -6,6 +6,8 @@ import { isOwnerEmail } from '@/app/lib/owner';
 import { roleGrantsAdminAccess } from '@/app/lib/admin/can-access-admin';
 import { applyAdminProfilePlanToEntitlements } from '@/app/lib/atlas-subscription-sync';
 
+export const dynamic = 'force-dynamic';
+
 function isUuid(value: string): boolean {
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value);
 }
@@ -13,6 +15,18 @@ function isUuid(value: string): boolean {
 type Role = 'user' | 'admin' | 'moderator' | 'owner';
 type Plan = 'free' | 'pro' | 'vip' | 'enterprise';
 type Status = 'pending' | 'active' | 'suspended' | 'banned';
+
+type AdminProfileRow = {
+  id?: string;
+  email?: string | null;
+  full_name?: string | null;
+  avatar_url?: string | null;
+  role?: string | null;
+  plan?: string | null;
+  status?: string | null;
+  created_at?: string | null;
+  last_login?: string | null;
+};
 
 function isRole(v: string): v is Role {
   return v === 'user' || v === 'admin' || v === 'moderator' || v === 'owner';
@@ -36,18 +50,7 @@ export async function GET(request: NextRequest, ctx: { params: Promise<{ id: str
 
   const admin = getSupabaseServiceRoleClient();
 
-  type ProfileRow = {
-    id: string;
-    email: string | null;
-    full_name: string | null;
-    avatar_url: string | null;
-    role: string | null;
-    plan: string | null;
-    status: string | null;
-    created_at: string | null;
-    updated_at: string | null;
-    last_login: string | null;
-  };
+  type ProfileRow = AdminProfileRow & { id: string };
   type SubscriptionRow = {
     id: string;
     plan_id: string | null;
@@ -116,6 +119,8 @@ export async function PATCH(request: NextRequest, ctx: { params: Promise<{ id: s
     | null
     | { role?: string; plan?: string; status?: string; full_name?: string };
 
+  console.info('[admin/users PATCH] received body', JSON.stringify(body));
+
   const role = typeof body?.role === 'string' ? body.role.trim() : undefined;
   const plan = typeof body?.plan === 'string' ? body.plan.trim() : undefined;
   const status = typeof body?.status === 'string' ? body.status.trim() : undefined;
@@ -177,10 +182,14 @@ export async function PATCH(request: NextRequest, ctx: { params: Promise<{ id: s
     );
   }
 
-  // Read back and verify persistence: a BEFORE UPDATE trigger
-  // (profiles_protect_privileged_fields) can silently revert privileged
-  // columns if it fails to recognize the service-role connection. Surface
-  // that as an explicit error instead of a false success.
+  // Rewrite atlas_subscriptions when plan changes, then re-assert profiles.plan
+  // (syncProfileEntitlementFromAtlas can otherwise derive 'free' from trial rows).
+  if (plan) {
+    const ent = await applyAdminProfilePlanToEntitlements(admin, userId, plan);
+    if (!ent.ok) return NextResponse.json({ error: ent.error }, { status: 400 });
+  }
+
+  // Read back and verify persistence after ALL writes (profile + entitlements).
   const { data: verifyRow } = await admin
     .from('profiles')
     .select('role, plan, status, full_name')
@@ -192,22 +201,16 @@ export async function PATCH(request: NextRequest, ctx: { params: Promise<{ id: s
   if (role && String(v.role ?? '') !== role) reverted.push('role');
   if (plan && String(v.plan ?? '') !== plan) reverted.push('plan');
   if (reverted.length > 0) {
+    console.error('[admin/users PATCH] update_not_persisted', { userId, requested: updates, actual: v, reverted });
     return NextResponse.json(
       {
         error: 'update_not_persisted',
         message: `Champs non persistés: ${reverted.join(', ')}. Vérifiez le trigger profiles_protect_privileged_fields (migration 20260611000000).`,
         fields: reverted,
+        actual: v,
       },
       { status: 500 },
     );
-  }
-
-  // Real SaaS billing integrity: when an admin changes the plan, rewrite the
-  // user's atlas_subscriptions entitlements so usage limits actually follow the
-  // profile plan (prevents "profile says pro but atlas says free" drift).
-  if (plan) {
-    const ent = await applyAdminProfilePlanToEntitlements(admin, userId, plan);
-    if (!ent.ok) return NextResponse.json({ error: ent.error }, { status: 400 });
   }
 
   // Keep JWT metadata role in sync for middleware protection.
@@ -229,7 +232,27 @@ export async function PATCH(request: NextRequest, ctx: { params: Promise<{ id: s
     details: { updates, prevStatus: prevStatus || null },
   });
 
-  return NextResponse.json({ ok: true });
+  const { data: finalProf } = await admin
+    .from('profiles')
+    .select('id, email, full_name, avatar_url, role, plan, status, created_at, last_login')
+    .eq('id', userId)
+    .maybeSingle();
+  const fp = (finalProf ?? {}) as AdminProfileRow;
+
+  return NextResponse.json({
+    ok: true,
+    user: {
+      id: userId,
+      email: fp.email ?? targetAuthEmail ?? '',
+      full_name: fp.full_name ?? '',
+      avatar_url: fp.avatar_url ?? '',
+      role: fp.role ?? role ?? 'user',
+      plan: fp.plan ?? plan ?? 'free',
+      status: fp.status ?? status ?? 'active',
+      created_at: fp.created_at ?? targetAuth?.user?.created_at ?? null,
+      last_login: fp.last_login ?? null,
+    },
+  });
 }
 
 export async function DELETE(request: NextRequest, ctx: { params: Promise<{ id: string }> }) {

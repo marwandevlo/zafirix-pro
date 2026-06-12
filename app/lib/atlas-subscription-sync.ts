@@ -197,7 +197,19 @@ export async function applyAdminProfilePlanToEntitlements(
   });
   if (insErr) return { ok: false, error: insErr.message };
 
-  return syncProfileEntitlementFromAtlas(admin, userId);
+  const sync = await syncProfileEntitlementFromAtlas(admin, userId);
+  if (!sync.ok) return sync;
+
+  // Admin panel is authoritative for profiles.plan — entitlement sync may derive
+  // 'free' from an active trial row or a lagging read; never downgrade the admin's
+  // explicit plan selection after subscription rows were rewritten.
+  const { error: planErr } = await admin
+    .from('profiles')
+    .update({ plan: p, updated_at: new Date().toISOString() })
+    .eq('id', userId);
+  if (planErr) return { ok: false, error: planErr.message };
+
+  return { ok: true };
 }
 
 export async function upsertPaddleAtlasSubscription(params: {

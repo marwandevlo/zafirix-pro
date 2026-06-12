@@ -1,12 +1,73 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import AdminShell from '@/app/admin/_components/AdminShell';
 import { isAtlasSupabaseDataEnabled } from '@/app/lib/atlas-data-source';
 import { isOwnerEmail, OWNER_EMAIL } from '@/app/lib/owner';
 import { supabase } from '@/app/lib/supabase';
 import { AdminAlert, AdminTableSkeleton } from '@/app/admin/_components/AdminUi';
+import { atlasPlanIdToProfilePlan } from '@/app/lib/atlas-subscription-sync';
+
+const PROFILE_PLAN_OPTIONS = ['free', 'pro', 'vip', 'enterprise'] as const;
+type ProfilePlanOption = (typeof PROFILE_PLAN_OPTIONS)[number];
+
+function normalizePlanToken(raw: string | null | undefined): ProfilePlanOption {
+  const s = String(raw ?? '').trim().toLowerCase();
+  if ((PROFILE_PLAN_OPTIONS as readonly string[]).includes(s)) return s as ProfilePlanOption;
+  return 'free';
+}
+
+const PROFILE_PLAN_RANK: Record<ProfilePlanOption, number> = {
+  free: 0,
+  pro: 1,
+  vip: 2,
+  enterprise: 3,
+};
+
+function todayYmdLocal(): string {
+  const d = new Date();
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
+
+/** Derive profiles.plan bucket from the best currently active atlas_subscriptions row. */
+function resolvePlanFromSubscriptions(subscriptions: AtlasSubscriptionRow[]): ProfilePlanOption | null {
+  const today = todayYmdLocal();
+  let best: ProfilePlanOption | null = null;
+  let bestRank = -1;
+
+  for (const row of subscriptions) {
+    const st = String(row.status ?? '').trim().toLowerCase();
+    if (st !== 'active' && st !== 'trial') continue;
+
+    const start = String(row.start_date ?? '').slice(0, 10);
+    const end = String(row.end_date ?? '').slice(0, 10);
+    if (!start || !end || today < start || today > end) continue;
+
+    const bucket = normalizePlanToken(atlasPlanIdToProfilePlan(String(row.plan_id ?? '')));
+    const rank = PROFILE_PLAN_RANK[bucket];
+    if (rank > bestRank) {
+      bestRank = rank;
+      best = bucket;
+    }
+  }
+
+  return best;
+}
+
+/** Canonical plan for the admin select: profile cache, upgraded by active entitlement when higher. */
+function resolveCanonicalPlan(
+  profilePlan: string | null | undefined,
+  subscriptions: AtlasSubscriptionRow[],
+): ProfilePlanOption {
+  const fromProfile = normalizePlanToken(profilePlan);
+  const fromSubs = resolvePlanFromSubscriptions(subscriptions);
+  if (!fromSubs) return fromProfile;
+  return PROFILE_PLAN_RANK[fromSubs] > PROFILE_PLAN_RANK[fromProfile] ? fromSubs : fromProfile;
+}
 
 type UserDetail = {
   id: string;
@@ -52,8 +113,39 @@ export default function UserDetailsAdminClient() {
   const [status, setStatus] = useState('active');
   const [fullName, setFullName] = useState('');
 
-  const reload = async () => {
-    if (!isAtlasSupabaseDataEnabled()) return;
+  // Refs mirror select/input state so save always reads the latest values,
+  // even if React hasn't re-rendered between onChange and click.
+  const roleRef = useRef(role);
+  const planRef = useRef(plan);
+  const statusRef = useRef(status);
+  const fullNameRef = useRef(fullName);
+  roleRef.current = role;
+  planRef.current = plan;
+  statusRef.current = status;
+  fullNameRef.current = fullName;
+
+  const syncFormFromUser = (u: UserDetail | null, subscriptions: AtlasSubscriptionRow[] = subs) => {
+    setRole(String(u?.role ?? 'user').trim().toLowerCase());
+    setPlan(resolveCanonicalPlan(u?.plan, subscriptions));
+    setStatus(String(u?.status ?? 'active').trim().toLowerCase());
+    setFullName(String(u?.full_name ?? ''));
+  };
+
+  const applySavedSnapshot = (
+    saved: Pick<UserDetail, 'role' | 'plan' | 'status' | 'full_name'>,
+    subscriptions: AtlasSubscriptionRow[] = subs,
+  ) => {
+    const canonicalPlan = resolveCanonicalPlan(saved.plan, subscriptions);
+    setUser((prev) => (prev ? { ...prev, ...saved, plan: canonicalPlan } : prev));
+    setRole(saved.role);
+    setPlan(canonicalPlan);
+    setStatus(saved.status);
+    setFullName(saved.full_name);
+  };
+
+  const reload = async (opts?: { syncForm?: boolean }) => {
+    const syncForm = opts?.syncForm !== false;
+    if (!isAtlasSupabaseDataEnabled()) return null;
     setLoading(true);
     setError('');
     try {
@@ -61,10 +153,11 @@ export default function UserDetailsAdminClient() {
       const token = data.session?.access_token ?? '';
       if (!token) {
         router.push(`/login?next=${encodeURIComponent(`/admin/users/${id}`)}`);
-        return;
+        return null;
       }
-      const res = await fetch(`/api/admin/users/${id}`, {
+      const res = await fetch(`/api/admin/users/${id}?t=${Date.now()}`, {
         headers: { Authorization: `Bearer ${token}` },
+        cache: 'no-store',
       });
       const json: unknown = await res.json().catch(() => ({}));
       const msg =
@@ -77,7 +170,6 @@ export default function UserDetailsAdminClient() {
         typeof json === 'object' && json && 'user' in json && (json as { user?: unknown }).user
           ? ((json as { user: unknown }).user as UserDetail)
           : null;
-      setUser(u);
 
       const subscriptions =
         typeof json === 'object' && json && 'subscriptions' in json && Array.isArray((json as { subscriptions?: unknown }).subscriptions)
@@ -91,12 +183,17 @@ export default function UserDetailsAdminClient() {
           : [];
       setLogs(adminLogs);
 
-      setRole(String(u?.role ?? 'user'));
-      setPlan(String(u?.plan ?? 'free'));
-      setStatus(String(u?.status ?? 'active'));
-      setFullName(String(u?.full_name ?? ''));
+      if (syncForm && u) {
+        const canonicalPlan = resolveCanonicalPlan(u.plan, subscriptions);
+        const mergedUser = { ...u, plan: canonicalPlan };
+        setUser(mergedUser);
+        syncFormFromUser(mergedUser, subscriptions);
+      }
+
+      return { user: u, subscriptions, adminLogs };
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Erreur');
+      return null;
     } finally {
       setLoading(false);
     }
@@ -115,13 +212,26 @@ export default function UserDetailsAdminClient() {
       const { data } = await supabase.auth.getSession();
       const token = data.session?.access_token ?? '';
       if (!token) return;
+
+      const payload = {
+        role: roleRef.current,
+        plan: planRef.current,
+        status: statusRef.current,
+        full_name: fullNameRef.current,
+      };
+
       const res = await fetch(`/api/admin/users/${id}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ role, plan, status, full_name: fullName }),
+        body: JSON.stringify(payload),
+        cache: 'no-store',
       });
       const json: unknown = await res.json().catch(() => ({}));
-      const body = (typeof json === 'object' && json ? json : {}) as { error?: unknown; message?: unknown };
+      const body = (typeof json === 'object' && json ? json : {}) as {
+        error?: unknown;
+        message?: unknown;
+        user?: unknown;
+      };
       const msg =
         typeof body.message === 'string' && body.message
           ? body.message
@@ -129,7 +239,23 @@ export default function UserDetailsAdminClient() {
             ? body.error
             : 'error';
       if (!res.ok) throw new Error(msg);
-      await reload();
+
+      const savedUser =
+        body.user && typeof body.user === 'object' ? (body.user as UserDetail) : null;
+
+      const refreshed = await reload({ syncForm: false });
+      const latestSubs = refreshed?.subscriptions ?? subs;
+
+      if (savedUser) {
+        const canonicalPlan = resolveCanonicalPlan(savedUser.plan ?? payload.plan, latestSubs);
+        const mergedUser = { ...savedUser, plan: canonicalPlan };
+        setUser(mergedUser);
+        syncFormFromUser(mergedUser, latestSubs);
+      } else {
+        applySavedSnapshot(payload, latestSubs);
+      }
+
+      router.refresh();
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Erreur');
     } finally {
@@ -161,6 +287,8 @@ export default function UserDetailsAdminClient() {
       setLoading(false);
     }
   };
+
+  const displayPlan = useMemo(() => normalizePlanToken(plan), [plan]);
 
   const createdLabel = useMemo(() => {
     if (!user?.created_at) return '—';
@@ -241,8 +369,9 @@ export default function UserDetailsAdminClient() {
                 <div>
                   <p className="text-xs text-gray-500">Plan</p>
                   <select
-                    value={plan}
-                    onChange={(e) => setPlan(e.target.value)}
+                    key={`plan-${displayPlan}`}
+                    value={displayPlan}
+                    onChange={(e) => setPlan(normalizePlanToken(e.target.value))}
                     disabled={protectedOwner}
                     className="mt-1 w-full px-3 py-2 rounded-xl border border-gray-200 text-sm disabled:opacity-60"
                   >
