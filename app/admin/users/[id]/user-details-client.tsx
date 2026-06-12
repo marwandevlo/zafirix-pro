@@ -121,10 +121,13 @@ export default function UserDetailsAdminClient() {
         body: JSON.stringify({ role, plan, status, full_name: fullName }),
       });
       const json: unknown = await res.json().catch(() => ({}));
+      const body = (typeof json === 'object' && json ? json : {}) as { error?: unknown; message?: unknown };
       const msg =
-        typeof json === 'object' && json && 'error' in json && typeof (json as { error?: unknown }).error === 'string'
-          ? String((json as { error?: unknown }).error)
-          : 'error';
+        typeof body.message === 'string' && body.message
+          ? body.message
+          : typeof body.error === 'string'
+            ? body.error
+            : 'error';
       if (!res.ok) throw new Error(msg);
       await reload();
     } catch (e) {
@@ -257,10 +260,16 @@ export default function UserDetailsAdminClient() {
                     disabled={protectedOwner}
                     className="mt-1 w-full px-3 py-2 rounded-xl border border-gray-200 text-sm disabled:opacity-60"
                   >
-                    <option value="active">active</option>
+                    <option value="pending">pending (en attente)</option>
+                    <option value="active">active (validé)</option>
                     <option value="suspended">suspended</option>
                     <option value="banned">banned</option>
                   </select>
+                  {status === 'pending' ? (
+                    <p className="mt-1 text-[11px] text-amber-700">
+                      Sélectionnez « active » puis « Save changes » pour valider ce compte.
+                    </p>
+                  ) : null}
                 </div>
                 <div className="flex items-end">
                   <button

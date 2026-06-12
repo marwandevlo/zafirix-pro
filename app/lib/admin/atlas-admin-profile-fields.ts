@@ -3,11 +3,11 @@
 export const ATLAS_PROFILE_PLANS = ['free', 'pro', 'vip', 'enterprise'] as const;
 export type AtlasProfilePlan = (typeof ATLAS_PROFILE_PLANS)[number];
 
-export const ATLAS_PROFILE_ROLES = ['user', 'admin', 'owner'] as const;
+export const ATLAS_PROFILE_ROLES = ['user', 'moderator', 'admin', 'owner'] as const;
 export type AtlasProfileRole = (typeof ATLAS_PROFILE_ROLES)[number];
 
-/** Include legacy/variant values some DBs still store. */
-export const ATLAS_PROFILE_STATUSES = ['pending', 'active', 'suspended', 'approved'] as const;
+/** Canonical set — matches profiles_status_check (migration 20260611000000). */
+export const ATLAS_PROFILE_STATUSES = ['pending', 'active', 'suspended', 'banned'] as const;
 export type AtlasProfileStatus = (typeof ATLAS_PROFILE_STATUSES)[number];
 
 export function isUuid(id: string): boolean {

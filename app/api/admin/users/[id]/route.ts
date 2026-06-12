@@ -160,11 +160,47 @@ export async function PATCH(request: NextRequest, ctx: { params: Promise<{ id: s
     return NextResponse.json({ error: 'no_changes' }, { status: 400 });
   }
 
-  // Ensure profile exists
-  await admin.from('profiles').upsert({ id: userId, email: null }, { onConflict: 'id' });
+  // Ensure profile exists — insert-only (never overwrite existing columns).
+  // NOTE: a plain upsert here previously ran ON CONFLICT DO UPDATE and wiped
+  // the profile email to NULL on every admin save.
+  if (!targetProf) {
+    await admin
+      .from('profiles')
+      .upsert({ id: userId, email: targetAuthEmail || null }, { onConflict: 'id', ignoreDuplicates: true });
+  }
 
   const { error: upErr } = await admin.from('profiles').update(updates).eq('id', userId);
-  if (upErr) return NextResponse.json({ error: 'db_error' }, { status: 500 });
+  if (upErr) {
+    return NextResponse.json(
+      { error: 'db_error', message: upErr.message, code: upErr.code ?? null },
+      { status: 500 },
+    );
+  }
+
+  // Read back and verify persistence: a BEFORE UPDATE trigger
+  // (profiles_protect_privileged_fields) can silently revert privileged
+  // columns if it fails to recognize the service-role connection. Surface
+  // that as an explicit error instead of a false success.
+  const { data: verifyRow } = await admin
+    .from('profiles')
+    .select('role, plan, status, full_name')
+    .eq('id', userId)
+    .maybeSingle();
+  const v = (verifyRow ?? {}) as { role?: string | null; plan?: string | null; status?: string | null; full_name?: string | null };
+  const reverted: string[] = [];
+  if (status && String(v.status ?? '') !== status) reverted.push('status');
+  if (role && String(v.role ?? '') !== role) reverted.push('role');
+  if (plan && String(v.plan ?? '') !== plan) reverted.push('plan');
+  if (reverted.length > 0) {
+    return NextResponse.json(
+      {
+        error: 'update_not_persisted',
+        message: `Champs non persistés: ${reverted.join(', ')}. Vérifiez le trigger profiles_protect_privileged_fields (migration 20260611000000).`,
+        fields: reverted,
+      },
+      { status: 500 },
+    );
+  }
 
   // Real SaaS billing integrity: when an admin changes the plan, rewrite the
   // user's atlas_subscriptions entitlements so usage limits actually follow the

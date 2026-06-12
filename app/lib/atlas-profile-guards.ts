@@ -33,6 +33,7 @@ export function normalizeProfilePlan(raw: string | null | undefined): AtlasProfi
 
 export function normalizeProfileStatus(raw: string | null | undefined): AtlasProfileStatus {
   const s = String(raw ?? '').trim().toLowerCase();
+  if (s === 'approved') return 'active'; // legacy value some DBs still store
   if ((ATLAS_PROFILE_STATUSES as readonly string[]).includes(s)) return s as AtlasProfileStatus;
   return 'pending';
 }
