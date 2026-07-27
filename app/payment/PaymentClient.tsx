@@ -32,6 +32,25 @@ function createReferenceId(): string {
   return `atlas_${Date.now()}_${Math.random().toString(16).slice(2)}`;
 }
 
+function paymentErrorMessage(json: unknown, fallback = 'Erreur paiement'): string {
+  if (typeof json !== 'object' || !json) return fallback;
+  const row = json as { error?: unknown; message?: unknown; hint?: unknown };
+  const error = typeof row.error === 'string' ? row.error : '';
+  const message = typeof row.message === 'string' ? row.message : '';
+  const hint = typeof row.hint === 'string' ? row.hint : '';
+
+  if (error === 'temporarily_unavailable') {
+    return message || 'Paiement temporairement indisponible. Réessayez plus tard ou contactez le support.';
+  }
+  if (error === 'auth_required') return 'Connectez-vous pour confirmer le paiement.';
+  if (error === 'invalid_plan') return 'Plan invalide. Retournez à la page tarifs.';
+  if (error === 'rate_limited') return 'Trop de tentatives. Réessayez dans une minute.';
+  if (error === 'payment_requests_table_missing' || error === 'db_error') {
+    return [message || 'Erreur base de données', hint].filter(Boolean).join(' · ') || fallback;
+  }
+  return message || error || fallback;
+}
+
 export default function PaymentClient() {
   const router = useRouter();
   const search = useSearchParams();
@@ -76,9 +95,9 @@ export default function PaymentClient() {
             },
             body: JSON.stringify({ addonId: addon.id, provider: manualProvider }),
           });
-          const json = (await res.json().catch(() => ({}))) as { error?: string; id?: string };
+          const json = (await res.json().catch(() => ({}))) as { error?: string; id?: string; message?: string };
           if (!res.ok) {
-            setError(typeof json?.error === 'string' ? json.error : 'Erreur paiement');
+            setError(paymentErrorMessage(json));
             return;
           }
           const id = String(json.id || '');
@@ -134,11 +153,7 @@ export default function PaymentClient() {
         });
         const json: unknown = await res.json().catch(() => ({}));
         if (!res.ok) {
-          const msg =
-            typeof json === 'object' && json && 'error' in json && typeof (json as { error?: unknown }).error === 'string'
-              ? String((json as { error?: unknown }).error)
-              : 'Erreur paiement';
-          setError(msg);
+          setError(paymentErrorMessage(json));
           return;
         }
         const id =

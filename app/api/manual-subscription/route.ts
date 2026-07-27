@@ -25,7 +25,15 @@ function bearer(request: NextRequest): string | null {
 
 export async function POST(request: NextRequest) {
   if (ATLAS_INCIDENT_HOTFIX_GROWTH) {
-    return NextResponse.json({ ok: false, error: 'temporarily_unavailable' }, { status: 503 });
+    console.warn('[api/manual-subscription] blocked by ATLAS_INCIDENT_HOTFIX_GROWTH');
+    return NextResponse.json(
+      {
+        ok: false,
+        error: 'temporarily_unavailable',
+        message: 'Les paiements manuels sont temporairement désactivés (incident hotfix).',
+      },
+      { status: 503 },
+    );
   }
   if (atlasDataBackend() !== 'supabase') {
     return NextResponse.json({ ok: false, error: 'not_enabled' }, { status: 400 });

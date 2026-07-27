@@ -1,7 +1,10 @@
 /**
- * Production incident hotfix (2026-05-03): disables referral UI surfaces, manual payment
- * client flow, WhatsApp Cloud API sends, and referral-related client/server tracking.
+ * Growth-incident kill switch (originally 2026-05-03).
  *
- * Set to `false` and redeploy when the incident is resolved.
+ * When true: blocks manual payment APIs (`temporarily_unavailable`), referral UI,
+ * WhatsApp sends, and related tracking.
+ *
+ * Restored to `false` so commercial checkout (`/payment?plan=…`) works again.
+ * Set back to `true` and redeploy only for a deliberate production incident freeze.
  */
-export const ATLAS_INCIDENT_HOTFIX_GROWTH = true;
+export const ATLAS_INCIDENT_HOTFIX_GROWTH = false;
