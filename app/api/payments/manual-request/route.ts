@@ -121,6 +121,8 @@ export async function POST(request: NextRequest) {
           kind: 'company_slot_addon',
           addonId: addon.id,
           extraSlots: addon.extraSlots,
+          source: 'payment_checkout',
+          user_email: auth.user.email ?? null,
         },
       }
     : {
@@ -132,7 +134,10 @@ export async function POST(request: NextRequest) {
         payment_method: 'manual' as const,
         manual_provider: provider,
         status: 'pending' as const,
-        metadata: {},
+        metadata: {
+          source: 'payment_checkout',
+          user_email: auth.user.email ?? null,
+        },
       };
 
   const { data, error } = await admin

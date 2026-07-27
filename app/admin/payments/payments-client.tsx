@@ -9,6 +9,7 @@ import { AdminAlert, AdminEmptyState, AdminTableSkeleton } from '@/app/admin/_co
 type PaymentRequestRow = {
   id: string;
   userId: string;
+  userEmail?: string | null;
   planId: string;
   amountMad: number;
   currency: string;
@@ -167,7 +168,10 @@ export default function PaymentsAdminClient() {
                         </span>
                       </td>
                       <td className="px-6 py-4 text-gray-600">{r.createdAt ? r.createdAt.slice(0, 10) : '—'}</td>
-                      <td className="px-6 py-4 font-mono text-xs text-gray-700">{r.userId}</td>
+                      <td className="px-6 py-4 text-gray-700">
+                        <div className="font-medium text-sm">{r.userEmail || '—'}</div>
+                        <div className="font-mono text-[11px] text-gray-400 mt-0.5">{r.userId}</div>
+                      </td>
                     </tr>
                   );
                 })}

@@ -7,16 +7,37 @@ import type { ManualSubscriptionRow } from '@/app/api/admin/manual-subscriptions
 
 function statusBadge(status: string) {
   const s = status.toLowerCase();
-  if (s === 'pending_manual') {
+  if (s === 'pending_manual' || s === 'pending') {
     return 'bg-amber-100 text-amber-900 border-amber-200';
   }
-  if (s === 'active') {
+  if (s === 'active' || s === 'paid') {
     return 'bg-emerald-100 text-emerald-900 border-emerald-200';
   }
-  if (s === 'canceled') {
+  if (s === 'canceled' || s === 'cancelled' || s === 'rejected') {
     return 'bg-slate-100 text-slate-700 border-slate-200';
   }
   return 'bg-gray-100 text-gray-800 border-gray-200';
+}
+
+function statusLabel(status: string): string {
+  const s = status.toLowerCase();
+  if (s === 'pending_manual' || s === 'pending') return 'En attente';
+  if (s === 'active' || s === 'paid') return 'Payé / actif';
+  if (s === 'canceled' || s === 'cancelled' || s === 'rejected') return 'Refusé';
+  return status || '—';
+}
+
+function providerLabel(provider: string | null | undefined, method: string): string {
+  const p = String(provider ?? '').toLowerCase();
+  if (p === 'cashplus') return 'CashPlus';
+  if (p === 'wafacash') return 'WafaCash';
+  if (p === 'western_union') return 'Western Union';
+  return method || 'manuel';
+}
+
+function isPendingRow(status: string): boolean {
+  const s = status.toLowerCase();
+  return s === 'pending_manual' || s === 'pending';
 }
 
 export default function ManualPaymentsAdminClient() {
@@ -43,9 +64,15 @@ export default function ManualPaymentsAdminClient() {
       const res = await fetch(`/api/admin/manual-subscriptions?${params.toString()}`, {
         headers: { Authorization: `Bearer ${token}` },
       });
-      const json = (await res.json().catch(() => ({}))) as { rows?: ManualSubscriptionRow[]; error?: string };
+      const json = (await res.json().catch(() => ({}))) as {
+        rows?: ManualSubscriptionRow[];
+        error?: string;
+        message?: string;
+        hint?: string;
+      };
       if (!res.ok) {
-        setError(json.error ?? 'Erreur');
+        const parts = [json.message || json.error || 'Erreur', json.hint].filter(Boolean);
+        setError(parts.join(' · '));
         return;
       }
       setRows(Array.isArray(json.rows) ? json.rows : []);
@@ -74,9 +101,9 @@ export default function ManualPaymentsAdminClient() {
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
         body: JSON.stringify({ id }),
       });
-      const json = (await res.json().catch(() => ({}))) as { error?: string };
+      const json = (await res.json().catch(() => ({}))) as { error?: string; message?: string };
       if (!res.ok) {
-        setError(json.error ?? 'Action impossible');
+        setError(json.message || json.error || 'Action impossible');
         return;
       }
       await load();
@@ -91,7 +118,8 @@ export default function ManualPaymentsAdminClient() {
         <div>
           <h2 className="text-lg font-bold text-gray-900">Paiements manuels (Maroc)</h2>
           <p className="text-sm text-gray-500 mt-1">
-            Virement, CashPlus, agence — activer ou refuser après contrôle du paiement.
+            Demandes créées depuis <span className="font-mono">/payment</span> → table{' '}
+            <span className="font-mono">atlas_payment_requests</span>. Activer ou refuser après contrôle.
           </p>
         </div>
         <div className="flex flex-wrap items-end gap-2">
@@ -104,8 +132,8 @@ export default function ManualPaymentsAdminClient() {
             >
               <option value="all">Tous</option>
               <option value="pending_manual">En attente</option>
-              <option value="active">Actifs</option>
-              <option value="canceled">Refusés / annulés</option>
+              <option value="active">Payés / actifs</option>
+              <option value="canceled">Refusés</option>
             </select>
           </label>
           <label className="text-xs text-gray-500 flex flex-col gap-1 min-w-[200px]">
@@ -136,11 +164,13 @@ export default function ManualPaymentsAdminClient() {
 
       <div className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
         <div className="overflow-x-auto">
-          <table className="min-w-[720px] w-full text-sm">
+          <table className="min-w-[880px] w-full text-sm">
             <thead className="bg-gray-50 text-left text-gray-500">
               <tr>
                 <th className="px-4 py-3 font-semibold">Email</th>
                 <th className="px-4 py-3 font-semibold">Plan</th>
+                <th className="px-4 py-3 font-semibold">Montant</th>
+                <th className="px-4 py-3 font-semibold">Canal</th>
                 <th className="px-4 py-3 font-semibold">Statut</th>
                 <th className="px-4 py-3 font-semibold">Date</th>
                 <th className="px-4 py-3 font-semibold text-right">Actions</th>
@@ -149,13 +179,13 @@ export default function ManualPaymentsAdminClient() {
             <tbody>
               {loading ? (
                 <tr>
-                  <td colSpan={5} className="px-4 py-10 text-center text-gray-400">
+                  <td colSpan={7} className="px-4 py-10 text-center text-gray-400">
                     Chargement…
                   </td>
                 </tr>
               ) : rows.length === 0 ? (
                 <tr>
-                  <td colSpan={5} className="px-4 py-10 text-center text-gray-400">
+                  <td colSpan={7} className="px-4 py-10 text-center text-gray-400">
                     Aucune ligne pour ce filtre.
                   </td>
                 </tr>
@@ -166,19 +196,26 @@ export default function ManualPaymentsAdminClient() {
                     <td className="px-4 py-3 text-gray-800">
                       <span className="font-semibold">{r.plan_label}</span>
                       <span className="text-xs text-gray-400 ml-1 font-mono">{r.plan}</span>
+                      {r.notes ? <div className="text-[11px] text-indigo-600 mt-0.5">{r.notes}</div> : null}
+                    </td>
+                    <td className="px-4 py-3 text-gray-800 whitespace-nowrap">
+                      {Number(r.amount_mad || 0).toLocaleString('fr-MA')} {r.currency || 'MAD'}
+                    </td>
+                    <td className="px-4 py-3 text-gray-700">
+                      {providerLabel(r.manual_provider, r.payment_method)}
                     </td>
                     <td className="px-4 py-3">
                       <span
                         className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-bold border ${statusBadge(r.status)}`}
                       >
-                        {r.status}
+                        {statusLabel(r.status)}
                       </span>
                     </td>
                     <td className="px-4 py-3 text-gray-600 whitespace-nowrap">
                       {r.created_at ? new Date(r.created_at).toLocaleString('fr-FR') : '—'}
                     </td>
                     <td className="px-4 py-3 text-right whitespace-nowrap">
-                      {r.status === 'pending_manual' ? (
+                      {isPendingRow(r.status) ? (
                         <div className="inline-flex flex-wrap justify-end gap-2">
                           <button
                             type="button"
