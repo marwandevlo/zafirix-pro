@@ -22,23 +22,26 @@ export function planDisplayName(plan: string): string {
 }
 
 export function buildManualSubscriptionWhatsAppUrl(params: {
-  /** E.164 without + e.g. 212612345678 */
-  phoneDigits: string;
+  /** E.164 without + e.g. 212622171488 */
+  phoneDigits?: string;
   planLabel: string;
-  userEmail: string;
+  userEmail?: string;
 }): string {
-  const line1 = `Bonjour, je veux souscrire au plan ${params.planLabel} sur ZAFIRIX PRO.`;
-  const line2 = `Mon email: ${params.userEmail}`;
-  const text = encodeURIComponent(`${line1}\n${line2}`);
-  const digits = params.phoneDigits.replace(/\D/g, '');
-  return `https://wa.me/${digits}?text=${text}`;
+  const planName = String(params.planLabel ?? '').trim() || 'sélectionné';
+  let message = `Bonjour, je souhaite activer le forfait ${planName} sur ZAFIRIX PRO pour mon compte.`;
+  const email = String(params.userEmail ?? '').trim();
+  if (email) {
+    message += `\nMon email: ${email}`;
+  }
+  const digits = String(params.phoneDigits ?? getManualWhatsAppPhoneDigits()).replace(/\D/g, '') || '212622171488';
+  return `https://wa.me/${digits}?text=${encodeURIComponent(message)}`;
 }
 
-/** Deep link only; replace with WhatsApp Cloud / Business API outbound sends when you add server-side messaging. */
+/** Deep link only; WhatsApp Business number for manual Maroc payments. */
 export function getManualWhatsAppPhoneDigits(): string {
   const raw =
     process.env.NEXT_PUBLIC_MANUAL_PAYMENT_WHATSAPP_E164?.trim() ||
     process.env.NEXT_PUBLIC_ZAFIRIX_WHATSAPP_E164?.trim() ||
-    '212600000000';
-  return raw.replace(/^\+/, '').replace(/\D/g, '') || '212600000000';
+    '212622171488';
+  return raw.replace(/^\+/, '').replace(/\D/g, '') || '212622171488';
 }
