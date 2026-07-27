@@ -7,6 +7,7 @@ import { isAtlasSupabaseDataEnabled } from '@/app/lib/atlas-data-source';
 import { supabase } from '@/app/lib/supabase';
 import {
   buildManualSubscriptionWhatsAppUrl,
+  MANUAL_PAYMENT_FALLBACK_EMAIL,
   planDisplayName,
 } from '@/app/lib/atlas-manual-subscription';
 import { ATLAS_INCIDENT_HOTFIX_GROWTH } from '@/app/lib/atlas-hotfix';
@@ -75,7 +76,7 @@ export function ManualPaymentModal({ open, onClose, planId }: Props) {
     () =>
       buildManualSubscriptionWhatsAppUrl({
         planLabel,
-        userEmail: email ?? undefined,
+        userEmail: email?.trim() || MANUAL_PAYMENT_FALLBACK_EMAIL,
       }),
     [email, planLabel],
   );

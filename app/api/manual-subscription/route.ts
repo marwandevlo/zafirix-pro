@@ -9,6 +9,7 @@ import { getPlanCompanyCap } from '@/app/lib/atlas-pricing-plans';
 import { recordServerAnalyticsEvent } from '@/app/lib/server-analytics-event';
 import { getWhatsAppOpsPhoneDigits, sendWhatsAppMessage } from '@/app/lib/whatsapp-service';
 import { buildManualRequestAcknowledgedEmailHtml } from '@/app/lib/atlas-email-templates';
+import { MANUAL_PAYMENT_FALLBACK_EMAIL } from '@/app/lib/atlas-manual-subscription';
 
 function clientIp(request: NextRequest): string {
   const xf = request.headers.get('x-forwarded-for');
@@ -77,7 +78,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ ok: false, error: 'user_mismatch' }, { status: 403 });
   }
 
-  const email = auth.user.email?.trim() ?? '';
+  const email = auth.user.email?.trim() || MANUAL_PAYMENT_FALLBACK_EMAIL;
   const admin = createClient(supabaseUrl, serviceRoleKey, {
     auth: { autoRefreshToken: false, persistSession: false },
   });
@@ -98,7 +99,7 @@ export async function POST(request: NextRequest) {
     .from('subscriptions')
     .insert({
       user_id: userId,
-      user_email: email || null,
+      user_email: email,
       plan: planStored,
       status: 'pending_manual',
       payment_method: 'manual',

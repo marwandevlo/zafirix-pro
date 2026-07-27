@@ -1,5 +1,8 @@
 import { getAtlasPlanById } from '@/app/lib/atlas-pricing-plans';
 
+/** Fallback contact email when the authenticated user has no email on the session. */
+export const MANUAL_PAYMENT_FALLBACK_EMAIL = 'support@zafirixpro.com';
+
 export const MANUAL_SUBSCRIPTION_PLANS = ['starter', 'pro', 'business', 'cabinet'] as const;
 export type ManualSubscriptionPlan = (typeof MANUAL_SUBSCRIPTION_PLANS)[number];
 
@@ -29,10 +32,8 @@ export function buildManualSubscriptionWhatsAppUrl(params: {
 }): string {
   const planName = String(params.planLabel ?? '').trim() || 'sélectionné';
   let message = `Bonjour, je souhaite activer le forfait ${planName} sur ZAFIRIX PRO pour mon compte.`;
-  const email = String(params.userEmail ?? '').trim();
-  if (email) {
-    message += `\nMon email: ${email}`;
-  }
+  const email = String(params.userEmail ?? '').trim() || MANUAL_PAYMENT_FALLBACK_EMAIL;
+  message += `\nMon email: ${email}`;
   const digits = String(params.phoneDigits ?? getManualWhatsAppPhoneDigits()).replace(/\D/g, '') || '212622171488';
   return `https://wa.me/${digits}?text=${encodeURIComponent(message)}`;
 }

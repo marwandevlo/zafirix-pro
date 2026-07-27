@@ -6,6 +6,7 @@ import { getCompanyAddonById } from '@/app/lib/atlas-company-addons';
 import { getAtlasPlanById } from '@/app/lib/atlas-pricing-plans';
 import { checkPaymentRateLimit } from '@/app/lib/payment-rate-limit';
 import { getSupabaseServiceRoleClient } from '@/app/lib/supabase-admin';
+import { MANUAL_PAYMENT_FALLBACK_EMAIL } from '@/app/lib/atlas-manual-subscription';
 
 type ManualProvider = 'cashplus' | 'wafacash' | 'western_union';
 
@@ -107,6 +108,11 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: 'service_role_missing', message: msg }, { status: 500 });
   }
 
+  const userEmail =
+    typeof auth.user.email === 'string' && auth.user.email.trim()
+      ? auth.user.email.trim()
+      : MANUAL_PAYMENT_FALLBACK_EMAIL;
+
   const insertRow = addon
     ? {
         user_id: auth.user.id,
@@ -122,7 +128,8 @@ export async function POST(request: NextRequest) {
           addonId: addon.id,
           extraSlots: addon.extraSlots,
           source: 'payment_checkout',
-          user_email: auth.user.email ?? null,
+          user_email: userEmail,
+          email: userEmail,
         },
       }
     : {
@@ -136,7 +143,8 @@ export async function POST(request: NextRequest) {
         status: 'pending' as const,
         metadata: {
           source: 'payment_checkout',
-          user_email: auth.user.email ?? null,
+          user_email: userEmail,
+          email: userEmail,
         },
       };
 
