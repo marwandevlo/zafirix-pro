@@ -8,6 +8,44 @@ import { ZafirixLogo } from '@/app/components/branding/ZafirixLogo';
 import { isAtlasSupabaseDataEnabled } from '@/app/lib/atlas-data-source';
 import { claimAtlasFreeTrialAfterAuth, shouldPersistAtlasTrialNotice } from '@/app/lib/atlas-trial-claim-client';
 import { awaitCompleteReferralSignupWithSession } from '@/app/lib/atlas-referral-client';
+import { resolvePostAuthRoute } from '@/app/lib/atlas-auth-routing';
+import { fetchSessionProfileStatus } from '@/app/lib/atlas-profile-status-client';
+
+async function runPostLoginLifecycle(params: {
+  email: string;
+  password: string;
+}): Promise<{ ok: true; route: string } | { ok: false; error: string }> {
+  const { error: signInError } = await supabase.auth.signInWithPassword({
+    email: params.email,
+    password: params.password,
+  });
+  if (signInError) {
+    return { ok: false, error: 'Email ou mot de passe incorrect' };
+  }
+
+  const { error: refreshError } = await supabase.auth.refreshSession();
+  if (refreshError) {
+    console.warn('[login] refreshSession failed:', refreshError.message);
+  }
+
+  if (isAtlasSupabaseDataEnabled()) {
+    const claim = await claimAtlasFreeTrialAfterAuth();
+    await awaitCompleteReferralSignupWithSession();
+    if (typeof window !== 'undefined' && shouldPersistAtlasTrialNotice(claim)) {
+      sessionStorage.setItem('zafirix_trial_notice', claim.message ?? '');
+    }
+  }
+
+  const { status: profileStatus, source, error: statusError } = await fetchSessionProfileStatus();
+  if (statusError) {
+    console.warn('[login] profile status fetch:', statusError, 'source:', source);
+  }
+
+  const nextParam =
+    typeof window !== 'undefined' ? new URLSearchParams(window.location.search).get('next')?.trim() : '';
+
+  return { ok: true, route: resolvePostAuthRoute(profileStatus, nextParam) };
+}
 
 export default function LoginPage() {
   const router = useRouter();
@@ -46,20 +84,16 @@ export default function LoginPage() {
         setSuccess('Compte créé ! Vérifiez votre e-mail si une confirmation est requise, puis connectez-vous pour activer l’essai selon l’éligibilité.');
       }
     } else {
-      const { error } = await supabase.auth.signInWithPassword({ email, password });
-      if (error) setError('Email ou mot de passe incorrect');
-      else {
-        if (isAtlasSupabaseDataEnabled()) {
-          const claim = await claimAtlasFreeTrialAfterAuth();
-          await awaitCompleteReferralSignupWithSession();
-          if (typeof window !== 'undefined' && shouldPersistAtlasTrialNotice(claim)) {
-            sessionStorage.setItem('zafirix_trial_notice', claim.message ?? '');
-          }
+      try {
+        const result = await runPostLoginLifecycle({ email, password });
+        if (!result.ok) {
+          setError(result.error);
+          return;
         }
-        const q =
-          typeof window !== 'undefined' ? new URLSearchParams(window.location.search).get('next')?.trim() : '';
-        const next = q || '/';
-        router.push(next.startsWith('/') ? next : '/');
+        router.push(result.route);
+      } catch (err) {
+        console.error('[login] unexpected error:', err);
+        setError('Connexion impossible. Réessayez.');
       }
     }
     setLoading(false);

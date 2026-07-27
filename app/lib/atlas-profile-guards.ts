@@ -5,11 +5,11 @@
 import {
   ATLAS_PROFILE_PLANS,
   ATLAS_PROFILE_ROLES,
-  ATLAS_PROFILE_STATUSES,
   type AtlasProfilePlan,
   type AtlasProfileRole,
   type AtlasProfileStatus,
 } from '@/app/lib/admin/atlas-admin-profile-fields';
+import { normalizeStatus } from '@/app/types/auth';
 
 function expectedProfilePlanFromAtlasPlanId(planId: string): AtlasProfilePlan {
   const id = planId.trim().toLowerCase();
@@ -32,14 +32,30 @@ export function normalizeProfilePlan(raw: string | null | undefined): AtlasProfi
 }
 
 export function normalizeProfileStatus(raw: string | null | undefined): AtlasProfileStatus {
-  const s = String(raw ?? '').trim().toLowerCase();
-  if (s === 'approved') return 'active'; // legacy value some DBs still store
-  if ((ATLAS_PROFILE_STATUSES as readonly string[]).includes(s)) return s as AtlasProfileStatus;
-  return 'pending';
+  return normalizeStatus(raw);
+}
+
+/** True when the account awaits admin validation. */
+export function isProfilePendingApproval(status: string | null | undefined): boolean {
+  return normalizeStatus(status) === 'pending';
+}
+
+/** True when the account may use the main app (post-admin approval). */
+export function canAccessAppWithProfileStatus(status: string | null | undefined): boolean {
+  return normalizeStatus(status) === 'active';
 }
 
 export function isProfileSuspended(status: string | null | undefined): boolean {
-  return normalizeProfileStatus(status) === 'suspended';
+  return normalizeStatus(status) === 'suspended';
+}
+
+export function isProfileBanned(status: string | null | undefined): boolean {
+  return normalizeStatus(status) === 'banned';
+}
+
+export function isProfileAccessBlocked(status: string | null | undefined): boolean {
+  const s = normalizeStatus(status);
+  return s === 'suspended' || s === 'banned';
 }
 
 /** True when profiles.plan cache disagrees with atlas_subscriptions-derived bucket. */
