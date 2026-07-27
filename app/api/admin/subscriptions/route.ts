@@ -5,6 +5,30 @@ import { requireAdmin } from '@/app/lib/admin/require-admin';
 
 type SubRowLoose = Record<string, unknown>;
 
+type DbErrorLike = {
+  code?: string;
+  message?: string;
+  details?: string;
+  hint?: string;
+};
+
+function isMissingSubscriptionsTable(error: DbErrorLike): boolean {
+  const code = String(error.code ?? '');
+  const message = String(error.message ?? '').toLowerCase();
+  return (
+    code === '42P01' ||
+    code === 'PGRST205' ||
+    message.includes("could not find the table 'public.subscriptions'") ||
+    message.includes('relation "public.subscriptions" does not exist') ||
+    (message.includes('subscriptions') && message.includes('does not exist'))
+  );
+}
+
+function classifyDbError(error: DbErrorLike): string {
+  if (isMissingSubscriptionsTable(error)) return 'subscriptions_table_missing';
+  return 'db_error';
+}
+
 function errorPayload(params: {
   error: string;
   message?: string;
@@ -13,17 +37,40 @@ function errorPayload(params: {
   hint?: string | null;
   debug?: Record<string, unknown>;
 }): Record<string, unknown> {
-  const isDev = process.env.NODE_ENV === 'development';
-  return isDev
-    ? {
-        error: params.error,
-        ...(params.message ? { message: params.message } : {}),
-        ...(params.code ? { code: params.code } : {}),
-        ...(params.details ? { details: params.details } : {}),
-        ...(params.hint ? { hint: params.hint } : {}),
-        ...(params.debug ? { debug: params.debug } : {}),
-      }
-    : { error: params.error };
+  // Admin routes: always surface actionable diagnostics (auth already gated by requireAdmin).
+  return {
+    error: params.error,
+    ...(params.message ? { message: params.message } : {}),
+    ...(params.code ? { code: params.code } : {}),
+    ...(params.details ? { details: params.details } : {}),
+    ...(params.hint ? { hint: params.hint } : {}),
+    ...(params.debug && process.env.NODE_ENV === 'development' ? { debug: params.debug } : {}),
+  };
+}
+
+function logAndRespondDbError(context: string, error: DbErrorLike) {
+  const classified = classifyDbError(error);
+  console.error(`[api/admin/subscriptions] ${context}`, {
+    classified,
+    code: error.code ?? null,
+    message: error.message ?? null,
+    details: error.details ?? null,
+    hint: error.hint ?? null,
+  });
+  return NextResponse.json(
+    errorPayload({
+      error: classified,
+      message: error.message ?? classified,
+      code: error.code ?? null,
+      details: error.details ?? null,
+      hint:
+        error.hint ??
+        (classified === 'subscriptions_table_missing'
+          ? 'Run supabase/migrations/20260727000000_create_subscriptions_table.sql in the Supabase SQL Editor.'
+          : null),
+    }),
+    { status: 500 },
+  );
 }
 
 export async function GET(request: NextRequest) {
@@ -49,51 +96,52 @@ export async function GET(request: NextRequest) {
       .limit(500);
 
     if (error) {
-      console.error('[api/admin/subscriptions] subscriptions_query_failed', {
-        code: (error as unknown as { code?: string }).code,
-        message: error.message,
-        details: (error as unknown as { details?: string }).details,
-        hint: (error as unknown as { hint?: string }).hint,
-      });
-      return NextResponse.json(
-        errorPayload({
-          error: 'db_error',
-          message: error.message,
-          code: (error as unknown as { code?: string }).code ?? null,
-          details: (error as unknown as { details?: string }).details ?? null,
-          hint: (error as unknown as { hint?: string }).hint ?? null,
-        }),
-        { status: 500 },
-      );
+      return logAndRespondDbError('subscriptions_query_failed', error as DbErrorLike);
     }
 
     const raw = (subs ?? []) as SubRowLoose[];
     const userIds = Array.from(new Set(raw.map((r) => String(r.user_id ?? '')).filter(Boolean)));
 
-    const { data: profs } =
-      userIds.length === 0
-        ? { data: [] as Array<{ id: string; email: string | null }> }
-        : await admin.from('profiles').select('id, email').in('id', userIds).limit(500);
+    let profs: Array<{ id: string; email: string | null }> = [];
+    if (userIds.length > 0) {
+      const { data: profileRows, error: profileError } = await admin
+        .from('profiles')
+        .select('id, email')
+        .in('id', userIds)
+        .limit(500);
+
+      if (profileError) {
+        console.error('[api/admin/subscriptions] profiles_lookup_failed', {
+          code: (profileError as DbErrorLike).code ?? null,
+          message: profileError.message,
+          details: (profileError as DbErrorLike).details ?? null,
+          hint: (profileError as DbErrorLike).hint ?? null,
+          userIdCount: userIds.length,
+        });
+      } else {
+        profs = (profileRows ?? []) as Array<{ id: string; email: string | null }>;
+      }
+    }
 
     const emailById = new Map<string, string>();
-    for (const p of (profs ?? []) as Array<{ id: string; email: string | null }>) {
+    for (const p of profs) {
       emailById.set(String(p.id), String(p.email ?? ''));
     }
 
     const rows = raw.map((r) => ({
       id: String(r.id ?? ''),
       user_id: String(r.user_id ?? ''),
-      email: emailById.get(String(r.user_id ?? '')) ?? '',
+      email: emailById.get(String(r.user_id ?? '')) || String(r.user_email ?? ''),
       status: String(r.status ?? ''),
       created_at: String(r.created_at ?? ''),
       updated_at: String(r.updated_at ?? ''),
-      plan: String((r.plan ?? r.plan_id ?? '') as string),
+      plan: String((r.plan ?? r.plan_id ?? r.plan_slug ?? '') as string),
     }));
 
     return NextResponse.json({ rows });
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
-    console.error('[api/admin/subscriptions] unexpected_error', { message: msg });
+    console.error('[api/admin/subscriptions] unexpected_error', { message: msg, stack: e instanceof Error ? e.stack : undefined });
     return NextResponse.json(errorPayload({ error: 'db_error', message: msg }), { status: 500 });
   }
 }
@@ -118,34 +166,20 @@ export async function PATCH(request: NextRequest) {
       console.error('[api/admin/subscriptions] service_role_missing', { message: msg });
       return NextResponse.json(errorPayload({ error: 'service_role_missing', message: msg }), { status: 500 });
     }
+
     const { error } = await admin
       .from('subscriptions')
       .update({ status, updated_at: new Date().toISOString() })
       .eq('id', id);
+
     if (error) {
-      console.error('[api/admin/subscriptions] subscriptions_update_failed', {
-        code: (error as unknown as { code?: string }).code,
-        message: error.message,
-        details: (error as unknown as { details?: string }).details,
-        hint: (error as unknown as { hint?: string }).hint,
-      });
-      return NextResponse.json(
-        errorPayload({
-          error: 'db_error',
-          message: error.message,
-          code: (error as unknown as { code?: string }).code ?? null,
-          details: (error as unknown as { details?: string }).details ?? null,
-          hint: (error as unknown as { hint?: string }).hint ?? null,
-        }),
-        { status: 500 },
-      );
+      return logAndRespondDbError('subscriptions_update_failed', error as DbErrorLike);
     }
 
     return NextResponse.json({ ok: true });
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
-    console.error('[api/admin/subscriptions] unexpected_error', { message: msg });
+    console.error('[api/admin/subscriptions] unexpected_error', { message: msg, stack: e instanceof Error ? e.stack : undefined });
     return NextResponse.json(errorPayload({ error: 'db_error', message: msg }), { status: 500 });
   }
 }
-

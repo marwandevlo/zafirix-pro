@@ -53,10 +53,18 @@ export default function AdminSubscriptionsPage() {
           const res = await fetch('/api/admin/subscriptions', {
             method: 'GET',
           });
-          const json = (await res.json().catch(() => ({}))) as { rows?: AdminSubRow[]; error?: string; message?: string };
+          const json = (await res.json().catch(() => ({}))) as {
+            rows?: AdminSubRow[];
+            error?: string;
+            message?: string;
+            hint?: string;
+            code?: string;
+          };
           if (!res.ok) {
-            const msg = process.env.NODE_ENV === 'development' ? (json.message || json.error || 'db_error') : 'db_error';
-            throw new Error(msg);
+            const parts = [json.message || json.error || 'db_error', json.hint, json.code ? `code=${json.code}` : '']
+              .map((p) => String(p ?? '').trim())
+              .filter(Boolean);
+            throw new Error(parts.join(' · '));
           }
           const list = Array.isArray(json.rows) ? json.rows : [];
 
@@ -112,10 +120,17 @@ export default function AdminSubscriptionsPage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ id, status: nextStatus }),
       });
-      const json = (await res.json().catch(() => ({}))) as { error?: string; message?: string };
+      const json = (await res.json().catch(() => ({}))) as {
+        error?: string;
+        message?: string;
+        hint?: string;
+        code?: string;
+      };
       if (!res.ok) {
-        const msg = process.env.NODE_ENV === 'development' ? (json.message || json.error || 'db_error') : 'db_error';
-        throw new Error(msg);
+        const parts = [json.message || json.error || 'db_error', json.hint, json.code ? `code=${json.code}` : '']
+          .map((p) => String(p ?? '').trim())
+          .filter(Boolean);
+        throw new Error(parts.join(' · '));
       }
       setRows((prev) => prev.map((r) => (r.id === id ? { ...r, status: nextStatus } : r)));
     } catch (e) {

@@ -45,7 +45,22 @@ export async function GET(request: NextRequest) {
   }
   const { data: rows, error } = await query.order('created_at', { ascending: false }).limit(500);
   if (error) {
-    return NextResponse.json({ error: 'db_error' }, { status: 500 });
+    console.error('[api/admin/manual-subscriptions] subscriptions_query_failed', {
+      code: (error as { code?: string }).code ?? null,
+      message: error.message,
+      details: (error as { details?: string }).details ?? null,
+      hint: (error as { hint?: string }).hint ?? null,
+    });
+    return NextResponse.json(
+      {
+        error: 'db_error',
+        message: error.message,
+        code: (error as { code?: string }).code ?? null,
+        details: (error as { details?: string }).details ?? null,
+        hint: (error as { hint?: string }).hint ?? null,
+      },
+      { status: 500 },
+    );
   }
 
   let list: ManualSubscriptionRow[] = (rows ?? []).map((r: Record<string, unknown>) => ({
