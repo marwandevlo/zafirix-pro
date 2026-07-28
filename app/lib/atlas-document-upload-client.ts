@@ -17,7 +17,9 @@ import { supabase } from '@/app/lib/supabase';
 /** Above this size, never use multipart `/api/documents/upload`. */
 export const DIRECT_STORAGE_UPLOAD_THRESHOLD_BYTES = 256 * 1024;
 
-const STORAGE_UPLOAD_TIMEOUT_MS = 600_000;
+/** Fail fast if Supabase Storage upload hangs (per attempt). */
+const STORAGE_UPLOAD_TIMEOUT_MS = 15_000;
+const API_REQUEST_TIMEOUT_MS = 15_000;
 const SESSION_REFRESH_IF_EXPIRES_WITHIN_SEC = 300;
 const UPLOAD_MAX_ATTEMPTS = 3;
 const UPLOAD_RETRY_BASE_MS = 800;
@@ -31,6 +33,8 @@ export type DocumentUploadProgress = {
 };
 
 export type DocumentUploadResult = {
+  success?: boolean;
+  documentId?: string;
   document: {
     id: string;
     companyId: string;
@@ -118,13 +122,18 @@ async function fetchJsonWithRetry<T>(
   url: string,
   init: RequestInit,
   step: string,
+  opts?: { timeoutMs?: number },
 ): Promise<{ ok: true; status: number; data: T } | { ok: false; status: number; body: DocumentUploadErrorBody }> {
   let lastStatus = 0;
   let lastBody: DocumentUploadErrorBody = { error: 'upload_failed', code: 'upload_failed', step };
+  const timeoutMs = opts?.timeoutMs ?? API_REQUEST_TIMEOUT_MS;
 
   for (let attempt = 1; attempt <= UPLOAD_MAX_ATTEMPTS; attempt++) {
+    const controller = new AbortController();
+    const timer = window.setTimeout(() => controller.abort(), timeoutMs);
     try {
-      const res = await fetch(url, { ...init, credentials: 'include' });
+      const res = await fetch(url, { ...init, credentials: 'include', signal: controller.signal });
+      window.clearTimeout(timer);
       lastStatus = res.status;
       const data = (await res.json().catch(() => ({}))) as T & DocumentUploadErrorBody;
 
@@ -147,12 +156,16 @@ async function fetchJsonWithRetry<T>(
         return { ok: false, status: res.status, body: lastBody };
       }
     } catch (err) {
-      lastStatus = 0;
+      window.clearTimeout(timer);
+      const isAbort = err instanceof DOMException && err.name === 'AbortError';
+      lastStatus = isAbort ? 408 : 0;
       lastBody = {
         error: 'upload_timeout',
         code: 'upload_timeout',
         step,
-        message: 'Délai dépassé ou réseau indisponible.',
+        message: isAbort
+          ? 'Délai dépassé pendant la communication avec le serveur.'
+          : 'Délai dépassé ou réseau indisponible.',
       };
       logUploadDiagnostic({
         event: `${step}_network_error`,
@@ -161,7 +174,7 @@ async function fetchJsonWithRetry<T>(
         attempt,
       });
       if (attempt >= UPLOAD_MAX_ATTEMPTS) {
-        return { ok: false, status: 408, body: lastBody };
+        return { ok: false, status: lastStatus || 408, body: lastBody };
       }
     }
 
@@ -230,14 +243,22 @@ async function uploadOnceViaAuthenticatedClient(
   const contentType = isAllowedDocumentMime(mimeType) ? mimeType : inferDocumentMimeType(file);
 
   return new Promise((resolve) => {
+    let settled = false;
+    const finish = (result: { ok: true } | { ok: false; body: DocumentUploadErrorBody }) => {
+      if (settled) return;
+      settled = true;
+      window.clearTimeout(timer);
+      resolve(result);
+    };
+
     const timer = window.setTimeout(() => {
-      resolve({
+      finish({
         ok: false,
         body: {
           error: 'upload_timeout',
           code: 'upload_timeout',
           step: 'client_storage_upload',
-          message: 'Délai dépassé pendant le téléversement vers le stockage.',
+          message: 'Délai dépassé pendant le téléversement vers le stockage (15 s).',
         },
       });
     }, STORAGE_UPLOAD_TIMEOUT_MS);
@@ -250,17 +271,14 @@ async function uploadOnceViaAuthenticatedClient(
           cacheControl: '3600',
         });
 
-        window.clearTimeout(timer);
-
         if (error) {
-          resolve({ ok: false, body: bodyFromStorageError(error) });
+          finish({ ok: false, body: bodyFromStorageError(error) });
           return;
         }
 
-        resolve({ ok: true });
+        finish({ ok: true });
       } catch (err) {
-        window.clearTimeout(timer);
-        resolve({ ok: false, body: bodyFromStorageError(err) });
+        finish({ ok: false, body: bodyFromStorageError(err) });
       }
     })();
   });
@@ -435,6 +453,8 @@ export async function uploadDocumentForOcr(
 
   onProgress?.({ phase: 'registered' });
 
+  onProgress?.({ phase: 'ocr' });
+
   const registerResult = await fetchJsonWithRetry<DocumentUploadResult>(
     '/api/documents/upload/register',
     {
@@ -451,6 +471,7 @@ export async function uploadDocumentForOcr(
       }),
     },
     'register',
+    { timeoutMs: API_REQUEST_TIMEOUT_MS },
   );
 
   if (!registerResult.ok) {
@@ -499,12 +520,13 @@ export async function uploadDocumentForOcr(
     mimeType,
   });
 
-  onProgress?.({ phase: 'ocr' });
-  /* OCR starts on server via register waitUntil — avoid duplicate client /ocr/run. */
+  /* OCR + auto-pipeline run on server via scheduleVercelBackground — client polls progress. */
 
   return {
     ok: true,
     data: {
+      success: registerBody.success ?? true,
+      documentId: registerBody.documentId ?? registerBody.document.id,
       document: registerBody.document,
       ocrAccepted: registerBody.ocrAccepted ?? true,
     },

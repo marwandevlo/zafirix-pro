@@ -210,24 +210,23 @@ type OcrProgressState = {
 function ocrProgressLabel(progress: OcrProgressState): string {
   switch (progress.phase) {
     case 'storage':
-      return 'Téléversement vers le stockage…';
-    case 'registered':
-      return 'Fichier enregistré…';
     case 'uploading':
       return 'Téléversement vers le stockage…';
+    case 'registered':
+      return 'Enregistrement du document…';
     case 'started':
       return progress.totalPages
         ? `Démarrage OCR (${progress.totalPages} page${progress.totalPages > 1 ? 's' : ''})…`
-        : 'Démarrage analyse OCR…';
+        : 'Analyse en cours…';
     case 'rendering':
       return progress.page && progress.totalPages
         ? `Page ${progress.page}/${progress.totalPages}…`
-        : 'Analyse OCR en cours…';
+        : 'Analyse en cours…';
     case 'analyzing':
       if (progress.page && progress.totalPages) {
         return `Page ${progress.page}/${progress.totalPages}…`;
       }
-      return 'Analyse OCR en cours…';
+      return 'Analyse en cours…';
     case 'saving':
       return 'Fichier enregistré…';
     case 'completed':
@@ -254,7 +253,7 @@ const SUPPLIER_INVOICES_MIGRATION_FILES = [
   'supabase/migrations/20260528170000_atlas_supplier_invoices_multi_invoice.sql',
 ] as const;
 
-const OCR_PROGRESS_POLL_MS = 2000;
+const OCR_PROGRESS_POLL_MS = 2500;
 
 type OcrProgressApiBody = {
   ok?: boolean;
@@ -435,6 +434,8 @@ export default function DocumentsPage() {
               });
             }
           }
+
+          if (ocrPollingIdsRef.current.size > 0) needsRefresh = true;
 
           if (needsRefresh) await refreshOcr();
           if (ocrPollingIdsRef.current.size === 0) stopOcrPoll();
@@ -725,14 +726,14 @@ export default function DocumentsPage() {
         return;
       }
 
-      const documentId = uploadResult.data.document.id;
+      const documentId = uploadResult.data.documentId ?? uploadResult.data.document.id;
       const mimeType = uploadResult.data.document.mimeType ?? mimeTypeGuess;
 
       setOcrPageInfo(atlasDocumentErrorMessage('ocr_background'));
       ocrRetriggeredRef.current.add(documentId);
-      enqueueOcrProgressPoll(documentId);
       setOcrProgress({ phase: 'analyzing', documentId, isPdf });
-      await refreshOcr();
+      enqueueOcrProgressPoll(documentId);
+      void refreshOcr();
     } catch (err) {
       const message = err instanceof Error ? err.message : 'ocr_failed';
       const code = message === 'ocr_timeout' ? 'ocr_timeout' : 'ocr_failed';
