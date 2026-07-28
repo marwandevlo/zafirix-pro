@@ -260,6 +260,7 @@ export type AtlasIsExportCompanyInfo = {
   trade_name: string | null;
   if_fiscal: string | null;
   if_number: string | null;
+  ice: string | null;
 };
 
 export async function loadCompanyIsExportInfo(
@@ -268,7 +269,7 @@ export async function loadCompanyIsExportInfo(
 ): Promise<AtlasIsExportCompanyInfo | null> {
   const { data, error } = await db
     .from('atlas_companies')
-    .select('name, legal_name, trade_name, if_fiscal, if_number, company_json')
+    .select('name, legal_name, trade_name, if_fiscal, if_number, ice, company_json')
     .eq('id', companyId)
     .maybeSingle();
   if (error || !data) return null;
@@ -281,5 +282,6 @@ export async function loadCompanyIsExportInfo(
     if_fiscal:
       row.if_fiscal == null ? (json?.if_fiscal == null ? null : String(json.if_fiscal)) : String(row.if_fiscal),
     if_number: row.if_number == null ? null : String(row.if_number),
+    ice: row.ice == null ? (json?.ice == null ? null : String(json.ice)) : String(row.ice),
   };
 }

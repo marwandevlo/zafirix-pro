@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
-import { Calculator, CheckCircle, FileCode, Globe, Loader2 } from 'lucide-react';
+import { Calculator, CheckCircle, FileCode, FileSpreadsheet, Globe, Loader2 } from 'lucide-react';
 import { AppSidebar } from '@/app/components/shell/AppSidebar';
 import { BetaSurfaceBadge } from '@/app/components/safety/BetaSurfaceBadge';
 import { getActiveCompanyDbRowId } from '@/app/lib/atlas-active-company';
@@ -22,7 +22,9 @@ export default function ISPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [xmlGenerated, setXmlGenerated] = useState(false);
+  const [excelGenerated, setExcelGenerated] = useState(false);
   const [exportingXml, setExportingXml] = useState(false);
+  const [exportingExcel, setExportingExcel] = useState(false);
 
   const loadHistory = useCallback(async (cid: string) => {
     const res = await apiFetch<{ drafts?: AtlasIsDraft[] }>(`/api/is/drafts?companyId=${encodeURIComponent(cid)}`);
@@ -71,6 +73,47 @@ export default function ISPage() {
     if (!draft) return;
     const res = await apiFetch<{ draft?: AtlasIsDraft }>(`/api/is/drafts/${draft.id}/validate`, { method: 'POST' });
     if (res.ok && res.data.draft) setDraft(res.data.draft);
+  };
+
+  const downloadExcel = async () => {
+    if (!companyId) return;
+    if (!draft) {
+      setError('Calculez d\'abord le brouillon IS pour cet exercice.');
+      return;
+    }
+    setExportingExcel(true);
+    setError('');
+    setExcelGenerated(false);
+    try {
+      const params = new URLSearchParams({
+        companyId,
+        fiscalYear: String(draft.fiscalYear),
+        draftId: draft.id,
+      });
+      const res = await fetch(`/api/is/export-excel?${params.toString()}`, { credentials: 'include' });
+      if (!res.ok) {
+        const body = (await res.json().catch(() => ({}))) as { error?: string; message?: string };
+        setError(body.message ?? body.error ?? 'Export Excel impossible.');
+        return;
+      }
+      const contentType = res.headers.get('content-type') ?? '';
+      if (!contentType.includes('spreadsheet') && !contentType.includes('excel')) {
+        setError('Réponse export invalide (attendu Excel .xlsx).');
+        return;
+      }
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `IS_${draft.fiscalYear}_DGI.xlsx`;
+      a.click();
+      URL.revokeObjectURL(url);
+      setExcelGenerated(true);
+    } catch {
+      setError('Erreur réseau lors de l\'export Excel IS.');
+    } finally {
+      setExportingExcel(false);
+    }
   };
 
   const generateXML = async () => {
@@ -155,6 +198,16 @@ export default function ISPage() {
             <div className="flex gap-2">
               <button
                 type="button"
+                onClick={() => void downloadExcel()}
+                disabled={!companyId || !draft || exportingExcel}
+                className="flex items-center gap-2 px-4 py-2 bg-[#1F497D] text-white rounded-lg text-sm hover:bg-[#16365c] transition-colors disabled:opacity-50"
+                title={draft ? 'Exporter le brouillon IS en Excel DGI' : 'Calculez le brouillon IS avant export'}
+              >
+                {exportingExcel ? <Loader2 size={16} className="animate-spin" /> : <FileSpreadsheet size={16} />}
+                Exporter Excel DGI
+              </button>
+              <button
+                type="button"
                 onClick={() => void generateXML()}
                 disabled={!companyId || !draft || exportingXml}
                 className="flex items-center gap-2 px-4 py-2 bg-blue-500 text-white rounded-lg text-sm disabled:opacity-50"
@@ -229,6 +282,13 @@ export default function ISPage() {
                 <div className="bg-green-50 border border-green-200 rounded-xl p-4 flex items-center gap-3">
                   <CheckCircle size={20} className="text-green-500" />
                   <p className="text-sm text-green-700">XML IS généré depuis le brouillon persisté.</p>
+                </div>
+              )}
+
+              {excelGenerated && (
+                <div className="bg-green-50 border border-green-200 rounded-xl p-4 flex items-center gap-3">
+                  <CheckCircle size={20} className="text-green-500" />
+                  <p className="text-sm text-green-700">Fichier Excel IS généré au format DGI.</p>
                 </div>
               )}
             </>
