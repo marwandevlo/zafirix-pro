@@ -16,7 +16,7 @@ import { requireSupabaseUser } from '@/app/lib/atlas-supabase-guard';
 import { supabase } from '@/app/lib/supabase';
 
 const PROFILE_SELECT =
-  'id, email, role, plan, status, full_name, company_name, onboarding_completed, created_at, updated_at';
+  'id, email, role, plan, status, full_name, company_name, phone, onboarding_completed, created_at, updated_at';
 
 type ProfileRow = {
   id: string;
@@ -26,6 +26,7 @@ type ProfileRow = {
   status?: string | null;
   full_name?: string | null;
   company_name?: string | null;
+  phone?: string | null;
   onboarding_completed?: boolean | null;
   created_at?: string | null;
   updated_at?: string | null;
@@ -40,6 +41,7 @@ function rowToProfile(row: ProfileRow, fallbackEmail = ''): AtlasProfile {
     status: normalizeProfileStatus(row.status),
     full_name: String(row.full_name ?? '').trim(),
     company_name: String(row.company_name ?? '').trim(),
+    phone: String(row.phone ?? '').trim(),
     onboarding_completed: Boolean(row.onboarding_completed),
     created_at: String(row.created_at ?? new Date().toISOString()),
     updated_at: String(row.updated_at ?? new Date().toISOString()),
@@ -54,6 +56,9 @@ function validateUserPatch(patch: AtlasProfileUserPatch): { ok: true } | { ok: f
   if (patch.company_name !== undefined) {
     const name = patch.company_name.trim();
     if (name.length > 200) return { ok: false, error: 'invalid_company_name' };
+  }
+  if (patch.phone !== undefined && patch.phone !== null && patch.phone.trim().length > 40) {
+    return { ok: false, error: 'invalid_phone' };
   }
   return { ok: true };
 }
@@ -132,6 +137,7 @@ export async function patchAtlasProfile(
   const payload: Record<string, unknown> = { updated_at: new Date().toISOString() };
   if (patch.full_name !== undefined) payload.full_name = patch.full_name.trim();
   if (patch.company_name !== undefined) payload.company_name = patch.company_name.trim();
+  if (patch.phone !== undefined) payload.phone = patch.phone?.trim() || null;
   if (patch.onboarding_completed !== undefined) payload.onboarding_completed = patch.onboarding_completed;
 
   const { data, error } = await supabase

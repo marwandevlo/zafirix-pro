@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import { Building2, Phone, User } from 'lucide-react';
 import { ZafirixLogo } from '@/app/components/branding/ZafirixLogo';
 import { isAtlasSupabaseDataEnabled } from '@/app/lib/atlas-data-source';
+import { fetchProfileViaApi, patchProfileViaApi } from '@/app/lib/atlas-profile-api-client';
 import { trackOnboardingStarted } from '@/app/lib/atlas-onboarding-analytics';
 import { supabase } from '@/app/lib/supabase';
 
@@ -36,28 +37,23 @@ export default function OnboardingPage() {
         return;
       }
 
-      const { data: prof, error: profErr } = await supabase
-        .from('profiles')
-        .select('full_name, phone, company')
-        .eq('id', session.user.id)
-        .maybeSingle();
+      const token = session.access_token ?? '';
+      const profile = await fetchProfileViaApi(token, {
+        userId: session.user.id,
+        email: session.user.email ?? '',
+      });
 
       if (cancelled) return;
 
-      if (profErr) {
-        setError('Impossible de charger votre profil.');
-      }
-
-      const row = prof as { full_name?: string | null; phone?: string | null; company?: string | null } | null;
-      const existingName = String(row?.full_name ?? '').trim();
+      const existingName = profile.full_name.trim();
       if (existingName) {
         router.push('/');
         return;
       }
 
       setFullName(existingName);
-      setPhone(String(row?.phone ?? ''));
-      setCompany(String(row?.company ?? ''));
+      setPhone(profile.phone.trim());
+      setCompany(profile.company_name.trim());
       setLoading(false);
     };
 
@@ -77,20 +73,21 @@ export default function OnboardingPage() {
     setSaving(true);
     try {
       const { data } = await supabase.auth.getSession();
-      const user = data.session?.user;
+      const session = data.session;
+      const user = session?.user;
       if (!user?.id) {
         router.push('/login?next=/onboarding');
         return;
       }
 
-      const payload = {
+      const token = session?.access_token ?? '';
+      const result = await patchProfileViaApi(token, {
         full_name: fullName.trim(),
+        company_name: company.trim() || '',
         phone: phone.trim() || null,
-        company: company.trim() || null,
-      };
+      });
 
-      const { error: upErr } = await supabase.from('profiles').update(payload).eq('id', user.id);
-      if (upErr) {
+      if (!result.ok) {
         setError('Enregistrement impossible. Réessayez.');
         return;
       }
@@ -183,4 +180,3 @@ export default function OnboardingPage() {
     </div>
   );
 }
-

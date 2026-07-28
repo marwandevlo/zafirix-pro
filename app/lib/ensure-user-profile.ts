@@ -1,0 +1,110 @@
+import type { SupabaseClient, User } from '@supabase/supabase-js';
+import { isOwnerEmail } from '@/app/lib/owner';
+
+export type EnsureUserProfileOptions = {
+  /** When true (default), set status to active if the auth user email is confirmed. */
+  activateIfEmailConfirmed?: boolean;
+  source?: string;
+};
+
+export type EnsureUserProfileResult = {
+  ok: boolean;
+  status: string;
+  created: boolean;
+  error?: string;
+};
+
+/**
+ * Idempotent profiles row for authenticated users.
+ * Uses service_role so RLS/triggers on INSERT do not strip privileged defaults.
+ */
+export async function ensureUserProfile(
+  admin: SupabaseClient,
+  user: User,
+  options: EnsureUserProfileOptions = {},
+): Promise<EnsureUserProfileResult> {
+  const source = options.source ?? 'ensureUserProfile';
+  const activateIfEmailConfirmed = options.activateIfEmailConfirmed !== false;
+
+  const email = user.email?.trim() ?? '';
+  const meta = user.user_metadata as Record<string, unknown> | undefined;
+  const fullName =
+    typeof meta?.full_name === 'string'
+      ? meta.full_name
+      : typeof meta?.name === 'string'
+        ? meta.name
+        : '';
+
+  const emailConfirmed = Boolean(user.email_confirmed_at);
+  const isOwner = isOwnerEmail(email);
+
+  const defaultStatus = isOwner
+    ? 'active'
+    : activateIfEmailConfirmed && emailConfirmed
+      ? 'active'
+      : 'pending';
+
+  const { data: existing, error: readError } = await admin
+    .from('profiles')
+    .select('id, email, status, role, plan')
+    .eq('id', user.id)
+    .maybeSingle();
+
+  if (readError) {
+    console.error(`[${source}] profile read failed`, readError.message);
+    return { ok: false, status: 'pending', created: false, error: readError.message };
+  }
+
+  if (!existing) {
+    const { error: insertError } = await admin.from('profiles').insert({
+      id: user.id,
+      email: email || null,
+      full_name: fullName,
+      role: isOwner ? 'owner' : 'user',
+      plan: isOwner ? 'enterprise' : 'free',
+      status: defaultStatus,
+    });
+
+    if (insertError) {
+      console.error(`[${source}] profile insert failed`, insertError.message);
+      return { ok: false, status: defaultStatus, created: false, error: insertError.message };
+    }
+
+    console.info(`[${source}] profile created`, { userId: user.id, status: defaultStatus });
+    return { ok: true, status: defaultStatus, created: true };
+  }
+
+  const currentStatus = String((existing as { status?: string | null }).status ?? '').trim().toLowerCase();
+  const patch: Record<string, unknown> = {};
+
+  if (email && !String((existing as { email?: string | null }).email ?? '').trim()) {
+    patch.email = email;
+  }
+  if (fullName && !String((existing as { full_name?: string | null }).full_name ?? '').trim()) {
+    patch.full_name = fullName;
+  }
+
+  if (
+    activateIfEmailConfirmed &&
+    emailConfirmed &&
+    currentStatus === 'pending' &&
+    !isOwner
+  ) {
+    patch.status = 'active';
+  }
+
+  if (Object.keys(patch).length > 0) {
+    patch.updated_at = new Date().toISOString();
+    const { error: updateError } = await admin.from('profiles').update(patch).eq('id', user.id);
+    if (updateError) {
+      console.error(`[${source}] profile update failed`, updateError.message);
+      return { ok: false, status: currentStatus || defaultStatus, created: false, error: updateError.message };
+    }
+    if (patch.status === 'active') {
+      console.info(`[${source}] email-confirmed user activated`, { userId: user.id });
+    }
+  }
+
+  const finalStatus = String(patch.status ?? currentStatus ?? defaultStatus);
+  return { ok: true, status: finalStatus, created: false };
+}

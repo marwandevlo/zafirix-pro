@@ -7,6 +7,7 @@ export type AtlasProfile = {
   status: string;
   full_name: string;
   company_name: string;
+  phone: string;
   onboarding_completed: boolean;
   created_at: string;
   updated_at: string;
@@ -16,5 +17,6 @@ export type AtlasProfile = {
 export type AtlasProfileUserPatch = {
   full_name?: string;
   company_name?: string;
+  phone?: string | null;
   onboarding_completed?: boolean;
 };
