@@ -21,8 +21,8 @@ export function validateProductionConfiguration(): void {
   }
 
   if (!process.env.PADDLE_WEBHOOK_SECRET?.trim()) {
-    console.error(
-      `${PREFIX} PADDLE_WEBHOOK_SECRET is required in production. Paddle webhooks will reject requests until set.`,
+    console.warn(
+      `${PREFIX} PADDLE_WEBHOOK_SECRET is not set — Paddle webhooks will reject requests until configured.`,
     );
   }
 

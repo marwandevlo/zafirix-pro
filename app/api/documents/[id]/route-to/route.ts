@@ -226,7 +226,6 @@ async function routeSalesInvoice(
       source_document_id: documentId,
       source_document_type: 'sales_invoice',
       generated_by: 'documents_ia',
-      validation_status: 'draft',
       metadata: { source_document_id: documentId, generated_by: 'documents_ia', generated_at: new Date().toISOString() },
     })
     .select('id').single();
@@ -295,79 +294,127 @@ function resolveModuleGroup(module: string): string {
 
 // ── Main handler ──────────────────────────────────────────────────────────────
 
+function routeToErrorResponse(
+  status: number,
+  code: string,
+  message: string,
+  extra?: Record<string, unknown>,
+) {
+  return NextResponse.json({ ok: false, error: code, code, message, ...extra }, { status });
+}
+
+function routingFailureStatus(message: string): number {
+  const lower = message.toLowerCase();
+  if (
+    lower.includes('required') ||
+    lower.includes('invalid') ||
+    lower.includes('missing') ||
+    lower.includes('not processed') ||
+    lower.includes('classification')
+  ) {
+    return 400;
+  }
+  return 500;
+}
+
 export async function POST(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
-  const { id: documentId } = await params;
-  const userId = await documentUploadSessionUserId(request);
-  if (!userId) return NextResponse.json({ error: 'auth_required' }, { status: 401 });
-
-  let body: RouteToBody;
-  try { body = (await request.json()) as RouteToBody; }
-  catch { return NextResponse.json({ error: 'invalid_json' }, { status: 400 }); }
-
-  const targetModule = String(body.module ?? '').trim();
-  if (!targetModule) return NextResponse.json({ error: 'module_required' }, { status: 400 });
-
-  const moduleGroup = resolveModuleGroup(targetModule);
-  const admin = getSupabaseServiceRoleClient();
-
-  // Load document + company
-  const [docRes, companyRes] = await Promise.all([
-    admin.from('atlas_documents')
-      .select('id, company_id, processing_status, validation_status, metadata, document_type')
-      .eq('id', documentId).eq('user_id', userId).maybeSingle(),
-    admin.from('atlas_companies')
-      .select('id, raisonSociale, company_json')
-      .eq('user_id', userId).maybeSingle(),
-  ]);
-
-  if (docRes.error || !docRes.data) return NextResponse.json({ error: 'document_not_found' }, { status: 404 });
-  const doc = docRes.data;
-
-  if (doc.processing_status !== 'processed') {
-    return NextResponse.json({ error: 'document_not_processed', message: 'Document doit être analysé avant envoi.' }, { status: 422 });
-  }
-
-  const meta = (doc.metadata && typeof doc.metadata === 'object') ? doc.metadata as Record<string, unknown> : {};
-  const extraction = (meta.extraction && typeof meta.extraction === 'object') ? meta.extraction as AtlasStructuredExtraction : {};
-  const docType = (doc.document_type as AtlasDocumentType | null) ?? 'unknown';
-  const companyId = doc.company_id ?? companyRes.data?.id ?? '';
-  const companyJson = companyRes.data?.company_json;
-  const regime = (companyJson && typeof companyJson === 'object' ? (companyJson as Record<string, unknown>).regimeTVA as string : null) ?? 'mensuel';
-
-  // Determine entity type for duplicate guard
-  const entityTypeMap: Record<string, string> = {
-    comptabilite: 'supplier_invoice',
-    factures: 'sales_invoice',
-    banque: 'bank_statement',
-    rh: 'payroll_record',
-    juridique: 'legal_document',
-    rapports: 'report_record',
-  };
-  const targetEntityType = entityTypeMap[moduleGroup] ?? moduleGroup;
-
-  // ── Duplicate prevention ──────────────────────────────────────────────────
-
-  const { isDuplicate, existingRecord } = await checkDuplicate(admin, documentId, moduleGroup, targetEntityType);
-
-  if (isDuplicate) {
-    return NextResponse.json({
-      ok: false,
-      duplicate: true,
-      message: `Ce document a déjà été envoyé vers ${moduleGroup}.`,
-      existingEntityId: existingRecord?.target_entity_id ?? null,
-      routedAt: existingRecord?.created_at ?? null,
-      actions: ['view', 'resend', 'new_version'],
-    });
-  }
-
-  // ── Route to module ───────────────────────────────────────────────────────
-
-  let result: Record<string, unknown> = {};
-
   try {
+    const { id: documentId } = await params;
+    const userId = await documentUploadSessionUserId(request);
+    if (!userId) return routeToErrorResponse(401, 'auth_required', 'Session expirée.');
+
+    let body: RouteToBody;
+    try {
+      body = (await request.json()) as RouteToBody;
+    } catch {
+      return routeToErrorResponse(400, 'invalid_json', 'Corps JSON invalide.');
+    }
+
+    const targetModule = String(body.module ?? '').trim();
+    if (!targetModule) {
+      return routeToErrorResponse(400, 'module_required', 'Le module de destination est requis.');
+    }
+
+    const moduleGroup = resolveModuleGroup(targetModule);
+    const admin = getSupabaseServiceRoleClient();
+
+    const [docRes, companyRes] = await Promise.all([
+      admin
+        .from('atlas_documents')
+        .select('id, company_id, processing_status, validation_status, metadata, document_type')
+        .eq('id', documentId)
+        .eq('user_id', userId)
+        .maybeSingle(),
+      admin.from('atlas_companies').select('id, raisonSociale, company_json').eq('user_id', userId).maybeSingle(),
+    ]);
+
+    if (docRes.error) {
+      return routeToErrorResponse(500, 'document_load_failed', docRes.error.message);
+    }
+    if (!docRes.data) {
+      return routeToErrorResponse(404, 'document_not_found', 'Document introuvable.');
+    }
+    const doc = docRes.data;
+
+    if (doc.processing_status !== 'processed') {
+      return routeToErrorResponse(
+        422,
+        'document_not_processed',
+        'Le document doit être analysé avant envoi vers un module.',
+      );
+    }
+
+    const meta =
+      doc.metadata && typeof doc.metadata === 'object' ? (doc.metadata as Record<string, unknown>) : {};
+    const extraction =
+      meta.extraction && typeof meta.extraction === 'object'
+        ? (meta.extraction as AtlasStructuredExtraction)
+        : {};
+    const docType = (doc.document_type as AtlasDocumentType | null) ?? 'unknown';
+    const companyId = doc.company_id ?? companyRes.data?.id ?? '';
+    if (!companyId) {
+      return routeToErrorResponse(400, 'company_required', 'Société active requise pour le routage.');
+    }
+
+    const companyJson = companyRes.data?.company_json;
+    const regime =
+      (companyJson && typeof companyJson === 'object'
+        ? ((companyJson as Record<string, unknown>).regimeTVA as string)
+        : null) ?? 'mensuel';
+
+    const entityTypeMap: Record<string, string> = {
+      comptabilite: 'supplier_invoice',
+      factures: 'sales_invoice',
+      banque: 'bank_statement',
+      rh: 'payroll_record',
+      juridique: 'legal_document',
+      rapports: 'report_record',
+    };
+    const targetEntityType = entityTypeMap[moduleGroup] ?? moduleGroup;
+
+    const { isDuplicate, existingRecord } = await checkDuplicate(
+      admin,
+      documentId,
+      moduleGroup,
+      targetEntityType,
+    );
+
+    if (isDuplicate) {
+      return NextResponse.json({
+        ok: false,
+        duplicate: true,
+        message: `Ce document a déjà été envoyé vers ${moduleGroup}.`,
+        existingEntityId: existingRecord?.target_entity_id ?? null,
+        routedAt: existingRecord?.created_at ?? null,
+        actions: ['view', 'resend', 'new_version'],
+      });
+    }
+
+    let result: Record<string, unknown> = {};
+
     if (moduleGroup === 'comptabilite') {
       const r = await routePurchaseToComptabilite(admin, userId, companyId, documentId, docType, extraction, regime);
       result = {
@@ -481,57 +528,61 @@ export async function POST(
         payload: { note: 'generic_routing' },
       });
     }
+
+    const routed = Array.isArray(meta.routed_to)
+      ? [...new Set([...(meta.routed_to as string[]), moduleGroup])]
+      : [moduleGroup];
+
+    const { error: docUpdateError } = await admin
+      .from('atlas_documents')
+      .update({
+        validation_status: 'validated',
+        validated_at: new Date().toISOString(),
+        validated_by: userId,
+        metadata: { ...meta, routed_to: routed, last_routed_at: new Date().toISOString() },
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', documentId)
+      .eq('user_id', userId);
+
+    if (docUpdateError) {
+      return routeToErrorResponse(500, 'document_update_failed', docUpdateError.message);
+    }
+
+    const moduleEventMap: Record<string, import('@/app/lib/atlas-document-events').DocumentEventType> = {
+      comptabilite: 'routed_to_comptabilite',
+      factures: 'routed_to_factures',
+      banque: 'routed_to_banque',
+      rh: 'routed_to_rh',
+      juridique: 'routed_to_juridique',
+      rapports: 'routed_to_rapports',
+      tva: 'routed_to_tva',
+    };
+
+    if (companyId) {
+      void logDocumentEvent({
+        companyId,
+        documentId,
+        userId,
+        eventType: moduleEventMap[moduleGroup] ?? 'routed_to_module',
+        payload: { module: moduleGroup, entity_type: targetEntityType, ...result },
+      });
+
+      void admin.from('atlas_entity_events').insert({
+        user_id: userId,
+        company_id: companyId,
+        entity_type: 'document',
+        entity_id: documentId,
+        event_type: `routed_to_${moduleGroup}`,
+        payload: { module: moduleGroup, entity_type: targetEntityType, ...result },
+      });
+    }
+
+    return NextResponse.json({ ok: true, ...result });
   } catch (err) {
-    const msg = err instanceof Error ? err.message : 'route_failed';
-    return NextResponse.json({ error: 'route_failed', message: msg }, { status: 500 });
+    const message = err instanceof Error ? err.message : 'route_failed';
+    console.error('[documents/route-to]', { message, err });
+    const status = routingFailureStatus(message);
+    return routeToErrorResponse(status, 'route_failed', message);
   }
-
-  // ── Mark document validated + update routed_to ────────────────────────────
-
-  const routed = Array.isArray(meta.routed_to)
-    ? [...new Set([...(meta.routed_to as string[]), moduleGroup])]
-    : [moduleGroup];
-
-  await admin.from('atlas_documents')
-    .update({
-      validation_status: 'validated',
-      validated_at: new Date().toISOString(),
-      validated_by: userId,
-      metadata: { ...meta, routed_to: routed, last_routed_at: new Date().toISOString() },
-      updated_at: new Date().toISOString(),
-    })
-    .eq('id', documentId).eq('user_id', userId);
-
-  // ── Audit log ─────────────────────────────────────────────────────────────
-
-  const moduleEventMap: Record<string, import('@/app/lib/atlas-document-events').DocumentEventType> = {
-    comptabilite: 'routed_to_comptabilite',
-    factures: 'routed_to_factures',
-    banque: 'routed_to_banque',
-    rh: 'routed_to_rh',
-    juridique: 'routed_to_juridique',
-    rapports: 'routed_to_rapports',
-    tva: 'routed_to_tva',
-  };
-
-  if (companyId) {
-    void logDocumentEvent({
-      companyId,
-      documentId,
-      userId,
-      eventType: moduleEventMap[moduleGroup] ?? 'routed_to_module',
-      payload: { module: moduleGroup, entity_type: targetEntityType, ...result },
-    });
-
-    void admin.from('atlas_entity_events').insert({
-      user_id: userId,
-      company_id: companyId,
-      entity_type: 'document',
-      entity_id: documentId,
-      event_type: `routed_to_${moduleGroup}`,
-      payload: { module: moduleGroup, entity_type: targetEntityType, ...result },
-    });
-  }
-
-  return NextResponse.json({ ok: true, ...result });
 }
