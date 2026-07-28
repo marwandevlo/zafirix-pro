@@ -105,11 +105,12 @@ function isTvaDeductibleAccount(compte: string): boolean {
   return c.startsWith('4456') || c.startsWith('3455') || c.startsWith('3456');
 }
 
-/** Prefer invoice date; fall back to created/updated so OCR-validated rows are not dropped. */
+/** Prefer invoice date; fall back to created/updated, then today so rows stay in the active period. */
 function resolveEffectiveDateYmd(
   primary: string | null | undefined,
   createdAt: string | null | undefined,
   updatedAt: string | null | undefined,
+  opts?: { fallbackToday?: boolean },
 ): string {
   const candidates = [primary, createdAt, updatedAt];
   for (const raw of candidates) {
@@ -117,12 +118,24 @@ function resolveEffectiveDateYmd(
     const ymd = String(raw).slice(0, 10);
     if (/^\d{4}-\d{2}-\d{2}$/.test(ymd)) return ymd;
   }
+  if (opts?.fallbackToday) return new Date().toISOString().slice(0, 10);
   return '';
 }
 
 function isIncludedClientInvoiceStatus(status: string | null | undefined): boolean {
   const s = String(status ?? 'sent').toLowerCase();
   return s !== 'cancelled';
+}
+
+/** Supplier invoices: include draft/validated/null; exclude only explicit rejections. */
+function isIncludedSupplierValidationStatus(status: string | null | undefined): boolean {
+  if (status == null || String(status).trim() === '') return true;
+  const s = String(status).toLowerCase();
+  if (['rejected', 'archived', 'cancelled', 'refused', 'refuse'].includes(s)) return false;
+  if (['draft', 'validated', 'validé', 'valide', 'posted', 'pending', 'pending_review'].includes(s)) {
+    return true;
+  }
+  return true;
 }
 
 function isIncludedInvoiceValidationStatus(status: string | null | undefined): boolean {
@@ -191,43 +204,80 @@ type TvaSuggestionRow = {
   updated_at?: string | null;
 };
 
+/** Match active company OR legacy rows uploaded before company was set. */
+async function fetchCompanyScopedRows<T>(
+  db: SupabaseClient,
+  table: string,
+  select: string,
+  companyId: string,
+  userId?: string,
+): Promise<T[]> {
+  const runQuery = async (scope: 'company_or_null' | 'user_only'): Promise<T[]> => {
+    let query = db.from(table).select(select);
+    if (userId) query = query.eq('user_id', userId);
+    if (scope === 'company_or_null') {
+      query = query.or(`company_id.eq.${companyId},company_id.is.null`);
+    }
+    const { data, error } = await query;
+    if (error) throw new Error(`${table}: ${error.message}`);
+    return (data ?? []) as T[];
+  };
+
+  const scoped = await runQuery('company_or_null');
+  if (scoped.length > 0 || !userId) return scoped;
+  return runQuery('user_only');
+}
+
 export async function computeTvaPeriod(
   db: SupabaseClient,
   companyId: string,
   periodKey: string,
   periodType: AtlasTvaPeriodType,
+  userId?: string,
 ): Promise<AtlasTvaPeriodCalculation> {
   const { periodStart, periodEnd, periodLabel } = parsePeriodBounds(periodKey, periodType);
+  const dateOpts = { fallbackToday: true };
 
-  const [invRes, supRes, accRes, tvaRes] = await Promise.all([
-    db
-      .from('atlas_invoices')
-      .select(
-        'id, number, client_name, issue_date, status, amount_ht, vat_amount, total_ttc, vat_rate, created_at, updated_at',
-      )
-      .eq('company_id', companyId),
-    db
-      .from('atlas_supplier_invoices')
-      .select(
-        'id, supplier_name, invoice_number, invoice_date, status, validation_status, amount_ht, vat_amount, amount_ttc, vat_rate, created_at, updated_at',
-      )
-      .eq('company_id', companyId),
-    db
-      .from('atlas_accounting_entries')
-      .select('id, entry_json, entry_date, source_invoice_id, validation_status, created_at, updated_at')
-      .eq('company_id', companyId),
-    db
-      .from('zafirix_tva_suggestions')
-      .select(
-        'id, tva_type, amount, rate, base_ht, period_key, invoice_date, invoice_number, supplier_name, source_document_id, source_invoice_id, validation_status, created_at, updated_at',
-      )
-      .eq('company_id', companyId),
+  const [clientInvoices, supplierInvoices, accountingEntries, suggestions] = await Promise.all([
+    fetchCompanyScopedRows<InvoiceRow>(
+      db,
+      'atlas_invoices',
+      'id, number, client_name, issue_date, status, amount_ht, vat_amount, total_ttc, vat_rate, created_at, updated_at',
+      companyId,
+      userId,
+    ),
+    fetchCompanyScopedRows<SupplierRow>(
+      db,
+      'atlas_supplier_invoices',
+      'id, supplier_name, invoice_number, invoice_date, status, validation_status, amount_ht, vat_amount, amount_ttc, vat_rate, created_at, updated_at',
+      companyId,
+      userId,
+    ),
+    fetchCompanyScopedRows<AccountingRow>(
+      db,
+      'atlas_accounting_entries',
+      'id, entry_json, entry_date, source_invoice_id, validation_status, created_at, updated_at',
+      companyId,
+      userId,
+    ),
+    fetchCompanyScopedRows<TvaSuggestionRow>(
+      db,
+      'zafirix_tva_suggestions',
+      'id, tva_type, amount, rate, base_ht, period_key, invoice_date, invoice_number, supplier_name, source_document_id, source_invoice_id, validation_status, created_at, updated_at',
+      companyId,
+      userId,
+    ),
   ]);
 
-  if (invRes.error) throw new Error(invRes.error.message);
-  if (supRes.error) throw new Error(supRes.error.message);
-  if (accRes.error) throw new Error(accRes.error.message);
-  if (tvaRes.error) throw new Error(tvaRes.error.message);
+  console.log('[TVA Server]', {
+    companyId,
+    userId: userId ?? null,
+    periodKey,
+    supplierCount: supplierInvoices.length,
+    suggestionsCount: suggestions.length,
+    clientCount: clientInvoices.length,
+    accountingCount: accountingEntries.length,
+  });
 
   const lines: AtlasTvaLineItem[] = [];
   let tvaCollectee = 0;
@@ -238,11 +288,11 @@ export async function computeTvaPeriod(
   let purchasesCount = 0;
   const countedInvoiceIds = new Set<string>();
 
-  for (const row of (invRes.data ?? []) as InvoiceRow[]) {
+  for (const row of clientInvoices) {
     if (!isIncludedClientInvoiceStatus(row.status)) continue;
 
-    const issueDate = resolveEffectiveDateYmd(row.issue_date, row.created_at, row.updated_at);
-    if (!issueDate || !inPeriod(issueDate, periodStart, periodEnd)) continue;
+    const issueDate = resolveEffectiveDateYmd(row.issue_date, row.created_at, row.updated_at, dateOpts);
+    if (!inPeriod(issueDate, periodStart, periodEnd)) continue;
 
     const amountHT = Number(row.amount_ht ?? 0);
     const vatAmount = Number(row.vat_amount ?? 0);
@@ -267,12 +317,12 @@ export async function computeTvaPeriod(
     });
   }
 
-  for (const row of (supRes.data ?? []) as SupplierRow[]) {
+  for (const row of supplierInvoices) {
     if (String(row.status).toLowerCase() === 'cancelled') continue;
-    if (!isIncludedInvoiceValidationStatus(row.validation_status)) continue;
+    if (!isIncludedSupplierValidationStatus(row.validation_status)) continue;
 
-    const issueDate = resolveEffectiveDateYmd(row.invoice_date, row.created_at, row.updated_at);
-    if (!issueDate || !inPeriod(issueDate, periodStart, periodEnd)) continue;
+    const issueDate = resolveEffectiveDateYmd(row.invoice_date, row.created_at, row.updated_at, dateOpts);
+    if (!inPeriod(issueDate, periodStart, periodEnd)) continue;
 
     const amountHT = Number(row.amount_ht ?? 0);
     const vatAmount = Number(row.vat_amount ?? 0);
@@ -297,14 +347,14 @@ export async function computeTvaPeriod(
     });
   }
 
-  for (const row of (tvaRes.data ?? []) as TvaSuggestionRow[]) {
+  for (const row of suggestions) {
     if (!isIncludedTvaSuggestionStatus(row.validation_status)) continue;
 
     const linkedId = row.source_invoice_id ? String(row.source_invoice_id) : '';
     if (linkedId && countedInvoiceIds.has(linkedId)) continue;
 
-    const issueDate = resolveEffectiveDateYmd(row.invoice_date, row.created_at, row.updated_at);
-    const inPeriodByDate = issueDate ? inPeriod(issueDate, periodStart, periodEnd) : false;
+    const issueDate = resolveEffectiveDateYmd(row.invoice_date, row.created_at, row.updated_at, dateOpts);
+    const inPeriodByDate = inPeriod(issueDate, periodStart, periodEnd);
     const inPeriodByKey = String(row.period_key) === periodKey;
     if (!inPeriodByDate && !inPeriodByKey) continue;
 
@@ -338,7 +388,7 @@ export async function computeTvaPeriod(
   }
 
   let accountingAdjust = 0;
-  for (const row of (accRes.data ?? []) as AccountingRow[]) {
+  for (const row of accountingEntries) {
     if (!isIncludedInvoiceValidationStatus(row.validation_status)) continue;
 
     const linkedId = row.source_invoice_id ? String(row.source_invoice_id) : '';
@@ -348,9 +398,9 @@ export async function computeTvaPeriod(
     if (!entry) continue;
 
     const date =
-      resolveEffectiveDateYmd(row.entry_date, row.created_at, row.updated_at) ||
+      resolveEffectiveDateYmd(row.entry_date, row.created_at, row.updated_at, dateOpts) ||
       String(entry.date ?? '').slice(0, 10);
-    if (date && !inPeriod(date, periodStart, periodEnd)) continue;
+    if (!inPeriod(date, periodStart, periodEnd)) continue;
 
     const compte = String(entry.compte ?? '');
     const debit = Number(entry.debit ?? 0);
@@ -457,7 +507,7 @@ export async function syncTvaPeriodRecord(
   periodType: AtlasTvaPeriodType,
   regime: string,
 ): Promise<AtlasTvaPeriodRecord> {
-  const calc = await computeTvaPeriod(db, companyId, periodKey, periodType);
+  const calc = await computeTvaPeriod(db, companyId, periodKey, periodType, userId);
   const due = declarationDueDate(calc.periodEnd, regime);
   const now = new Date().toISOString();
 
