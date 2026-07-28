@@ -14,6 +14,7 @@ const COLOR_DGI_BLUE = 'FF1F497D';
 const COLOR_TOTAL_GRAY = 'FFF2F2F2';
 const COLOR_BORDER_LIGHT = 'FFD9D9D9';
 const COLOR_BLACK = 'FF000000';
+const FONT_CALIBRI = 'Calibri';
 
 const TABLE_HEADERS = [
   'N°',
@@ -52,16 +53,31 @@ function totalBorder(): Partial<ExcelJS.Borders> {
   };
 }
 
+function setTextCell(cell: ExcelJS.Cell, value: string): void {
+  cell.value = value;
+  cell.numFmt = TEXT_FMT;
+}
+
 function autoFitColumns(ws: ExcelJS.Worksheet, minRow: number): void {
-  ws.columns.forEach((column, index) => {
-    let maxLen = TABLE_HEADERS[index]?.length ?? 10;
-    column.eachCell?.({ includeEmpty: false }, (cell) => {
-      if (Number(cell.row) < minRow) return;
-      const len = cell.value == null ? 0 : String(cell.value).length;
-      if (len > maxLen) maxLen = len;
+  for (let colIndex = 1; colIndex <= COL_COUNT; colIndex += 1) {
+    const headerLen = TABLE_HEADERS[colIndex - 1]?.length ?? 10;
+    let maxLen = headerLen;
+
+    ws.eachRow({ includeEmpty: false }, (row, rowNumber) => {
+      if (rowNumber < minRow) return;
+      const cell = row.getCell(colIndex);
+      const display =
+        cell.text ??
+        (cell.value == null
+          ? ''
+          : typeof cell.value === 'object' && 'formula' in (cell.value as object)
+            ? String((cell.value as { formula?: string }).formula ?? '')
+            : String(cell.value));
+      maxLen = Math.max(maxLen, display.length);
     });
-    column.width = Math.max(maxLen + 4, 12);
-  });
+
+    ws.getColumn(colIndex).width = Math.max(maxLen + 4, 12);
+  }
 }
 
 function sheetTitle(clientInfo: DgiTvaClientInfo): string {
@@ -71,7 +87,7 @@ function sheetTitle(clientInfo: DgiTvaClientInfo): string {
   return `Relevé de Déductions Q${clientInfo.periode} ${clientInfo.annee}`.slice(0, 31);
 }
 
-/** Build a DGI-styled Relevé de déductions workbook buffer (ExcelJS ≈ openpyxl styling). */
+/** Build a DGI-styled Relevé de déductions workbook buffer (ExcelJS). */
 export async function generateTvaReleveExcelBuffer(
   record: AtlasTvaPeriodRecord,
   company: { name?: string | null; legal_name?: string | null; trade_name?: string | null; ice?: string | null },
@@ -86,46 +102,38 @@ export async function generateTvaReleveExcelBuffer(
   const ws = wb.addWorksheet(sheetTitle(clientInfo));
   ws.views = [{ showGridLines: true }];
 
+  ws.getColumn(8).numFmt = TEXT_FMT;
+
   ws.mergeCells(1, 1, 1, COL_COUNT);
   const titleCell = ws.getCell(1, 1);
   titleCell.value = 'RELEVÉ DE DÉDUCTIONS (TVA) - MAROC';
-  titleCell.font = { name: 'Calibri', size: 14, bold: true, color: { argb: 'FFFFFFFF' } };
-  titleCell.fill = {
-    type: 'pattern',
-    pattern: 'solid',
-    fgColor: { argb: COLOR_DGI_BLUE },
-  };
+  titleCell.font = { name: FONT_CALIBRI, size: 14, bold: true, color: { argb: 'FFFFFFFF' } };
+  titleCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: COLOR_DGI_BLUE } };
   titleCell.alignment = { vertical: 'middle', horizontal: 'center' };
   ws.getRow(1).height = 28;
 
   ws.getCell(3, 1).value = 'Client / Société:';
-  ws.getCell(3, 1).font = { name: 'Calibri', size: 11, bold: true };
+  ws.getCell(3, 1).font = { name: FONT_CALIBRI, size: 11, bold: true };
   ws.getCell(3, 2).value = clientInfo.nom_client;
-  ws.getCell(3, 2).font = { name: 'Calibri', size: 10 };
+  ws.getCell(3, 2).font = { name: FONT_CALIBRI, size: 10 };
 
   ws.getCell(3, 4).value = 'Période:';
-  ws.getCell(3, 4).font = { name: 'Calibri', size: 11, bold: true };
+  ws.getCell(3, 4).font = { name: FONT_CALIBRI, size: 11, bold: true };
   ws.getCell(3, 5).value = clientInfo.periodLabel;
-  ws.getCell(3, 5).font = { name: 'Calibri', size: 10 };
+  ws.getCell(3, 5).font = { name: FONT_CALIBRI, size: 10 };
 
   ws.getCell(4, 1).value = 'ICE Client:';
-  ws.getCell(4, 1).font = { name: 'Calibri', size: 11, bold: true };
-  const iceClientCell = ws.getCell(4, 2);
-  iceClientCell.value = clientInfo.ice_client;
-  iceClientCell.numFmt = TEXT_FMT;
-  iceClientCell.font = { name: 'Calibri', size: 10 };
+  ws.getCell(4, 1).font = { name: FONT_CALIBRI, size: 11, bold: true };
+  setTextCell(ws.getCell(4, 2), clientInfo.ice_client);
+  ws.getCell(4, 2).font = { name: FONT_CALIBRI, size: 10 };
 
   const headerRow = ws.getRow(HEADER_ROW);
   headerRow.height = 22;
   TABLE_HEADERS.forEach((label, idx) => {
     const cell = headerRow.getCell(idx + 1);
     cell.value = label;
-    cell.font = { name: 'Calibri', size: 10, bold: true, color: { argb: 'FFFFFFFF' } };
-    cell.fill = {
-      type: 'pattern',
-      pattern: 'solid',
-      fgColor: { argb: COLOR_DGI_BLUE },
-    };
+    cell.font = { name: FONT_CALIBRI, size: 10, bold: true, color: { argb: 'FFFFFFFF' } };
+    cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: COLOR_DGI_BLUE } };
     cell.alignment = { horizontal: 'center', vertical: 'middle', wrapText: true };
     cell.border = thinBorder();
   });
@@ -159,39 +167,37 @@ export async function generateTvaReleveExcelBuffer(
     excelRow.getCell(7).numFmt = CURRENCY_FMT;
     excelRow.getCell(7).alignment = { horizontal: 'right' };
 
-    const iceCell = excelRow.getCell(8);
-    iceCell.value = item.iceFournisseur;
-    iceCell.numFmt = TEXT_FMT;
-    iceCell.alignment = { horizontal: 'center' };
+    setTextCell(excelRow.getCell(8), item.iceFournisseur);
+    excelRow.getCell(8).alignment = { horizontal: 'center' };
 
     excelRow.getCell(9).value = item.nomFournisseur;
     excelRow.getCell(9).alignment = { horizontal: 'left' };
 
-    excelRow.getCell(10).value = item.dateFacture;
+    setTextCell(excelRow.getCell(10), item.dateFacture);
     excelRow.getCell(10).alignment = { horizontal: 'center' };
 
     excelRow.getCell(11).value = item.modePaiement;
     excelRow.getCell(11).alignment = { horizontal: 'center' };
 
-    excelRow.getCell(12).value = item.datePaiement;
+    setTextCell(excelRow.getCell(12), item.datePaiement);
     excelRow.getCell(12).alignment = { horizontal: 'center' };
 
     for (let c = 1; c <= COL_COUNT; c += 1) {
       const cell = excelRow.getCell(c);
-      cell.font = { name: 'Calibri', size: 10 };
+      cell.font = { name: FONT_CALIBRI, size: 10 };
       cell.border = thinBorder();
     }
   });
 
-  const totalRowNum = DATA_START_ROW + rows.length;
+  const totalRowNum = rows.length > 0 ? DATA_START_ROW + rows.length : DATA_START_ROW;
   const totalRow = ws.getRow(totalRowNum);
 
   totalRow.getCell(3).value = 'Total';
-  totalRow.getCell(3).font = { name: 'Calibri', size: 10, bold: true };
+  totalRow.getCell(3).font = { name: FONT_CALIBRI, size: 10, bold: true };
   totalRow.getCell(3).alignment = { horizontal: 'right' };
 
-  const lastDataRow = totalRowNum - 1;
   if (rows.length > 0) {
+    const lastDataRow = totalRowNum - 1;
     totalRow.getCell(4).value = { formula: `SUM(D${DATA_START_ROW}:D${lastDataRow})` };
     totalRow.getCell(6).value = { formula: `SUM(F${DATA_START_ROW}:F${lastDataRow})` };
     totalRow.getCell(7).value = { formula: `SUM(G${DATA_START_ROW}:G${lastDataRow})` };
@@ -204,18 +210,20 @@ export async function generateTvaReleveExcelBuffer(
   totalRow.getCell(4).numFmt = CURRENCY_FMT;
   totalRow.getCell(6).numFmt = CURRENCY_FMT;
   totalRow.getCell(7).numFmt = CURRENCY_FMT;
-  totalRow.getCell(4).font = { name: 'Calibri', size: 10, bold: true };
-  totalRow.getCell(6).font = { name: 'Calibri', size: 10, bold: true };
-  totalRow.getCell(7).font = { name: 'Calibri', size: 10, bold: true };
+  totalRow.getCell(4).font = { name: FONT_CALIBRI, size: 10, bold: true };
+  totalRow.getCell(6).font = { name: FONT_CALIBRI, size: 10, bold: true };
+  totalRow.getCell(7).font = { name: FONT_CALIBRI, size: 10, bold: true };
+  totalRow.getCell(4).alignment = { horizontal: 'right' };
+  totalRow.getCell(6).alignment = { horizontal: 'right' };
+  totalRow.getCell(7).alignment = { horizontal: 'right' };
 
   for (let c = 1; c <= COL_COUNT; c += 1) {
     const cell = totalRow.getCell(c);
-    cell.fill = {
-      type: 'pattern',
-      pattern: 'solid',
-      fgColor: { argb: COLOR_TOTAL_GRAY },
-    };
+    cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: COLOR_TOTAL_GRAY } };
     cell.border = totalBorder();
+    if (c !== 3 && c !== 4 && c !== 6 && c !== 7) {
+      cell.font = { name: FONT_CALIBRI, size: 10 };
+    }
   }
 
   autoFitColumns(ws, HEADER_ROW);

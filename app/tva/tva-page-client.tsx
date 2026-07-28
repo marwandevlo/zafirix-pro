@@ -33,7 +33,7 @@ const TVA_LINE_EXPORT_COLUMNS: ExportColumn[] = [
 import { getActiveCompanyDbRowId } from '@/app/lib/atlas-active-company';
 import { readActiveCompanyFromLocalStorage } from '@/app/lib/atlas-companies-repository';
 import { isAtlasSupabaseDataEnabled } from '@/app/lib/atlas-data-source';
-import { dgiRegimeCode, generateTvaDeclarationXml } from '@/app/lib/atlas-tva-xml';
+import { dgiDeclarationRegime, generateTvaDeclarationXml } from '@/app/lib/atlas-tva-xml';
 import type { AtlasTvaDashboard, AtlasTvaPeriodRecord } from '@/app/types/atlas-tva';
 
 type Tab = 'dashboard' | 'ventes' | 'achats' | 'historique' | 'audit';
@@ -206,7 +206,7 @@ export default function TvaPageClient() {
       '';
     const xml = generateTvaDeclarationXml(current, {
       identifiantFiscal,
-      regime: dgiRegimeCode(dashboard.regimeTVA),
+      regime: dgiDeclarationRegime(),
     });
     const blob = new Blob([xml], { type: 'application/xml' });
     const url = URL.createObjectURL(blob);
