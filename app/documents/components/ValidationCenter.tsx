@@ -1,6 +1,7 @@
 'use client';
 
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useMemo } from 'react';
+import { useRouter } from 'next/navigation';
 import {
   CheckCircle,
   XCircle,
@@ -26,7 +27,10 @@ import {
   classificationFromDocument,
   structuredExtractionFromDocument,
   validationStatusFromDocument,
+  ocrInvoicesFromDocument,
 } from '@/app/lib/atlas-documents-repository';
+import { creatableOcrInvoices } from '@/app/lib/atlas-ocr-invoices-detect';
+import type { AtlasOcrDetectedInvoice } from '@/app/types/atlas-document';
 import {
   confidenceColor,
   confidenceLabel,
@@ -213,9 +217,18 @@ function CorrectionModal({
 
 // ── Main component ────────────────────────────────────────────────────────────
 
+type ValidationApiDetail = {
+  page?: number;
+  invoice_number?: string;
+  missing?: string[];
+  error?: string;
+};
+
 export function ValidationCenter({ document, onClose, onValidated, onRetryOcr }: ValidationCenterProps) {
+  const router = useRouter();
   const [correction, setCorrection] = useState<CorrectionState | null>(null);
   const [validating, setValidating] = useState(false);
+  const [localValidationStatus, setLocalValidationStatus] = useState<string | null>(null);
   const [routing, setRouting] = useState<string | null>(null);
   const [routingAll, setRoutingAll] = useState(false);
   const [routingResult, setRoutingResult] = useState<RoutingResult | null>(null);
@@ -231,7 +244,13 @@ export function ValidationCenter({ document, onClose, onValidated, onRetryOcr }:
 
   const classification = classificationFromDocument(document);
   const extraction = structuredExtractionFromDocument(document);
-  const validationStatus = validationStatusFromDocument(document);
+  const validationStatus = localValidationStatus ?? validationStatusFromDocument(document);
+
+  const detectedInvoices = useMemo(
+    () => creatableOcrInvoices(ocrInvoicesFromDocument(document)),
+    [document],
+  );
+  const isMultiInvoice = detectedInvoices.length > 1;
 
   const routingSuggestions = classification?.detected_type
     ? getRoutingSuggestions(classification.detected_type)
@@ -240,6 +259,28 @@ export function ValidationCenter({ document, onClose, onValidated, onRetryOcr }:
   const showMessage = (type: 'success' | 'error', text: string) => {
     setMessage({ type, text });
     setTimeout(() => setMessage(null), 4000);
+  };
+
+  const formatValidationError = (body: {
+    message?: string;
+    error?: string;
+    details?: ValidationApiDetail[];
+  }): string => {
+    const parts: string[] = [];
+    if (body.message) parts.push(body.message);
+    for (const detail of body.details ?? []) {
+      const label = detail.invoice_number
+        ? `Facture ${detail.invoice_number}`
+        : detail.page
+          ? `Page ${detail.page}`
+          : 'Facture';
+      if (detail.missing?.length) {
+        parts.push(`${label}: champs manquants (${detail.missing.join(', ')})`);
+      } else if (detail.error) {
+        parts.push(`${label}: ${detail.error}`);
+      }
+    }
+    return parts.join(' · ') || body.error || 'Erreur lors de la validation.';
   };
 
   const handleValidate = useCallback(async (action: 'validated' | 'rejected' | 'needs_correction') => {
@@ -251,19 +292,55 @@ export function ValidationCenter({ document, onClose, onValidated, onRetryOcr }:
         credentials: 'include',
         body: JSON.stringify({ action }),
       });
+      const body = (await res.json().catch(() => ({}))) as {
+        message?: string;
+        error?: string;
+        details?: ValidationApiDetail[];
+        invoicesCreated?: number;
+        invoicesSkipped?: number;
+        journalLineCount?: number;
+        tvaAmount?: number;
+      };
+
       if (!res.ok) {
-        const b = await res.json().catch(() => ({})) as { message?: string };
-        showMessage('error', b.message ?? 'Erreur lors de la validation.');
+        console.error('[ValidationCenter] validate failed', body);
+        showMessage('error', formatValidationError(body));
         return;
       }
-      showMessage('success', action === 'validated' ? 'Document validé.' : action === 'rejected' ? 'Document rejeté.' : 'Marqué à corriger.');
+
+      setLocalValidationStatus(action);
+
+      if (action === 'validated') {
+        const created = body.invoicesCreated ?? 0;
+        const skipped = body.invoicesSkipped ?? 0;
+        const journal = body.journalLineCount ?? 0;
+        const tva = body.tvaAmount ?? 0;
+        let successMsg = created > 1
+          ? `Document validé — ${created} factures enregistrées.`
+          : created === 1
+            ? 'Document validé — facture enregistrée.'
+            : 'Document validé.';
+        if (skipped > 0) successMsg += ` ${skipped} page(s) ignorée(s) (données incomplètes).`;
+        if (journal > 0) successMsg += ` ${journal} écriture(s) comptable(s).`;
+        if (tva > 0) {
+          successMsg += ` TVA: ${tva.toLocaleString('fr-MA', { minimumFractionDigits: 2 })} MAD.`;
+        }
+        showMessage('success', successMsg);
+      } else {
+        showMessage(
+          'success',
+          action === 'rejected' ? 'Document rejeté.' : 'Marqué à corriger.',
+        );
+      }
+
+      router.refresh();
       onValidated();
     } catch {
       showMessage('error', 'Erreur réseau. Réessayez.');
     } finally {
       setValidating(false);
     }
-  }, [document.id, onValidated]);
+  }, [document.id, onValidated, router]);
 
   const handleSaveCorrection = useCallback(async (fieldName: string, oldValue: string, newValue: string, reason: string, sourcePage?: number, confidenceBefore?: number) => {
     try {
@@ -453,6 +530,43 @@ export function ValidationCenter({ document, onClose, onValidated, onRetryOcr }:
               {statusLabels[validationStatus] ?? validationStatus}
             </div>
           </section>
+
+          {/* Multi-invoice pages detected */}
+          {isMultiInvoice && (
+            <section>
+              <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-3">
+                Factures détectées ({detectedInvoices.length})
+              </h3>
+              <div className="space-y-2">
+                {detectedInvoices.map((inv: AtlasOcrDetectedInvoice) => (
+                  <div
+                    key={`${inv.page_number}-${inv.invoice_number ?? 'page'}`}
+                    className="px-3 py-2.5 rounded-lg border border-emerald-100 bg-emerald-50/60 text-xs"
+                  >
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="font-semibold text-emerald-900">
+                        Page {inv.page_number}
+                        {inv.invoice_number ? ` · ${inv.invoice_number}` : ''}
+                      </span>
+                      {inv.amount_ttc != null && (
+                        <span className="font-medium text-emerald-800">
+                          {inv.amount_ttc.toLocaleString('fr-MA', { minimumFractionDigits: 2 })} MAD
+                        </span>
+                      )}
+                    </div>
+                    <div className="text-emerald-700 mt-1 flex flex-wrap gap-x-3 gap-y-0.5">
+                      {inv.supplier_name && <span>{inv.supplier_name}</span>}
+                      {inv.amount_ht != null && <span>HT: {inv.amount_ht.toLocaleString('fr-MA')} MAD</span>}
+                      {inv.vat_amount != null && <span>TVA: {inv.vat_amount.toLocaleString('fr-MA')} MAD</span>}
+                    </div>
+                  </div>
+                ))}
+              </div>
+              <p className="text-[11px] text-gray-500 mt-2">
+                La validation enregistrera chaque facture détectée (comptabilité + TVA).
+              </p>
+            </section>
+          )}
 
           {/* Extracted fields */}
           {visibleFields.length > 0 && (

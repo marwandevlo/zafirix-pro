@@ -3,13 +3,19 @@
  * PUT  /api/documents/[id]/validate
  *
  * Validate or reject a processed document.
+ * On validated: registers supplier invoices + TVA/journal for each detected page/invoice.
  * Body: { action: 'validated' | 'rejected' | 'needs_correction', note?: string }
  */
 
+import { revalidatePath } from 'next/cache';
 import { NextRequest, NextResponse } from 'next/server';
 import { documentUploadSessionUserId } from '@/app/lib/atlas-document-upload-auth';
-import { getSupabaseServiceRoleClient } from '@/app/lib/supabase-admin';
+import {
+  markDocumentValidated,
+  registerValidatedDocumentRecords,
+} from '@/app/lib/atlas-document-validation-server';
 import { logDocumentEvent } from '@/app/lib/atlas-document-events';
+import { getSupabaseServiceRoleClient } from '@/app/lib/supabase-admin';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -18,6 +24,13 @@ type ValidateBody = {
   action?: string;
   note?: string;
 };
+
+function revalidateDocumentSurfaces(): void {
+  revalidatePath('/documents');
+  revalidatePath('/comptabilite');
+  revalidatePath('/tva');
+  revalidatePath('/declarations');
+}
 
 export async function POST(
   request: NextRequest,
@@ -28,7 +41,6 @@ export async function POST(
   if (!userId) {
     return NextResponse.json({ error: 'auth_required' }, { status: 401 });
   }
-  const auth = { userId };
 
   let body: ValidateBody;
   try {
@@ -39,7 +51,10 @@ export async function POST(
 
   const action = String(body.action ?? '').trim();
   if (!['validated', 'rejected', 'needs_correction'].includes(action)) {
-    return NextResponse.json({ error: 'invalid_action', message: 'action must be validated|rejected|needs_correction' }, { status: 400 });
+    return NextResponse.json(
+      { error: 'invalid_action', message: 'action must be validated|rejected|needs_correction' },
+      { status: 400 },
+    );
   }
 
   const admin = getSupabaseServiceRoleClient();
@@ -48,7 +63,7 @@ export async function POST(
     .from('atlas_documents')
     .select('id, company_id, processing_status, validation_status')
     .eq('id', documentId)
-    .eq('user_id', auth.userId)
+    .eq('user_id', userId)
     .maybeSingle();
 
   if (fetchErr || !doc) {
@@ -56,35 +71,87 @@ export async function POST(
   }
 
   if (doc.processing_status !== 'processed') {
-    return NextResponse.json({ error: 'document_not_processed', message: 'Document must be processed before validation' }, { status: 422 });
+    return NextResponse.json(
+      { error: 'document_not_processed', message: 'Document must be processed before validation' },
+      { status: 422 },
+    );
   }
 
   const now = new Date().toISOString();
+
+  if (action === 'validated') {
+    const registration = await registerValidatedDocumentRecords(admin, userId, documentId);
+    if (!registration.ok) {
+      console.error('[documents/validate] registration failed', {
+        documentId,
+        error: registration.error,
+        details: registration.details,
+      });
+      return NextResponse.json(
+        {
+          error: registration.error,
+          message: registration.message,
+          details: registration.details ?? [],
+        },
+        { status: 422 },
+      );
+    }
+
+    await markDocumentValidated(
+      admin,
+      userId,
+      documentId,
+      doc.company_id ? String(doc.company_id) : null,
+      doc.validation_status,
+      registration,
+    );
+
+    revalidateDocumentSurfaces();
+
+    return NextResponse.json({
+      ok: true,
+      validation_status: 'validated',
+      invoicesCreated: registration.invoicesCreated,
+      invoicesSkipped: registration.invoicesSkipped,
+      invoiceIds: registration.invoiceIds,
+      journalLineCount: registration.journalLineCount,
+      tvaAmount: registration.tvaAmount,
+    });
+  }
+
   const { error: updateErr } = await admin
     .from('atlas_documents')
     .update({
       validation_status: action,
-      validated_at: action === 'validated' ? now : null,
-      validated_by: action === 'validated' ? auth.userId : null,
+      validated_at: null,
+      validated_by: null,
       updated_at: now,
     })
     .eq('id', documentId)
-    .eq('user_id', auth.userId);
+    .eq('user_id', userId);
 
   if (updateErr) {
     return NextResponse.json({ error: 'update_failed', message: updateErr.message }, { status: 500 });
   }
 
-  // Log event
   if (doc.company_id) {
     void logDocumentEvent({
       companyId: doc.company_id,
       documentId,
-      userId: auth.userId,
-      eventType: action === 'validated' ? 'user_validated' : action === 'rejected' ? 'user_rejected' : 'validation_required',
+      userId,
+      eventType: action === 'rejected' ? 'user_rejected' : 'validation_required',
       payload: { action, note: body.note ?? null, previous_status: doc.validation_status },
     });
   }
 
+  revalidateDocumentSurfaces();
+
   return NextResponse.json({ ok: true, validation_status: action });
+}
+
+export async function PUT(
+  request: NextRequest,
+  context: { params: Promise<{ id: string }> },
+) {
+  return POST(request, context);
 }

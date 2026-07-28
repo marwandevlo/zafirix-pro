@@ -143,3 +143,36 @@ export function supplierInvoiceDedupeKey(
 export function sourcePageForDetectedInvoice(invoice: AtlasOcrDetectedInvoice): number {
   return invoice.page_number;
 }
+
+/** Build structured extraction fields from a per-page detected invoice (multi-PDF path). */
+export function detectedInvoiceToStructuredExtraction(
+  detected: AtlasOcrDetectedInvoice,
+): import('@/app/types/atlas-document').AtlasStructuredExtraction {
+  const page = detected.page_number;
+  const confidence = detected.confidence ?? 0.85;
+  const field = (value: string | number | null | undefined) =>
+    value != null && value !== ''
+      ? { value, confidence, source_page: page }
+      : undefined;
+
+  return {
+    supplier_name: field(detected.supplier_name),
+    invoice_number: field(detected.invoice_number),
+    invoice_date: field(detected.invoice_date),
+    subtotal_ht: field(detected.amount_ht),
+    tva_amount: field(detected.vat_amount),
+    total_ttc: field(detected.amount_ttc),
+    tva_rate: field(detected.vat_rate),
+  };
+}
+
+export function validateDetectedInvoiceFields(
+  detected: AtlasOcrDetectedInvoice,
+): { ok: true } | { ok: false; missing: string[] } {
+  const missing: string[] = [];
+  const hasAmount =
+    (detected.amount_ttc != null && detected.amount_ttc > 0) ||
+    (detected.amount_ht != null && detected.amount_ht > 0);
+  if (!hasAmount) missing.push('montant_ht_or_ttc');
+  return missing.length ? { ok: false, missing } : { ok: true };
+}
