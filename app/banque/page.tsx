@@ -17,8 +17,7 @@ import {
 import { AppSidebar } from '@/app/components/shell/AppSidebar';
 import { ModuleEmptyState } from '@/app/components/onboarding/ModuleEmptyState';
 import { BetaSurfaceBadge } from '@/app/components/safety/BetaSurfaceBadge';
-import { ExportMenu } from '@/app/components/ExportMenu';
-import type { ExportColumn } from '@/app/components/ExportMenu';
+import { BankExportMenu } from '@/app/components/bank/BankExportMenu';
 import { BankAlertCenter } from '@/app/components/bank/BankAlertCenter';
 import { ValidationStatusBadge } from '@/app/components/validation/ValidationStatusBadge';
 import { getActiveCompanyDbRowId } from '@/app/lib/atlas-active-company';
@@ -49,17 +48,6 @@ type PendingStatement = {
   syncedTransactionCount: number;
 };
 
-const TX_EXPORT_COLUMNS: ExportColumn[] = [
-  { key: 'transactionDate', label: 'Date' },
-  { key: 'description', label: 'Description' },
-  { key: 'reference', label: 'Référence' },
-  { key: 'debit', label: 'Débit (MAD)', format: v => typeof v === 'number' && v > 0 ? v.toFixed(2) : '' },
-  { key: 'credit', label: 'Crédit (MAD)', format: v => typeof v === 'number' && v > 0 ? v.toFixed(2) : '' },
-  { key: 'balance', label: 'Solde (MAD)', format: v => v != null ? Number(v).toFixed(2) : '' },
-  { key: 'reconStatus', label: 'Rapprochement' },
-  { key: 'validationStatus', label: 'Statut validation' },
-  { key: 'sourceDocumentId', label: 'Source Document IA' },
-];
 
 function formatMad(n: number): string {
   return n.toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -151,22 +139,6 @@ export default function BanquePage() {
     });
   }, [transactions, reconFilter]);
 
-  const exportRows = useMemo(() => filtered.map(tx => {
-    const { label } = reconStatusLabel(tx);
-    return {
-      id: tx.id,
-      transactionDate: tx.transactionDate ?? '',
-      description: tx.description ?? '',
-      reference: tx.reference ?? '',
-      debit: tx.debit,
-      credit: tx.credit,
-      balance: tx.balance,
-      reconStatus: label,
-      validationStatus: tx.validationStatus,
-      sourceDocumentId: tx.sourceDocumentId ?? '',
-    };
-  }), [filtered]);
-
   const validateMatch = async (reconId: string, action: 'validate' | 'reject') => {
     await fetch('/api/bank/reconciliation', {
       method: 'PATCH',
@@ -245,12 +217,12 @@ export default function BanquePage() {
                 </span>
               )}
             </button>
-            <ExportMenu
-              data={exportRows as unknown as Record<string, unknown>[]}
-              columns={TX_EXPORT_COLUMNS}
-              filename="operations_bancaires"
-              title="Opérations bancaires"
-              filters={{ statut: statusFilter, rapprochement: reconFilter, recherche: search }}
+            <BankExportMenu
+              companyId={companyId}
+              statusFilter={statusFilter}
+              search={search}
+              reconFilter={reconFilter}
+              transactionCount={filtered.length}
               size="sm"
             />
             <button
