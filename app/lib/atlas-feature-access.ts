@@ -14,6 +14,7 @@ import {
 } from '@/app/lib/atlas-billing-server';
 import { computeTrialStatus } from '@/app/lib/atlas-trial-manager';
 import { logAuditEvent } from '@/app/lib/atlas-audit-log';
+import { shouldBypassBillingEnforcement } from '@/app/lib/atlas-billing-bypass';
 
 export type FeatureAccessResult = {
   allowed: boolean;
@@ -59,6 +60,17 @@ export async function canUseFeature(
   featureCode: FeatureCode,
   quantity = 1,
 ): Promise<FeatureAccessResult> {
+  if (await shouldBypassBillingEnforcement(db, userId)) {
+    return {
+      allowed: true,
+      featureCode,
+      limit: null,
+      used: 0,
+      remaining: null,
+      unlimited: true,
+    };
+  }
+
   const quota = await getRemainingQuota(db, userId, workspaceId, featureCode);
   const summary = await buildBillingUsageSummary(db, userId, workspaceId);
 
@@ -123,6 +135,7 @@ export async function buildBillingUsageSummary(
   const plans = await listSubscriptionPlans(db);
   const plan = sub ? plans.find((p) => p.id === sub!.planId) : plans.find((p) => p.code === 'FREE');
   const trial = computeTrialStatus(sub?.trialEndsAt ?? null, sub?.status ?? null);
+  const bypassBilling = userId ? await shouldBypassBillingEnforcement(db, userId) : false;
 
   const quotas: FeatureQuota[] = [];
   for (const code of ATLAS_FEATURE_CODES) {
@@ -132,6 +145,17 @@ export async function buildBillingUsageSummary(
       used = await countCompaniesInWorkspace(db, userId, workspaceId);
     } else {
       used = await countUsageThisMonth(db, workspaceId, code);
+    }
+    if (bypassBilling) {
+      quotas.push({
+        featureCode: code,
+        limit: null,
+        used,
+        remaining: null,
+        unlimited: true,
+        allowed: true,
+      });
+      continue;
     }
     const unlimited = limit === null;
     const remaining = unlimited ? null : Math.max(0, limit - used);
@@ -149,8 +173,8 @@ export async function buildBillingUsageSummary(
     workspaceId,
     subscription: sub,
     quotas,
-    trialDaysRemaining: trial.daysRemaining,
-    trialExpired: trial.expired,
+    trialDaysRemaining: bypassBilling ? null : trial.daysRemaining,
+    trialExpired: bypassBilling ? false : trial.expired,
   };
 }
 
