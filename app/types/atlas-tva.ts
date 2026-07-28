@@ -12,6 +12,11 @@ export type AtlasTvaLineItem = {
   totalTTC: number;
   vatRate?: number;
   source: 'invoice' | 'supplier_invoice' | 'accounting_entry' | 'tva_suggestion';
+  /** DGI Relevé de déductions — optional enrichment */
+  supplierIce?: string;
+  designation?: string;
+  paymentMode?: string;
+  paymentDate?: string;
 };
 
 export type AtlasTvaPeriodCalculation = {

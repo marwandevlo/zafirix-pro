@@ -220,6 +220,7 @@ type InvoiceRow = {
 type SupplierRow = {
   id: string;
   supplier_name: string;
+  supplier_ice?: string | null;
   invoice_number: string | null;
   invoice_date: string | null;
   status: string;
@@ -228,6 +229,8 @@ type SupplierRow = {
   vat_amount: number | string | null;
   amount_ttc: number | string | null;
   vat_rate: number | string | null;
+  payment_method?: string | null;
+  category?: string | null;
   created_at?: string | null;
   updated_at?: string | null;
 };
@@ -318,7 +321,7 @@ export async function computeTvaPeriod(
     fetchCompanyScopedRows<SupplierRow>(
       db,
       'atlas_supplier_invoices',
-      'id, supplier_name, invoice_number, invoice_date, status, validation_status, amount_ht, vat_amount, amount_ttc, vat_rate, created_at, updated_at',
+      'id, supplier_name, supplier_ice, invoice_number, invoice_date, status, validation_status, amount_ht, vat_amount, amount_ttc, vat_rate, payment_method, category, created_at, updated_at',
       companyId,
       userId,
     ),
@@ -404,6 +407,10 @@ export async function computeTvaPeriod(
       totalTTC,
       vatRate: row.vat_rate != null ? Number(row.vat_rate) : undefined,
       source: 'supplier_invoice',
+      supplierIce: row.supplier_ice ? String(row.supplier_ice) : undefined,
+      designation: row.category ? String(row.category) : 'Achats / Services',
+      paymentMode: row.payment_method ? String(row.payment_method) : undefined,
+      paymentDate: issueDate,
     });
   }
 
@@ -590,6 +597,38 @@ async function loadCompanyRegime(db: SupabaseClient, companyId: string): Promise
   if (error || !data) return 'mensuel';
   const json = asRecord((data as { company_json: unknown }).company_json);
   return String(json?.regimeTVA ?? 'mensuel');
+}
+
+export type AtlasTvaExportCompanyInfo = {
+  name: string | null;
+  legal_name: string | null;
+  trade_name: string | null;
+  ice: string | null;
+  if_fiscal: string | null;
+  if_number: string | null;
+};
+
+export async function loadCompanyTvaExportInfo(
+  db: SupabaseClient,
+  companyId: string,
+): Promise<AtlasTvaExportCompanyInfo | null> {
+  const { data, error } = await db
+    .from('atlas_companies')
+    .select('name, legal_name, trade_name, ice, if_fiscal, if_number, company_json')
+    .eq('id', companyId)
+    .maybeSingle();
+  if (error || !data) return null;
+  const row = data as Record<string, unknown>;
+  const json = asRecord(row.company_json);
+  return {
+    name: row.name == null ? null : String(row.name),
+    legal_name: row.legal_name == null ? null : String(row.legal_name),
+    trade_name: row.trade_name == null ? null : String(row.trade_name),
+    ice: row.ice == null ? (json?.ice == null ? null : String(json.ice)) : String(row.ice),
+    if_fiscal:
+      row.if_fiscal == null ? (json?.if_fiscal == null ? null : String(json.if_fiscal)) : String(row.if_fiscal),
+    if_number: row.if_number == null ? null : String(row.if_number),
+  };
 }
 
 export async function syncTvaPeriodRecord(

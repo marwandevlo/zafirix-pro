@@ -6,6 +6,7 @@ import {
   CheckCircle,
   Clock,
   FileCode,
+  FileSpreadsheet,
   Globe,
   History,
   Loader2,
@@ -30,8 +31,9 @@ const TVA_LINE_EXPORT_COLUMNS: ExportColumn[] = [
   { key: 'source_document_id', label: 'Source Document IA' },
 ];
 import { getActiveCompanyDbRowId } from '@/app/lib/atlas-active-company';
+import { readActiveCompanyFromLocalStorage } from '@/app/lib/atlas-companies-repository';
 import { isAtlasSupabaseDataEnabled } from '@/app/lib/atlas-data-source';
-import { generateTvaDeclarationXml } from '@/app/lib/atlas-tva-xml';
+import { dgiRegimeCode, generateTvaDeclarationXml } from '@/app/lib/atlas-tva-xml';
 import type { AtlasTvaDashboard, AtlasTvaPeriodRecord } from '@/app/types/atlas-tva';
 
 type Tab = 'dashboard' | 'ventes' | 'achats' | 'historique' | 'audit';
@@ -104,6 +106,7 @@ export default function TvaPageClient() {
   const [error, setError] = useState('');
   const [declaring, setDeclaring] = useState(false);
   const [xmlDone, setXmlDone] = useState(false);
+  const [exportingExcel, setExportingExcel] = useState(false);
   const [selectedYear, setSelectedYear] = useState(() => new Date().getFullYear());
   const [selectedQuarter, setSelectedQuarter] = useState<TvaQuarterSelection>(() => currentQuarter());
   const skipPeriodFetchRef = useRef(false);
@@ -195,8 +198,16 @@ export default function TvaPageClient() {
   );
 
   const downloadXml = () => {
-    if (!current) return;
-    const xml = generateTvaDeclarationXml(current);
+    if (!current || !dashboard) return;
+    const activeCompany = readActiveCompanyFromLocalStorage();
+    const identifiantFiscal =
+      activeCompany?.if_fiscal?.trim() ||
+      (activeCompany as { if_number?: string } | null)?.if_number?.trim() ||
+      '';
+    const xml = generateTvaDeclarationXml(current, {
+      identifiantFiscal,
+      regime: dgiRegimeCode(dashboard.regimeTVA),
+    });
     const blob = new Blob([xml], { type: 'application/xml' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
@@ -205,6 +216,33 @@ export default function TvaPageClient() {
     a.click();
     URL.revokeObjectURL(url);
     setXmlDone(true);
+  };
+
+  const downloadExcel = async () => {
+    if (!current || !companyId) return;
+    setExportingExcel(true);
+    setError('');
+    try {
+      const periodKey = buildPeriodKey(selectedYear, selectedQuarter);
+      const params = new URLSearchParams({ companyId, periodKey });
+      const res = await fetch(`/api/tva/export?${params.toString()}`, { credentials: 'include' });
+      if (!res.ok) {
+        const body = (await res.json().catch(() => ({}))) as { error?: string };
+        setError(body.error ?? 'Export Excel impossible.');
+        return;
+      }
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `Releve_TVA_${periodKey}.xlsx`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch {
+      setError('Erreur réseau lors de l\'export Excel.');
+    } finally {
+      setExportingExcel(false);
+    }
   };
 
   const declarePeriod = async () => {
@@ -319,6 +357,15 @@ export default function TvaPageClient() {
                 ))}
               </select>
             </div>
+            <button
+              type="button"
+              onClick={() => void downloadExcel()}
+              disabled={!current || !companyId || exportingExcel}
+              className="flex items-center gap-2 px-4 py-2 bg-[#1F497D] text-white rounded-lg text-sm hover:bg-[#16365c] transition-colors disabled:opacity-50"
+            >
+              {exportingExcel ? <Loader2 size={16} className="animate-spin" /> : <FileSpreadsheet size={16} />}
+              Exporter Excel DGI
+            </button>
             <button
               type="button"
               onClick={downloadXml}
