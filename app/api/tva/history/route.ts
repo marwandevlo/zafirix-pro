@@ -16,8 +16,11 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: 'company_required' }, { status: 400 });
   }
 
+  const yearParam = request.nextUrl.searchParams.get('year');
+  const year = yearParam ? Number(yearParam) : undefined;
+
   try {
-    const history = await listTvaHistory(ctx.db, ctx.userId, companyId);
+    const history = await listTvaHistory(ctx.db, ctx.userId, companyId, { year });
     return NextResponse.json(history);
   } catch (err) {
     const message = err instanceof Error ? err.message : 'history_failed';

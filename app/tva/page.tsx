@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   AlertCircle,
   CheckCircle,
@@ -35,6 +35,36 @@ import { generateTvaDeclarationXml } from '@/app/lib/atlas-tva-xml';
 import type { AtlasTvaDashboard, AtlasTvaPeriodRecord } from '@/app/types/atlas-tva';
 
 type Tab = 'dashboard' | 'ventes' | 'achats' | 'historique' | 'audit';
+
+type TvaQuarterSelection = 'T1' | 'T2' | 'T3' | 'T4' | 'AN';
+
+const TVA_YEARS = [2024, 2025, 2026, 2027] as const;
+
+const QUARTER_OPTIONS: { value: TvaQuarterSelection; label: string }[] = [
+  { value: 'T1', label: 'Trimestre 1 (Jan – Mar)' },
+  { value: 'T2', label: 'Trimestre 2 (Avr – Jun)' },
+  { value: 'T3', label: 'Trimestre 3 (Jul – Sep)' },
+  { value: 'T4', label: 'Trimestre 4 (Oct – Déc)' },
+  { value: 'AN', label: 'Annuel' },
+];
+
+function currentQuarter(): TvaQuarterSelection {
+  const q = Math.ceil((new Date().getMonth() + 1) / 3);
+  return `T${q}` as TvaQuarterSelection;
+}
+
+function buildPeriodKey(year: number, quarter: TvaQuarterSelection): string {
+  if (quarter === 'AN') return `${year}-AN`;
+  return `${year}-Q${quarter.slice(1)}`;
+}
+
+function parsePeriodKey(key: string): { year: number; quarter: TvaQuarterSelection } | null {
+  const annual = key.match(/^(\d{4})-AN$/);
+  if (annual) return { year: Number(annual[1]), quarter: 'AN' };
+  const quarterly = key.match(/^(\d{4})-Q([1-4])$/);
+  if (quarterly) return { year: Number(quarterly[1]), quarter: `T${quarterly[2]}` as TvaQuarterSelection };
+  return null;
+}
 
 async function tvaFetch<T>(path: string, init?: RequestInit): Promise<{ ok: boolean; data: T }> {
   const res = await fetch(path, {
@@ -74,47 +104,85 @@ export default function TVAPage() {
   const [error, setError] = useState('');
   const [declaring, setDeclaring] = useState(false);
   const [xmlDone, setXmlDone] = useState(false);
+  const [selectedYear, setSelectedYear] = useState(() => new Date().getFullYear());
+  const [selectedQuarter, setSelectedQuarter] = useState<TvaQuarterSelection>(() => currentQuarter());
+  const skipPeriodFetchRef = useRef(false);
+  const initialDetectDoneRef = useRef(false);
 
   const supabaseEnabled = isAtlasSupabaseDataEnabled();
 
-  const reload = useCallback(async () => {
-    setError('');
-    setLoading(true);
-    try {
-      const cid = await getActiveCompanyDbRowId();
-      setCompanyId(cid);
-      if (!supabaseEnabled || !cid) {
-        setDashboard(null);
-        setHistory([]);
-        return;
+  const reload = useCallback(
+    async (opts?: { detectLatest?: boolean; periodKey?: string }) => {
+      setError('');
+      setLoading(true);
+      try {
+        const cid = await getActiveCompanyDbRowId();
+        setCompanyId(cid);
+        if (!supabaseEnabled || !cid) {
+          setDashboard(null);
+          setHistory([]);
+          return;
+        }
+
+        const dashParams = new URLSearchParams({ companyId: cid });
+        const historyParams = new URLSearchParams({ companyId: cid, year: String(selectedYear) });
+
+        if (opts?.detectLatest) {
+          dashParams.set('detectLatest', '1');
+          dashParams.set('year', String(selectedYear));
+        } else {
+          const periodKey = opts?.periodKey ?? buildPeriodKey(selectedYear, selectedQuarter);
+          dashParams.set('periodKey', periodKey);
+        }
+
+        const [dashRes, histRes] = await Promise.all([
+          tvaFetch<{ dashboard?: AtlasTvaDashboard; error?: string }>(
+            `/api/tva/dashboard?${dashParams.toString()}`,
+          ),
+          tvaFetch<{ periods?: AtlasTvaPeriodRecord[]; error?: string }>(
+            `/api/tva/history?${historyParams.toString()}`,
+          ),
+        ]);
+
+        if (!dashRes.ok) {
+          setError(dashRes.data.error ?? 'Impossible de charger la TVA.');
+          setDashboard(null);
+        } else {
+          const dash = dashRes.data.dashboard ?? null;
+          setDashboard(dash);
+          if (opts?.detectLatest && dash?.selectedPeriodKey) {
+            const parsed = parsePeriodKey(dash.selectedPeriodKey);
+            if (parsed) {
+              skipPeriodFetchRef.current = true;
+              setSelectedYear(parsed.year);
+              setSelectedQuarter(parsed.quarter);
+            }
+          }
+        }
+        if (histRes.ok) {
+          setHistory(histRes.data.periods ?? []);
+        }
+      } catch {
+        setError('Erreur réseau.');
+      } finally {
+        setLoading(false);
       }
-      const [dashRes, histRes] = await Promise.all([
-        tvaFetch<{ dashboard?: AtlasTvaDashboard; error?: string }>(
-          `/api/tva/dashboard?companyId=${encodeURIComponent(cid)}`,
-        ),
-        tvaFetch<{ periods?: AtlasTvaPeriodRecord[]; error?: string }>(
-          `/api/tva/history?companyId=${encodeURIComponent(cid)}`,
-        ),
-      ]);
-      if (!dashRes.ok) {
-        setError(dashRes.data.error ?? 'Impossible de charger la TVA.');
-        setDashboard(null);
-      } else {
-        setDashboard(dashRes.data.dashboard ?? null);
-      }
-      if (histRes.ok) {
-        setHistory(histRes.data.periods ?? []);
-      }
-    } catch {
-      setError('Erreur réseau.');
-    } finally {
-      setLoading(false);
-    }
-  }, [supabaseEnabled]);
+    },
+    [supabaseEnabled, selectedYear, selectedQuarter],
+  );
 
   useEffect(() => {
+    if (!initialDetectDoneRef.current) {
+      initialDetectDoneRef.current = true;
+      void reload({ detectLatest: true });
+      return;
+    }
+    if (skipPeriodFetchRef.current) {
+      skipPeriodFetchRef.current = false;
+      return;
+    }
     void reload();
-  }, [reload]);
+  }, [selectedYear, selectedQuarter, reload]);
 
   const current = dashboard?.current ?? null;
   const salesLines = useMemo(
@@ -214,7 +282,43 @@ export default function TVAPage() {
               Calculs réels à partir de vos factures clients, fournisseurs et écritures comptables
             </p>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-3">
+            <div className="flex items-center gap-2">
+              <label htmlFor="tva-year" className="text-xs text-gray-500">
+                Année
+              </label>
+              <select
+                id="tva-year"
+                value={selectedYear}
+                onChange={(e) => setSelectedYear(Number(e.target.value))}
+                disabled={loading}
+                className="text-sm border border-gray-200 rounded-lg px-3 py-2 bg-white text-gray-800 min-w-[5.5rem]"
+              >
+                {TVA_YEARS.map((y) => (
+                  <option key={y} value={y}>
+                    {y}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div className="flex items-center gap-2">
+              <label htmlFor="tva-quarter" className="text-xs text-gray-500">
+                Période
+              </label>
+              <select
+                id="tva-quarter"
+                value={selectedQuarter}
+                onChange={(e) => setSelectedQuarter(e.target.value as TvaQuarterSelection)}
+                disabled={loading}
+                className="text-sm border border-gray-200 rounded-lg px-3 py-2 bg-white text-gray-800 min-w-[14rem]"
+              >
+                {QUARTER_OPTIONS.map(({ value, label }) => (
+                  <option key={value} value={value}>
+                    {label}
+                  </option>
+                ))}
+              </select>
+            </div>
             <button
               type="button"
               onClick={downloadXml}
@@ -255,7 +359,7 @@ export default function TVAPage() {
             <>
               <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
                 <div className="bg-white rounded-xl p-5 shadow-sm border border-gray-100">
-                  <p className="text-xs text-gray-400">Période en cours</p>
+                  <p className="text-xs text-gray-400">Période sélectionnée</p>
                   <p className="text-lg font-bold text-gray-800 mt-1">{current?.periodLabel}</p>
                   <p className="text-xs text-gray-400 mt-1">
                     Régime {dashboard.regimeTVA} · {current?.periodStart} → {current?.periodEnd}
@@ -358,7 +462,7 @@ export default function TVAPage() {
               <div className="px-5 py-4 border-b border-gray-100">
                 <h2 className="font-semibold text-gray-700">Historique TVA</h2>
                 <p className="text-xs text-gray-400 mt-0.5">
-                  Périodes {dashboard?.regimeTVA === 'trimestriel' ? 'trimestrielles' : 'mensuelles'}
+                  Périodes trimestrielles et annuelles — {selectedYear}
                 </p>
               </div>
               <table className="w-full text-sm">

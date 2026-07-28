@@ -48,6 +48,7 @@ export type AtlasTvaDashboard = {
   nextDeclarationDate: string;
   amountDue: number;
   status: AtlasTvaPeriodStatus;
+  selectedPeriodKey?: string;
 };
 
 export type AtlasTvaHistoryResponse = {

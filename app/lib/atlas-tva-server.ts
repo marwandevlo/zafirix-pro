@@ -33,6 +33,16 @@ export function periodTypeForRegime(regime: string | null | undefined): AtlasTva
   return normalizeRegimeTVA(regime) === 'trimestriel' ? 'quarterly' : 'monthly';
 }
 
+/** Resolve storage/compute type from an explicit period key (UI selector). */
+export function periodTypeForPeriodKey(
+  periodKey: string,
+  regime: string | null | undefined,
+): AtlasTvaPeriodType {
+  if (/^\d{4}-AN$/.test(periodKey) || /^\d{4}-Q[1-4]$/.test(periodKey)) return 'quarterly';
+  if (/^\d{4}-\d{2}$/.test(periodKey)) return 'monthly';
+  return periodTypeForRegime(regime);
+}
+
 export function currentPeriodKey(regime: string | null | undefined, ref = new Date()): string {
   const y = ref.getFullYear();
   const m = ref.getMonth() + 1;
@@ -47,6 +57,16 @@ export function parsePeriodBounds(
   periodKey: string,
   periodType: AtlasTvaPeriodType,
 ): { periodStart: string; periodEnd: string; periodLabel: string } {
+  const annualMatch = periodKey.match(/^(\d{4})-AN$/);
+  if (annualMatch) {
+    const year = Number(annualMatch[1]);
+    return {
+      periodStart: `${year}-01-01`,
+      periodEnd: `${year}-12-31`,
+      periodLabel: `Année ${year}`,
+    };
+  }
+
   if (periodType === 'monthly') {
     const [yStr, mStr] = periodKey.split('-');
     const year = Number(yStr);
@@ -643,10 +663,11 @@ export async function getTvaDashboard(
   db: SupabaseClient,
   userId: string,
   companyId: string,
+  opts?: { periodKey?: string | null },
 ): Promise<AtlasTvaDashboard> {
   const regime = await loadCompanyRegime(db, companyId);
-  const periodType = periodTypeForRegime(regime);
-  const periodKey = currentPeriodKey(regime);
+  const periodKey = opts?.periodKey?.trim() || currentPeriodKey(regime);
+  const periodType = periodTypeForPeriodKey(periodKey, regime);
   const current = await syncTvaPeriodRecord(db, userId, companyId, periodKey, periodType, regime);
 
   return {
@@ -656,18 +677,62 @@ export async function getTvaDashboard(
     nextDeclarationDate: current.declarationDueDate,
     amountDue: current.tvaNette,
     status: current.status,
+    selectedPeriodKey: periodKey,
   };
+}
+
+/** Latest quarter/year key in a given calendar year that has TVA activity. */
+export async function findLatestTvaPeriodKeyWithData(
+  db: SupabaseClient,
+  userId: string,
+  companyId: string,
+  year: number,
+): Promise<string | null> {
+  const candidates = [`${year}-AN`, `${year}-Q4`, `${year}-Q3`, `${year}-Q2`, `${year}-Q1`];
+  for (const periodKey of candidates) {
+    const periodType = periodTypeForPeriodKey(periodKey, 'trimestriel');
+    const calc = await computeTvaPeriod(db, companyId, periodKey, periodType, userId);
+    if (calc.tvaCollectee > 0 || calc.tvaDeductible > 0 || calc.lines.length > 0) {
+      return periodKey;
+    }
+  }
+  return null;
 }
 
 export async function listTvaHistory(
   db: SupabaseClient,
   userId: string,
   companyId: string,
-  opts?: { limit?: number },
+  opts?: { limit?: number; year?: number },
 ): Promise<{ periods: AtlasTvaPeriodRecord[]; regimeTVA: string }> {
   const regime = await loadCompanyRegime(db, companyId);
-  const periodType = periodTypeForRegime(regime);
   const limit = opts?.limit ?? 24;
+
+  if (opts?.year) {
+    const year = opts.year;
+    const keys = [`${year}-Q1`, `${year}-Q2`, `${year}-Q3`, `${year}-Q4`, `${year}-AN`];
+    await Promise.all(
+      keys.map((key) =>
+        syncTvaPeriodRecord(db, userId, companyId, key, periodTypeForPeriodKey(key, regime), regime),
+      ),
+    );
+
+    const { data, error } = await db
+      .from('atlas_tva_periods')
+      .select('*')
+      .eq('company_id', companyId)
+      .eq('user_id', userId)
+      .in('period_key', keys)
+      .order('period_end', { ascending: false });
+
+    if (error) throw new Error(error.message);
+    return {
+      regimeTVA: regime,
+      periods: (data ?? []).map((r) => rowToPeriodRecord(r as Record<string, unknown>)),
+    };
+  }
+
+  const periodType = periodTypeForRegime(regime);
 
   const keys: string[] = [];
   const ref = new Date();
@@ -710,7 +775,7 @@ export async function markTvaPeriodDeclared(
   periodKey: string,
 ): Promise<AtlasTvaPeriodRecord> {
   const regime = await loadCompanyRegime(db, companyId);
-  const periodType = periodTypeForRegime(regime);
+  const periodType = periodTypeForPeriodKey(periodKey, regime);
   await syncTvaPeriodRecord(db, userId, companyId, periodKey, periodType, regime);
 
   const now = new Date().toISOString();
