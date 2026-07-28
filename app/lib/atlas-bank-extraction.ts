@@ -97,15 +97,41 @@ export function parseBankTransactionsFromDocument(
     for (const t of metaTx) {
       if (t && typeof t === 'object') {
         const o = t as Record<string, unknown>;
+        const debitRaw = parseNum(o.debit as string | number | null);
+        const creditRaw = parseNum(o.credit as string | number | null);
+        const montantRaw = parseNum(o.montant as string | number | null);
+        const amountRaw = parseNum(o.amount as string | number | null) ?? montantRaw;
+
+        let debit = debitRaw ?? undefined;
+        let credit = creditRaw ?? undefined;
+        let amount = amountRaw ?? undefined;
+
+        if (debit == null && credit == null && amountRaw != null) {
+          if (amountRaw < 0) {
+            debit = Math.abs(amountRaw);
+            amount = Math.abs(amountRaw);
+          } else if (amountRaw > 0) {
+            credit = amountRaw;
+            amount = amountRaw;
+          }
+        }
+
         rows.push({
-          transaction_date: o.date as string | undefined ?? o.transaction_date as string | undefined,
+          transaction_date:
+            (o.date as string | undefined) ??
+            (o.transaction_date as string | undefined),
           value_date: o.value_date as string | undefined,
-          description: o.description as string | undefined ?? o.label as string | undefined,
-          reference: o.reference as string | undefined,
-          debit: typeof o.debit === 'number' ? o.debit : undefined,
-          credit: typeof o.credit === 'number' ? o.credit : undefined,
-          amount: typeof o.amount === 'number' ? o.amount : undefined,
-          balance: typeof o.balance === 'number' ? o.balance : undefined,
+          description:
+            (o.description as string | undefined) ??
+            (o.label as string | undefined) ??
+            (o.libelle as string | undefined),
+          reference:
+            (o.reference as string | undefined) ??
+            (o.ref as string | undefined),
+          debit,
+          credit,
+          amount,
+          balance: parseNum(o.balance as string | number | null) ?? undefined,
         });
       }
     }

@@ -15,6 +15,7 @@ export async function GET(request: NextRequest) {
 
   const { searchParams } = new URL(request.url);
   const statementId = searchParams.get('statementId');
+  const companyId = searchParams.get('companyId')?.trim();
   const status = searchParams.get('status');
   const search = searchParams.get('search')?.trim();
   const limit = Math.min(200, parseInt(searchParams.get('limit') ?? '100', 10));
@@ -27,6 +28,8 @@ export async function GET(request: NextRequest) {
     .eq('user_id', userId)
     .order('transaction_date', { ascending: false })
     .range(offset, offset + limit - 1);
+
+  if (companyId) query = query.eq('company_id', companyId);
 
   if (statementId) query = query.eq('statement_id', statementId);
   if (status && status !== 'all') query = query.eq('validation_status', status);

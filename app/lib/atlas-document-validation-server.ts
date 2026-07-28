@@ -25,7 +25,8 @@ import {
   sourcePageForDetectedInvoice,
   validateDetectedInvoiceFields,
 } from '@/app/lib/atlas-ocr-invoices-detect';
-import { createBankStatementFromDocument } from '@/app/lib/atlas-bank-server';
+import { syncBankStatementFromDocument } from '@/app/lib/atlas-bank-server';
+import { parseBankTransactionsFromDocument, statementHeaderFromExtraction } from '@/app/lib/atlas-bank-extraction';
 import { parseNestedClassification } from '@/app/lib/atlas-ai-json-parse';
 import { isBankStatementType } from '@/app/lib/atlas-document-type-utils';
 
@@ -105,25 +106,18 @@ function classificationFromMetadata(metadata: Record<string, unknown>) {
 }
 
 function validateBankStatementExtraction(
-  _extraction: AtlasStructuredExtraction,
-  _metadata: Record<string, unknown>,
+  extraction: AtlasStructuredExtraction,
+  metadata: Record<string, unknown>,
 ): { ok: true } | { ok: false; missing: string[] } {
-  // Classification confirmed as bank_statement — invoice fields (HT, TVA, N° facture) are not required.
+  const rows = parseBankTransactionsFromDocument(extraction, metadata);
+  const header = statementHeaderFromExtraction(extraction);
+  const missing: string[] = [];
+  if (rows.length === 0) missing.push('transactions');
+  if (!header.bankName && !header.accountNumber) missing.push('bank_name_or_account');
+  if (missing.length === 2) {
+    return { ok: false, missing };
+  }
   return { ok: true };
-}
-
-async function findExistingBankStatement(
-  admin: SupabaseClient,
-  userId: string,
-  documentId: string,
-): Promise<string | null> {
-  const { data } = await admin
-    .from('zafirix_bank_statements')
-    .select('id')
-    .eq('user_id', userId)
-    .eq('source_document_id', documentId)
-    .maybeSingle();
-  return data?.id ? String(data.id) : null;
 }
 
 async function registerBankStatementFromDocument(
@@ -134,25 +128,13 @@ async function registerBankStatementFromDocument(
   extraction: AtlasStructuredExtraction,
   metadata: Record<string, unknown>,
 ): Promise<{ statementId: string; transactionCount: number }> {
-  const existing = await findExistingBankStatement(admin, userId, documentId);
-  if (existing) {
-    const { data: stmt } = await admin
-      .from('zafirix_bank_statements')
-      .select('transaction_count')
-      .eq('id', existing)
-      .maybeSingle();
-    return {
-      statementId: existing,
-      transactionCount: typeof stmt?.transaction_count === 'number' ? stmt.transaction_count : 0,
-    };
-  }
-
-  const result = await createBankStatementFromDocument(admin, {
+  const result = await syncBankStatementFromDocument(admin, {
     userId,
     companyId,
     documentId,
     extraction,
     metadata,
+    markValidated: true,
   });
   return { statementId: result.statementId, transactionCount: result.transactionCount };
 }

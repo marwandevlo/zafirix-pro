@@ -6,7 +6,9 @@ import { ArrowRight, CheckCircle, HelpCircle, Loader2, XCircle } from 'lucide-re
 
 type Summary = { matched: number; suggested: number; unmatched: number; rejected: number; total: number };
 
-export function ReconciliationWidget() {
+type Props = { companyId?: string | null };
+
+export function ReconciliationWidget({ companyId }: Props) {
   const router = useRouter();
   const [summary, setSummary] = useState<Summary | null>(null);
   const [loading, setLoading] = useState(true);
@@ -15,7 +17,8 @@ export function ReconciliationWidget() {
     let cancelled = false;
     (async () => {
       try {
-        const res = await fetch('/api/bank/reconciliation', { credentials: 'include' });
+        const qs = companyId ? `?companyId=${encodeURIComponent(companyId)}` : '';
+        const res = await fetch(`/api/bank/reconciliation${qs}`, { credentials: 'include' });
         if (!res.ok || cancelled) return;
         const data = await res.json() as { summary: Summary };
         if (!cancelled) setSummary(data.summary);
@@ -24,7 +27,7 @@ export function ReconciliationWidget() {
       }
     })();
     return () => { cancelled = true; };
-  }, []);
+  }, [companyId]);
 
   return (
     <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">

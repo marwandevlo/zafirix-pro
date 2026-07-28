@@ -32,7 +32,7 @@ import {
   persistJournalLines,
   persistTvaSuggestion,
 } from '@/app/lib/atlas-documents-accounting-engine';
-import { createBankStatementFromDocument } from '@/app/lib/atlas-bank-server';
+import { syncBankStatementFromDocument } from '@/app/lib/atlas-bank-server';
 import { createPayslipExtractionFromDocument } from '@/app/lib/atlas-payslip-server';
 import { logAuditEvent } from '@/app/lib/atlas-audit-log';
 import { meterFeatureUsage } from '@/app/lib/atlas-usage-meter';
@@ -453,8 +453,9 @@ export async function POST(
         return NextResponse.json({ error: meter.code, message: meter.messageFr }, { status: meter.status });
       }
 
-      const r = await createBankStatementFromDocument(admin, {
+      const r = await syncBankStatementFromDocument(admin, {
         userId, companyId, documentId, extraction, metadata: meta,
+        markValidated: doc.validation_status === 'validated',
       });
       result = {
         module: 'banque',

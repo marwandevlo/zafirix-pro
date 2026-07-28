@@ -15,31 +15,78 @@ export async function GET(request: NextRequest) {
   const userId = await documentUploadSessionUserId(request);
   if (!userId) return NextResponse.json({ error: 'auth_required' }, { status: 401 });
 
-  const status = new URL(request.url).searchParams.get('status');
+  const { searchParams } = new URL(request.url);
+  const status = searchParams.get('status');
+  const companyId = searchParams.get('companyId')?.trim();
   const admin = getSupabaseServiceRoleClient();
 
-  let query = admin
+  let txQuery = admin
+    .from('zafirix_bank_transactions')
+    .select('id')
+    .eq('user_id', userId);
+  if (companyId) txQuery = txQuery.eq('company_id', companyId);
+
+  const { data: txRows, error: txErr } = await txQuery;
+  if (txErr) return NextResponse.json({ error: txErr.message }, { status: 500 });
+
+  const txIds = (txRows ?? []).map((r) => String(r.id));
+  if (txIds.length === 0) {
+    return NextResponse.json({
+      ok: true,
+      summary: { matched: 0, suggested: 0, unmatched: 0, rejected: 0, total: 0 },
+      records: [],
+    });
+  }
+
+  let reconQuery = admin
     .from('atlas_bank_reconciliation')
     .select('id, transaction_id, entity_type, entity_id, confidence, status, match_reason, created_at')
     .eq('user_id', userId)
+    .in('transaction_id', txIds)
     .order('created_at', { ascending: false })
-    .limit(100);
+    .limit(500);
 
-  if (status) query = query.eq('status', status);
+  if (status) reconQuery = reconQuery.eq('status', status);
 
-  const { data, error } = await query;
+  const { data, error } = await reconQuery;
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
 
   const rows = data ?? [];
+  const reconByTx = new Map<string, typeof rows>();
+  for (const r of rows) {
+    const tid = String(r.transaction_id);
+    if (!reconByTx.has(tid)) reconByTx.set(tid, []);
+    reconByTx.get(tid)!.push(r);
+  }
+
+  let matched = 0;
+  let suggested = 0;
+  let unmatched = 0;
+  let rejected = 0;
+
+  for (const txId of txIds) {
+    const recons = reconByTx.get(txId) ?? [];
+    const statuses = recons.map((r) => r.status);
+    if (statuses.includes('matched')) {
+      matched += 1;
+    } else if (statuses.includes('suggested')) {
+      suggested += 1;
+    } else if (statuses.includes('rejected')) {
+      rejected += 1;
+    } else {
+      unmatched += 1;
+    }
+  }
+
   const summary = {
-    matched: rows.filter(r => r.status === 'matched').length,
-    suggested: rows.filter(r => r.status === 'suggested').length,
-    unmatched: rows.filter(r => r.status === 'unmatched').length,
-    rejected: rows.filter(r => r.status === 'rejected').length,
-    total: rows.length,
+    matched,
+    suggested,
+    unmatched,
+    rejected,
+    total: txIds.length,
   };
 
-  return NextResponse.json({ ok: true, summary, records: rows });
+  return NextResponse.json({ ok: true, summary, records: rows.slice(0, 100) });
 }
 
 export async function PATCH(request: NextRequest) {

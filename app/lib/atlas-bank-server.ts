@@ -18,6 +18,85 @@ export type CreateBankStatementResult = {
   reconciliationRun: boolean;
 };
 
+async function findBankStatementByDocument(
+  db: SupabaseClient,
+  userId: string,
+  documentId: string,
+): Promise<{ id: string; transactionCount: number } | null> {
+  const { data } = await db
+    .from('zafirix_bank_statements')
+    .select('id, transaction_count')
+    .eq('user_id', userId)
+    .eq('source_document_id', documentId)
+    .maybeSingle();
+  if (!data?.id) return null;
+  return {
+    id: String(data.id),
+    transactionCount: typeof data.transaction_count === 'number' ? data.transaction_count : 0,
+  };
+}
+
+export async function markBankStatementValidated(
+  db: SupabaseClient,
+  userId: string,
+  statementId: string,
+): Promise<void> {
+  const now = new Date().toISOString();
+  await db
+    .from('zafirix_bank_statements')
+    .update({ validation_status: 'validated', updated_at: now })
+    .eq('id', statementId)
+    .eq('user_id', userId);
+  await db
+    .from('zafirix_bank_transactions')
+    .update({ validation_status: 'validated', updated_at: now })
+    .eq('statement_id', statementId)
+    .eq('user_id', userId);
+}
+
+/** Idempotent import — re-imports when an existing statement has zero transactions. */
+export async function syncBankStatementFromDocument(
+  db: SupabaseClient,
+  params: {
+    userId: string;
+    companyId: string;
+    documentId: string;
+    extraction: AtlasStructuredExtraction;
+    metadata?: Record<string, unknown>;
+    markValidated?: boolean;
+  },
+): Promise<CreateBankStatementResult> {
+  const { userId, documentId, markValidated = false } = params;
+  const existing = await findBankStatementByDocument(db, userId, documentId);
+
+  if (existing && existing.transactionCount > 0) {
+    if (markValidated) {
+      await markBankStatementValidated(db, userId, existing.id);
+    }
+    return {
+      statementId: existing.id,
+      transactionCount: existing.transactionCount,
+      reconciliationRun: false,
+    };
+  }
+
+  if (existing) {
+    await db.from('zafirix_bank_transactions').delete().eq('statement_id', existing.id);
+    await db.from('zafirix_bank_statements').delete().eq('id', existing.id);
+  }
+
+  const result = await createBankStatementFromDocument(db, {
+    ...params,
+    validationStatus: markValidated ? 'validated' : 'draft',
+  });
+
+  if (markValidated) {
+    await markBankStatementValidated(db, userId, result.statementId);
+  }
+
+  return result;
+}
+
 export async function createBankStatementFromDocument(
   db: SupabaseClient,
   params: {
@@ -26,9 +105,10 @@ export async function createBankStatementFromDocument(
     documentId: string;
     extraction: AtlasStructuredExtraction;
     metadata?: Record<string, unknown>;
+    validationStatus?: 'draft' | 'validated';
   },
 ): Promise<CreateBankStatementResult> {
-  const { userId, companyId, documentId, extraction, metadata } = params;
+  const { userId, companyId, documentId, extraction, metadata, validationStatus = 'draft' } = params;
   const header = statementHeaderFromExtraction(extraction);
   const rawRows = parseBankTransactionsFromDocument(extraction, metadata);
 
@@ -46,7 +126,7 @@ export async function createBankStatementFromDocument(
       closing_balance: header.closingBalance,
       currency: 'MAD',
       transaction_count: rawRows.length,
-      validation_status: 'draft',
+      validation_status: validationStatus,
       raw_extraction: extraction as object,
       metadata: { imported_at: new Date().toISOString(), transaction_rows: rawRows.length },
     })
@@ -73,7 +153,7 @@ export async function createBankStatementFromDocument(
       amount: n.amount,
       balance: n.balance,
       currency: 'MAD',
-      validation_status: 'draft',
+      validation_status: validationStatus,
       confidence_score: n.confidence_score,
       raw_payload: raw as object,
     };
