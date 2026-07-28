@@ -105,6 +105,23 @@ function isTvaDeductibleAccount(compte: string): boolean {
   return c.startsWith('4456') || c.startsWith('3455') || c.startsWith('3456');
 }
 
+function isPcge3455Account(compte: string): boolean {
+  return compte.replace(/\s/g, '').startsWith('3455');
+}
+
+function resolveEntryAccountCode(entry: Record<string, unknown>): string {
+  return String(entry.compte ?? entry.account ?? '');
+}
+
+function supplierVatAmount(row: SupplierRow): number {
+  const vat = Number(row.vat_amount ?? 0);
+  if (vat > 0) return vat;
+  const ht = Number(row.amount_ht ?? 0);
+  const ttc = Number(row.amount_ttc ?? 0);
+  if (ttc > ht && ht >= 0) return roundMad(ttc - ht);
+  return 0;
+}
+
 /** Parse a date string to YYYY-MM-DD without inventing today's date. */
 function parseStrictDateYmd(raw: string | null | undefined): string | null {
   if (!raw) return null;
@@ -222,7 +239,7 @@ type TvaSuggestionRow = {
   updated_at?: string | null;
 };
 
-/** Match active company OR legacy rows uploaded before company was set. */
+/** Match active company OR legacy rows; merge with all user rows when userId is known. */
 async function fetchCompanyScopedRows<T>(
   db: SupabaseClient,
   table: string,
@@ -242,8 +259,23 @@ async function fetchCompanyScopedRows<T>(
   };
 
   const scoped = await runQuery('company_or_null');
-  if (scoped.length > 0 || !userId) return scoped;
-  return runQuery('user_only');
+  if (!userId) return scoped;
+
+  const userWide = await runQuery('user_only');
+  const seen = new Set<string>();
+  const merged: T[] = [];
+
+  const pushRow = (row: T, index: number) => {
+    const id = (row as { id?: string }).id;
+    const key = id ? String(id) : `${table}:${index}`;
+    if (seen.has(key)) return;
+    seen.add(key);
+    merged.push(row);
+  };
+
+  scoped.forEach((row, index) => pushRow(row, index));
+  userWide.forEach((row, index) => pushRow(row, scoped.length + index));
+  return merged;
 }
 
 export async function computeTvaPeriod(
@@ -286,19 +318,10 @@ export async function computeTvaPeriod(
     ),
   ]);
 
-  console.log('[TVA Server]', {
-    companyId,
-    userId: userId ?? null,
-    periodKey,
-    supplierCount: supplierInvoices.length,
-    suggestionsCount: suggestions.length,
-    clientCount: clientInvoices.length,
-    accountingCount: accountingEntries.length,
-  });
-
   const lines: AtlasTvaLineItem[] = [];
   let tvaCollectee = 0;
-  let tvaDeductible = 0;
+  let supplierTvaSum = 0;
+  let accounting3455TvaSum = 0;
   let caHT = 0;
   let achatsHT = 0;
   let salesCount = 0;
@@ -342,11 +365,11 @@ export async function computeTvaPeriod(
     if (!issueDate || !inPeriod(issueDate, periodStart, periodEnd)) continue;
 
     const amountHT = Number(row.amount_ht ?? 0);
-    const vatAmount = Number(row.vat_amount ?? 0);
+    const vatAmount = supplierVatAmount(row);
     const totalTTC = Number(row.amount_ttc ?? amountHT + vatAmount);
     if (vatAmount <= 0 && amountHT <= 0) continue;
 
-    tvaDeductible += vatAmount;
+    supplierTvaSum += vatAmount;
     achatsHT += amountHT;
     purchasesCount += 1;
     countedInvoiceIds.add(String(row.id));
@@ -364,6 +387,7 @@ export async function computeTvaPeriod(
     });
   }
 
+  let suggestionDeductible = 0;
   for (const row of suggestions) {
     if (!isIncludedTvaSuggestionStatus(row.validation_status)) continue;
 
@@ -379,7 +403,7 @@ export async function computeTvaPeriod(
 
     const isDeductible = String(row.tva_type).toLowerCase() === 'deductible';
     if (isDeductible) {
-      tvaDeductible += vatAmount;
+      suggestionDeductible += vatAmount;
       achatsHT += amountHT;
       purchasesCount += 1;
     } else {
@@ -404,11 +428,6 @@ export async function computeTvaPeriod(
 
   let accountingAdjust = 0;
   for (const row of accountingEntries) {
-    if (!isIncludedInvoiceValidationStatus(row.validation_status)) continue;
-
-    const linkedId = row.source_invoice_id ? String(row.source_invoice_id) : '';
-    if (linkedId && countedInvoiceIds.has(linkedId)) continue;
-
     const entry = asRecord(row.entry_json);
     if (!entry) continue;
 
@@ -419,10 +438,44 @@ export async function computeTvaPeriod(
     );
     if (!date || !inPeriod(date, periodStart, periodEnd)) continue;
 
-    const compte = String(entry.compte ?? '');
+    const compte = resolveEntryAccountCode(entry);
     const debit = Number(entry.debit ?? 0);
     const credit = Number(entry.credit ?? 0);
     const libelle = String(entry.libelle ?? 'Écriture comptable');
+
+    if (isPcge3455Account(compte) && debit > 0) {
+      accounting3455TvaSum += debit;
+      accountingAdjust -= debit;
+      lines.push({
+        id: `acc-${row.id}`,
+        kind: 'purchase',
+        reference: compte,
+        counterparty: libelle,
+        issueDate: date,
+        amountHT: 0,
+        vatAmount: debit,
+        totalTTC: debit,
+        source: 'accounting_entry',
+      });
+      continue;
+    }
+
+    if (isTvaDeductibleAccount(compte) && debit > 0 && !isPcge3455Account(compte)) {
+      accounting3455TvaSum += debit;
+      accountingAdjust -= debit;
+      lines.push({
+        id: `acc-${row.id}`,
+        kind: 'purchase',
+        reference: compte,
+        counterparty: libelle,
+        issueDate: date,
+        amountHT: 0,
+        vatAmount: debit,
+        totalTTC: debit,
+        source: 'accounting_entry',
+      });
+      continue;
+    }
 
     if (isTvaCollecteeAccount(compte) && credit > 0) {
       tvaCollectee += credit;
@@ -438,22 +491,25 @@ export async function computeTvaPeriod(
         totalTTC: credit,
         source: 'accounting_entry',
       });
-    } else if (isTvaDeductibleAccount(compte) && debit > 0) {
-      tvaDeductible += debit;
-      accountingAdjust -= debit;
-      lines.push({
-        id: `acc-${row.id}`,
-        kind: 'purchase',
-        reference: compte,
-        counterparty: libelle,
-        issueDate: date,
-        amountHT: 0,
-        vatAmount: debit,
-        totalTTC: debit,
-        source: 'accounting_entry',
-      });
     }
   }
+
+  const journalOrSupplierDeductible = Math.max(supplierTvaSum, accounting3455TvaSum);
+  let tvaDeductible = journalOrSupplierDeductible + suggestionDeductible;
+
+  console.log('[TVA Server]', {
+    companyId,
+    userId: userId ?? null,
+    periodKey,
+    supplierCount: supplierInvoices.length,
+    suggestionsCount: suggestions.length,
+    clientCount: clientInvoices.length,
+    accountingCount: accountingEntries.length,
+    supplierTvaSum: roundMad(supplierTvaSum),
+    accounting3455TvaSum: roundMad(accounting3455TvaSum),
+    journalOrSupplierDeductible: roundMad(journalOrSupplierDeductible),
+    suggestionDeductible: roundMad(suggestionDeductible),
+  });
 
   tvaCollectee = roundMad(tvaCollectee);
   tvaDeductible = roundMad(tvaDeductible);
