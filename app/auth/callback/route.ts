@@ -1,6 +1,8 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { createServerClient } from '@supabase/ssr';
 import type { EmailOtpType } from '@supabase/supabase-js';
+import { createServiceRoleClient } from '@/app/lib/atlas-profile-status-server';
+import { ensureUserProfile } from '@/app/lib/ensure-user-profile';
 
 const DEFAULT_NEXT = '/dashboard';
 
@@ -10,12 +12,20 @@ function safeNextPath(raw: string | null): string {
   return next;
 }
 
+function redirectWithCookies(request: NextRequest, url: string, response: NextResponse): NextResponse {
+  const redirect = NextResponse.redirect(url);
+  for (const cookie of response.cookies.getAll()) {
+    redirect.cookies.set(cookie.name, cookie.value);
+  }
+  return redirect;
+}
+
 /**
  * Auth callback for:
  * - Email confirm (token_hash + type=signup) — Confirm Signup template
  * - PKCE OAuth / magic-link code exchange (?code=…)
  *
- * Sets session cookies via @supabase/ssr, then redirects into the app.
+ * Sets session cookies via @supabase/ssr, ensures profiles row, redirects into the app.
  */
 export async function GET(request: NextRequest) {
   const { searchParams, origin } = new URL(request.url);
@@ -32,8 +42,7 @@ export async function GET(request: NextRequest) {
     return NextResponse.redirect(`${origin}/login?error=auth_misconfigured`);
   }
 
-  // Build redirect response first so Set-Cookie from exchange/verify attaches to it.
-  let response = NextResponse.redirect(`${origin}${next}`);
+  let response = NextResponse.next({ request });
 
   const supabase = createServerClient(supabaseUrl, supabaseAnonKey, {
     cookies: {
@@ -44,7 +53,7 @@ export async function GET(request: NextRequest) {
         for (const { name, value } of cookiesToSet) {
           request.cookies.set(name, value);
         }
-        response = NextResponse.redirect(`${origin}${next}`);
+        response = NextResponse.next({ request });
         for (const { name, value, options } of cookiesToSet) {
           response.cookies.set(name, value, options);
         }
@@ -56,18 +65,12 @@ export async function GET(request: NextRequest) {
     if (token_hash && type) {
       const { error } = await supabase.auth.verifyOtp({ type, token_hash });
       if (error) {
-        console.error('[auth/callback] verifyOtp failed', {
-          type,
-          message: error.message,
-        });
+        console.error('[auth/callback] verifyOtp failed', { type, message: error.message });
         return NextResponse.redirect(
           `${origin}/login?error=auth_callback_failed&reason=${encodeURIComponent(error.message)}`,
         );
       }
-      return response;
-    }
-
-    if (code) {
+    } else if (code) {
       const { error } = await supabase.auth.exchangeCodeForSession(code);
       if (error) {
         console.error('[auth/callback] exchangeCodeForSession failed', { message: error.message });
@@ -75,13 +78,33 @@ export async function GET(request: NextRequest) {
           `${origin}/login?error=auth_callback_failed&reason=${encodeURIComponent(error.message)}`,
         );
       }
-      return response;
+    } else {
+      console.warn('[auth/callback] missing code/token_hash', {
+        keys: Array.from(searchParams.keys()),
+      });
+      return NextResponse.redirect(`${origin}/login?error=auth_callback_missing_params`);
     }
 
-    console.warn('[auth/callback] missing code/token_hash', {
-      keys: Array.from(searchParams.keys()),
-    });
-    return NextResponse.redirect(`${origin}/login?error=auth_callback_missing_params`);
+    const { data: userData, error: userError } = await supabase.auth.getUser();
+    if (userError || !userData.user) {
+      console.error('[auth/callback] getUser after exchange failed', userError?.message);
+      return redirectWithCookies(request, `${origin}/login?error=auth_callback_no_user`, response);
+    }
+
+    const admin = createServiceRoleClient(supabaseUrl);
+    if (admin) {
+      const ensured = await ensureUserProfile(admin, userData.user, {
+        activateIfEmailConfirmed: true,
+        source: 'auth/callback',
+      });
+      if (!ensured.ok) {
+        console.warn('[auth/callback] ensureUserProfile failed', ensured.error);
+      }
+    } else {
+      console.warn('[auth/callback] service_role missing — profile not ensured server-side');
+    }
+
+    return redirectWithCookies(request, `${origin}${next}`, response);
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     console.error('[auth/callback] unexpected_error', { message });

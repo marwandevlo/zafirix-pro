@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { atlasDataBackend } from '@/app/lib/atlas-data-source';
 import { getSupabaseServiceRoleClient } from '@/app/lib/supabase-admin';
 import { requireAdmin, writeAdminLog } from '@/app/lib/admin/require-admin';
+import { revalidateAdminSurfaces } from '@/app/lib/admin/revalidate-admin-paths';
 import { isOwnerEmail } from '@/app/lib/owner';
 import { roleGrantsAdminAccess } from '@/app/lib/admin/can-access-admin';
 import { applyAdminProfilePlanToEntitlements } from '@/app/lib/atlas-subscription-sync';
@@ -232,6 +233,8 @@ export async function PATCH(request: NextRequest, ctx: { params: Promise<{ id: s
     details: { updates, prevStatus: prevStatus || null },
   });
 
+  revalidateAdminSurfaces([`/admin/users/${userId}`, '/admin/users']);
+
   const { data: finalProf } = await admin
     .from('profiles')
     .select('id, email, full_name, avatar_url, role, plan, status, created_at, last_login')
@@ -288,6 +291,8 @@ export async function DELETE(request: NextRequest, ctx: { params: Promise<{ id: 
     action: 'USER_DELETED',
     details: {},
   });
+
+  revalidateAdminSurfaces(['/admin/users']);
 
   return NextResponse.json({ ok: true });
 }

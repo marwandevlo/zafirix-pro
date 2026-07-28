@@ -5,6 +5,9 @@ import { requireAdmin } from '@/app/lib/admin/require-admin';
 import { getSupabaseServiceRoleClient } from '@/app/lib/supabase-admin';
 import { getAtlasPlanById } from '@/app/lib/atlas-pricing-plans';
 
+export const dynamic = 'force-dynamic';
+export const revalidate = 0;
+
 /**
  * Admin row shape for /admin/manual-payments.
  * Sourced from public.atlas_payment_requests (same table as /api/payments/manual-request).

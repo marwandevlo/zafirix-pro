@@ -3,6 +3,9 @@ import { atlasDataBackend } from '@/app/lib/atlas-data-source';
 import { getSupabaseServiceRoleClient } from '@/app/lib/supabase-admin';
 import { requireAdmin } from '@/app/lib/admin/require-admin';
 
+export const dynamic = 'force-dynamic';
+export const revalidate = 0;
+
 type SubRowLoose = Record<string, unknown>;
 
 type DbErrorLike = {

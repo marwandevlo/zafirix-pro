@@ -8,6 +8,10 @@ import { requireAdmin } from '@/app/lib/admin/require-admin';
 import { syncProfileEntitlementFromAtlas } from '@/app/lib/atlas-subscription-sync';
 import { getSupabaseServiceRoleClient } from '@/app/lib/supabase-admin';
 import { logAtlasAdminAction } from '@/app/lib/admin/atlas-admin-audit';
+import { revalidateAdminSurfaces } from '@/app/lib/admin/revalidate-admin-paths';
+
+export const dynamic = 'force-dynamic';
+export const revalidate = 0;
 
 function isUuid(value: string): boolean {
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value);
@@ -159,6 +163,8 @@ export async function POST(request: NextRequest) {
     targetId: id,
     metadata: { user_id: userId, plan_id: plan.id, start, end },
   });
+
+  revalidateAdminSurfaces(['/admin/manual-payments', '/admin/payments']);
 
   return NextResponse.json({ ok: true, startDate: start, endDate: end });
 }

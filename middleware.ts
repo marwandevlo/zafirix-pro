@@ -3,7 +3,9 @@ import { createServerClient } from '@supabase/ssr';
 import type { User } from '@supabase/supabase-js';
 import { atlasDataBackend } from '@/app/lib/atlas-data-source';
 import { jwtUserShowsAdmin, roleGrantsAdminAccess } from '@/app/lib/admin/can-access-admin';
+import { ensureUserProfile } from '@/app/lib/ensure-user-profile';
 import {
+  createServiceRoleClient,
   readAuthoritativeProfileStatus,
   warnIfMissingServiceRoleKey,
 } from '@/app/lib/atlas-profile-status-server';
@@ -83,25 +85,72 @@ function applyProfileGate(
   pathname: string,
   normalized: ProfileStatus,
   request: NextRequest,
+  sessionResponse: NextResponse,
 ): NextResponse | null {
   if (!isProfileGateExemptPath(pathname)) {
     if (isPendingStatus(normalized)) {
       const url = request.nextUrl.clone();
       url.pathname = '/pending-approval';
-      return NextResponse.redirect(url);
+      return copySessionCookies(sessionResponse, NextResponse.redirect(url));
     }
     if (isBlockedStatus(normalized)) {
       const url = request.nextUrl.clone();
       url.pathname = '/access-denied';
-      return NextResponse.redirect(url);
+      return copySessionCookies(sessionResponse, NextResponse.redirect(url));
     }
   }
 
   if (pathname === '/pending-approval' && isActiveStatus(normalized)) {
     const url = request.nextUrl.clone();
-    url.pathname = '/';
-    return NextResponse.redirect(url);
+    url.pathname = '/dashboard';
+    return copySessionCookies(sessionResponse, NextResponse.redirect(url));
   }
+
+  return null;
+}
+
+function copySessionCookies(from: NextResponse, to: NextResponse): NextResponse {
+  for (const cookie of from.cookies.getAll()) {
+    to.cookies.set(cookie.name, cookie.value);
+  }
+  return to;
+}
+
+async function resolveProfileStatusForGate(
+  user: User,
+  supabaseUrl: string,
+  sessionClient: ReturnType<typeof createServerClient>,
+): Promise<ProfileStatus | null> {
+  let statusRead = await readAuthoritativeProfileStatus(user.id, {
+    supabaseUrl,
+    sessionClient,
+    context: 'middleware.profileGate',
+  });
+
+  const needsEnsure =
+    statusRead.normalized === null ||
+    (statusRead.normalized === 'pending' && Boolean(user.email_confirmed_at));
+
+  if (needsEnsure) {
+    const admin = createServiceRoleClient(supabaseUrl);
+    if (admin) {
+      await ensureUserProfile(admin, user, {
+        activateIfEmailConfirmed: true,
+        source: 'middleware.profileGate',
+      });
+      statusRead = await readAuthoritativeProfileStatus(user.id, {
+        supabaseUrl,
+        sessionClient,
+        context: 'middleware.profileGate.retry',
+      });
+    }
+  }
+
+  if (statusRead.normalized !== null) return statusRead.normalized;
+  if (statusRead.raw !== null) return normalizeStatus(statusRead.raw);
+
+  // Authenticated + email confirmed but no profile row yet — allow app access.
+  if (user.email_confirmed_at) return 'active';
 
   return null;
 }
@@ -151,20 +200,26 @@ export async function middleware(request: NextRequest) {
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
   const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
 
-  const response = NextResponse.next();
+  let sessionResponse = NextResponse.next({ request });
 
   const supabase = createServerClient(supabaseUrl, supabaseAnonKey, {
     cookies: {
       getAll: () => request.cookies.getAll(),
       setAll: (cookiesToSet) => {
+        for (const { name, value } of cookiesToSet) {
+          request.cookies.set(name, value);
+        }
+        sessionResponse = NextResponse.next({ request });
         for (const { name, value, options } of cookiesToSet) {
-          response.cookies.set(name, value, options);
+          sessionResponse.cookies.set(name, value, options);
         }
       },
     },
   });
 
-  let { data } = await supabase.auth.getUser();
+  // Refresh session — keeps server/middleware cookies aligned with @supabase/ssr.
+  await supabase.auth.getSession();
+  const { data } = await supabase.auth.getUser();
   let user = data.user;
 
   if (!user && pathname.startsWith('/api/documents/')) {
@@ -192,7 +247,7 @@ export async function middleware(request: NextRequest) {
       );
     }
     const url = request.nextUrl.clone();
-    url.pathname = pathname.startsWith('/admin') ? '/login' : '/landing';
+    url.pathname = pathname.startsWith('/admin') || pathname === '/dashboard' ? '/login' : '/landing';
     url.searchParams.set('next', pathname);
     return NextResponse.redirect(url);
   }
@@ -205,18 +260,10 @@ export async function middleware(request: NextRequest) {
 
   warnIfMissingServiceRoleKey('middleware.profileGate');
 
-  const statusRead = await readAuthoritativeProfileStatus(user.id, {
-    supabaseUrl,
-    sessionClient: supabase,
-    context: `middleware:${pathname}`,
-  });
+  const normalizedStatus = await resolveProfileStatusForGate(user, supabaseUrl, supabase);
 
-  if (statusRead.normalized !== null) {
-    const gateRedirect = applyProfileGate(pathname, statusRead.normalized, request);
-    if (gateRedirect) return gateRedirect;
-  } else if (statusRead.raw !== null) {
-    const normalized = normalizeStatus(statusRead.raw);
-    const gateRedirect = applyProfileGate(pathname, normalized, request);
+  if (normalizedStatus !== null) {
+    const gateRedirect = applyProfileGate(pathname, normalizedStatus, request, sessionResponse);
     if (gateRedirect) return gateRedirect;
   }
 
@@ -224,11 +271,11 @@ export async function middleware(request: NextRequest) {
     if (!(await userHasAdminAccess(user, supabaseUrl))) {
       const url = request.nextUrl.clone();
       url.pathname = '/access-denied';
-      return NextResponse.redirect(url);
+      return copySessionCookies(sessionResponse, NextResponse.redirect(url));
     }
   }
 
-  return response;
+  return sessionResponse;
 }
 
 export const config = {

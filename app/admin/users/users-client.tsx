@@ -1,7 +1,8 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import AdminShell from '@/app/admin/_components/AdminShell';
 import { isAtlasSupabaseDataEnabled } from '@/app/lib/atlas-data-source';
 import { isOwnerEmail, OWNER_EMAIL } from '@/app/lib/owner';
@@ -19,6 +20,7 @@ type AdminUserRow = {
 };
 
 export default function UsersAdminClient() {
+  const router = useRouter();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [rows, setRows] = useState<AdminUserRow[]>([]);
@@ -28,68 +30,70 @@ export default function UsersAdminClient() {
   const [planFilter, setPlanFilter] = useState<string>('all');
   const [statusFilter, setStatusFilter] = useState<string>('all');
 
-  useEffect(() => {
-    let cancelled = false;
-
-    const load = async () => {
-      setLoading(true);
-      setError('');
-      setWarning('');
-      try {
-        if (!isAtlasSupabaseDataEnabled()) {
-          if (!cancelled) {
-            setRows([]);
-            setWarning('Local mode: users list is not available.');
-          }
-          return;
+  const loadUsers = useCallback(async (cancelledRef?: { current: boolean }) => {
+    setLoading(true);
+    setError('');
+    setWarning('');
+    try {
+      if (!isAtlasSupabaseDataEnabled()) {
+        if (!cancelledRef?.current) {
+          setRows([]);
+          setWarning('Local mode: users list is not available.');
         }
-
-        const { data } = await supabase.auth.getSession();
-        const token = data.session?.access_token ?? '';
-        if (!token) return;
-
-        const sp = new URLSearchParams();
-        if (q.trim()) sp.set('q', q.trim());
-        if (roleFilter !== 'all') sp.set('role', roleFilter);
-        if (planFilter !== 'all') sp.set('plan', planFilter);
-        if (statusFilter !== 'all') sp.set('status', statusFilter);
-        const url = `/api/admin/users${sp.toString() ? `?${sp.toString()}` : ''}`;
-
-        const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
-        const json: unknown = await res.json().catch(() => ({}));
-        if (!res.ok) {
-          const msg =
-            typeof json === 'object' && json && 'error' in json && typeof (json as { error?: unknown }).error === 'string'
-              ? String((json as { error?: unknown }).error)
-              : 'forbidden';
-          setError(msg);
-          return;
-        }
-
-        if (!cancelled) {
-          const users =
-            typeof json === 'object' && json && 'users' in json && Array.isArray((json as { users?: unknown }).users)
-              ? ((json as { users: unknown[] }).users as AdminUserRow[])
-              : [];
-          setRows(users);
-          const warn =
-            typeof json === 'object' && json && 'warning' in json && typeof (json as { warning?: unknown }).warning === 'string'
-              ? String((json as { warning?: unknown }).warning)
-              : '';
-          if (warn) setWarning(warn);
-        }
-      } catch (e) {
-        if (!cancelled) setError(e instanceof Error ? e.message : 'Erreur');
-      } finally {
-        if (!cancelled) setLoading(false);
+        return;
       }
-    };
 
-    void load();
-    return () => {
-      cancelled = true;
-    };
+      const { data } = await supabase.auth.getSession();
+      const token = data.session?.access_token ?? '';
+      if (!token) return;
+
+      const sp = new URLSearchParams();
+      if (q.trim()) sp.set('q', q.trim());
+      if (roleFilter !== 'all') sp.set('role', roleFilter);
+      if (planFilter !== 'all') sp.set('plan', planFilter);
+      if (statusFilter !== 'all') sp.set('status', statusFilter);
+      const url = `/api/admin/users${sp.toString() ? `?${sp.toString()}` : ''}`;
+
+      const res = await fetch(url, {
+        headers: { Authorization: `Bearer ${token}` },
+        cache: 'no-store',
+      });
+      const json: unknown = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        const msg =
+          typeof json === 'object' && json && 'error' in json && typeof (json as { error?: unknown }).error === 'string'
+            ? String((json as { error?: unknown }).error)
+            : 'forbidden';
+        if (!cancelledRef?.current) setError(msg);
+        return;
+      }
+
+      if (!cancelledRef?.current) {
+        const users =
+          typeof json === 'object' && json && 'users' in json && Array.isArray((json as { users?: unknown }).users)
+            ? ((json as { users: unknown[] }).users as AdminUserRow[])
+            : [];
+        setRows(users);
+        const warn =
+          typeof json === 'object' && json && 'warning' in json && typeof (json as { warning?: unknown }).warning === 'string'
+            ? String((json as { warning?: unknown }).warning)
+            : '';
+        if (warn) setWarning(warn);
+      }
+    } catch (e) {
+      if (!cancelledRef?.current) setError(e instanceof Error ? e.message : 'Erreur');
+    } finally {
+      if (!cancelledRef?.current) setLoading(false);
+    }
   }, [planFilter, q, roleFilter, statusFilter]);
+
+  useEffect(() => {
+    const cancelled = { current: false };
+    void loadUsers(cancelled);
+    return () => {
+      cancelled.current = true;
+    };
+  }, [loadUsers]);
 
   const visible = useMemo(() => rows, [rows]);
 
@@ -109,15 +113,36 @@ export default function UsersAdminClient() {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
         body: JSON.stringify(patch),
+        cache: 'no-store',
       });
-      const json: unknown = await res.json().catch(() => ({}));
-      const msg =
-        typeof json === 'object' && json && 'error' in json && typeof (json as { error?: unknown }).error === 'string'
-          ? String((json as { error?: unknown }).error)
-          : 'error';
+      const json = (await res.json().catch(() => ({}))) as {
+        error?: string;
+        message?: string;
+        user?: AdminUserRow & { full_name?: string };
+      };
+      const msg = json.message || json.error || 'error';
       if (!res.ok) throw new Error(msg);
-      // Reload list (keeps filters/search applied)
-      return;
+
+      if (json.user) {
+        setRows((prev) =>
+          prev.map((r) =>
+            r.id === id
+              ? {
+                  ...r,
+                  role: json.user?.role ?? r.role,
+                  plan: json.user?.plan ?? r.plan,
+                  status: json.user?.status ?? r.status,
+                  email: json.user?.email ?? r.email,
+                }
+              : r,
+          ),
+        );
+      } else {
+        setRows((prev) => prev.map((r) => (r.id === id ? { ...r, ...patch } : r)));
+      }
+
+      router.refresh();
+      await loadUsers();
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Erreur');
     } finally {
@@ -146,6 +171,7 @@ export default function UsersAdminClient() {
           : 'error';
       if (!res.ok) throw new Error(msg);
       setRows((prev) => prev.filter((r) => r.id !== id));
+      router.refresh();
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Erreur');
     } finally {

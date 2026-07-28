@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import AdminShell from '@/app/admin/_components/AdminShell';
 import { isAtlasSupabaseDataEnabled } from '@/app/lib/atlas-data-source';

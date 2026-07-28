@@ -3,6 +3,9 @@ import { atlasDataBackend } from '@/app/lib/atlas-data-source';
 import { requireAdmin } from '@/app/lib/admin/require-admin';
 import { getSupabaseServiceRoleClient } from '@/app/lib/supabase-admin';
 
+export const dynamic = 'force-dynamic';
+export const revalidate = 0;
+
 /**
  * Lists public.atlas_payment_requests for /admin/payments.
  * Uses service-role so pending manual checkouts are visible regardless of RLS.

@@ -1,6 +1,7 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { useRouter } from 'next/navigation';
 import { Check, RefreshCw, Search, X } from 'lucide-react';
 import { supabase } from '@/app/lib/supabase';
 import type { ManualSubscriptionRow } from '@/app/api/admin/manual-subscriptions/route';
@@ -41,6 +42,7 @@ function isPendingRow(status: string): boolean {
 }
 
 export default function ManualPaymentsAdminClient() {
+  const router = useRouter();
   const [rows, setRows] = useState<ManualSubscriptionRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -63,6 +65,7 @@ export default function ManualPaymentsAdminClient() {
       if (q.trim()) params.set('q', q.trim());
       const res = await fetch(`/api/admin/manual-subscriptions?${params.toString()}`, {
         headers: { Authorization: `Bearer ${token}` },
+        cache: 'no-store',
       });
       const json = (await res.json().catch(() => ({}))) as {
         rows?: ManualSubscriptionRow[];
@@ -106,6 +109,7 @@ export default function ManualPaymentsAdminClient() {
         setError(json.message || json.error || 'Action impossible');
         return;
       }
+      router.refresh();
       await load();
     } finally {
       setBusyId(null);

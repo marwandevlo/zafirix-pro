@@ -3,6 +3,10 @@ import { atlasDataBackend } from '@/app/lib/atlas-data-source';
 import { requireAdmin } from '@/app/lib/admin/require-admin';
 import { getSupabaseServiceRoleClient } from '@/app/lib/supabase-admin';
 import { logAtlasAdminAction } from '@/app/lib/admin/atlas-admin-audit';
+import { revalidateAdminSurfaces } from '@/app/lib/admin/revalidate-admin-paths';
+
+export const dynamic = 'force-dynamic';
+export const revalidate = 0;
 
 function isUuid(value: string): boolean {
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value);
@@ -58,6 +62,8 @@ export async function POST(request: NextRequest) {
     targetId: id,
     metadata: { user_id: (updated[0] as { user_id?: string }).user_id ?? null },
   });
+
+  revalidateAdminSurfaces(['/admin/manual-payments', '/admin/payments']);
 
   return NextResponse.json({ ok: true });
 }
