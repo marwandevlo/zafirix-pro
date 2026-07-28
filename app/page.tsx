@@ -40,6 +40,7 @@ import { AIInsightsWidget } from '@/app/components/assistant/AIInsightsWidget';
 import { FiscalClosingAssistantWidget } from '@/app/components/assistant/FiscalClosingAssistantWidget';
 import { ExecutiveSummaryWidget } from '@/app/components/assistant/ExecutiveSummaryWidget';
 import { CompanySwitcher } from '@/app/components/shell/CompanySwitcher';
+import { CompanyMasterExportMenu } from '@/app/components/company/CompanyMasterExportMenu';
 import { ConsolidatedDashboardWidget } from '@/app/components/cabinet/ConsolidatedDashboardWidget';
 import { SubscriptionWidget } from '@/app/components/billing/SubscriptionWidget';
 
@@ -161,6 +162,7 @@ export default function Home() {
           </div>
           <div className="flex items-center gap-2">
             <CompanySwitcher className="hidden sm:block" />
+            <CompanyMasterExportMenu />
             <button onClick={() => navigate('/consultant')} className="hidden sm:flex items-center gap-2 px-3 py-2 bg-indigo-50 text-indigo-600 rounded-lg text-sm font-medium hover:bg-indigo-100 transition-colors">
               <Brain size={16} />
               <span className="hidden md:inline">{t('Consultant IA', 'المستشار')}</span>
