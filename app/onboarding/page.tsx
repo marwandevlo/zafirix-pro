@@ -37,23 +37,38 @@ export default function OnboardingPage() {
         return;
       }
 
-      const token = session.access_token ?? '';
-      const profile = await fetchProfileViaApi(token, {
-        userId: session.user.id,
-        email: session.user.email ?? '',
-      });
+      // Always default to blank — never block the user if /api/profile fails.
+      let nextFullName = '';
+      let nextPhone = '';
+      let nextCompany = '';
+
+      try {
+        const token = session.access_token ?? '';
+        const profile = await fetchProfileViaApi(token, {
+          userId: session.user.id,
+          email: session.user.email ?? '',
+        });
+
+        if (cancelled) return;
+
+        const existingName = String(profile?.full_name ?? '').trim();
+        if (existingName) {
+          router.push('/');
+          return;
+        }
+
+        nextFullName = existingName;
+        nextPhone = String(profile?.phone ?? '').trim();
+        nextCompany = String(profile?.company_name ?? '').trim();
+      } catch {
+        // Silent fallback: empty form, no error banner.
+      }
 
       if (cancelled) return;
 
-      const existingName = profile.full_name.trim();
-      if (existingName) {
-        router.push('/');
-        return;
-      }
-
-      setFullName(existingName);
-      setPhone(profile.phone.trim());
-      setCompany(profile.company_name.trim());
+      setFullName(nextFullName);
+      setPhone(nextPhone);
+      setCompany(nextCompany);
       setLoading(false);
     };
 
