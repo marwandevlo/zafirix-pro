@@ -68,16 +68,17 @@ function extractStr(field?: { value?: string | number | null; user_corrected_val
 
 function parseDate(dateStr: string): string | null {
   if (!dateStr) return null;
-  const parts = dateStr.match(/(\d{1,2})[\/\-\.](\d{1,2})[\/\-\.](\d{2,4})/);
+  const trimmed = dateStr.trim();
+  if (/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) return trimmed;
+  const parts = trimmed.match(/(\d{1,2})[\/\-\.](\d{1,2})[\/\-\.](\d{2,4})/);
   if (!parts) return null;
   const [, d, m, y] = parts;
   const year = y.length === 2 ? `20${y}` : y;
   return `${year}-${m.padStart(2, '0')}-${d.padStart(2, '0')}`;
 }
 
-function periodKey(dateYmd: string | null, regime: string): string {
-  const ref = dateYmd ? new Date(`${dateYmd}T12:00:00`) : new Date();
-  return currentPeriodKey(regime, ref);
+function periodKey(dateYmd: string, regime: string): string {
+  return currentPeriodKey(regime, new Date(`${dateYmd}T12:00:00`));
 }
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -128,11 +129,13 @@ export function buildJournalLines(
   extraction: AtlasStructuredExtraction,
   isPurchase: boolean,
   invoiceId: string,
+  uploadDateYmd?: string | null,
 ): AccountingJournalLine[] {
   const supplierName = extractStr(extraction.supplier_name) || 'Fournisseur';
   const invoiceNum = extractStr(extraction.invoice_number) || '—';
   const invoiceDateRaw = extractStr(extraction.invoice_date);
-  const entryDate = parseDate(invoiceDateRaw) ?? new Date().toISOString().slice(0, 10);
+  const entryDate = parseDate(invoiceDateRaw) ?? parseDate(uploadDateYmd ?? '') ?? null;
+  if (!entryDate) return [];
   const ht = extractNum(extraction.subtotal_ht);
   const tva = extractNum(extraction.tva_amount);
   const ttc = extractNum(extraction.total_ttc) || (ht + tva);
@@ -219,6 +222,7 @@ export function buildTvaSuggestion(
   isPurchase: boolean,
   invoiceId: string,
   regime: string,
+  uploadDateYmd?: string | null,
 ): TvaSuggestion | null {
   const tva = extractNum(extraction.tva_amount);
   if (tva <= 0) return null;
@@ -226,7 +230,8 @@ export function buildTvaSuggestion(
   const ht = extractNum(extraction.subtotal_ht);
   const rate = extractNum(extraction.tva_rate) || (ht > 0 ? Math.round(tva / ht * 100) : 20);
   const invoiceDateRaw = extractStr(extraction.invoice_date);
-  const invoiceDateYmd = parseDate(invoiceDateRaw);
+  const invoiceDateYmd = parseDate(invoiceDateRaw) ?? parseDate(uploadDateYmd ?? '') ?? null;
+  if (!invoiceDateYmd) return null;
   const pk = periodKey(invoiceDateYmd, regime);
 
   return {

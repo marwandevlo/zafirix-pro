@@ -57,7 +57,14 @@ type DocumentRow = {
   document_type: string | null;
   metadata: unknown;
   content: unknown;
+  created_at?: string | null;
 };
+
+function uploadDateFromDocument(row: DocumentRow): string | null {
+  if (!row.created_at) return null;
+  const ymd = String(row.created_at).slice(0, 10);
+  return /^\d{4}-\d{2}-\d{2}$/.test(ymd) ? ymd : null;
+}
 
 function rowToAtlasDocument(row: DocumentRow): AtlasDocument {
   const metadata = asRecord(row.metadata) ?? undefined;
@@ -127,10 +134,19 @@ function validateStructuredExtraction(
 
 function parseDate(dateStr: string | null): string | null {
   if (!dateStr) return null;
-  const parts = dateStr.match(/(\d{1,2})[\/\-\.](\d{1,2})[\/\-\.](\d{2,4})/);
+  const trimmed = dateStr.trim();
+  if (/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) return trimmed;
+  const parts = trimmed.match(/(\d{1,2})[\/\-\.](\d{1,2})[\/\-\.](\d{2,4})/);
   if (!parts) return null;
   const [, d, m, y] = parts;
   return `${y.length === 2 ? `20${y}` : y}-${m.padStart(2, '0')}-${d.padStart(2, '0')}`;
+}
+
+function resolvePersistedInvoiceDate(
+  extraction: AtlasStructuredExtraction,
+  uploadDateYmd: string | null,
+): string | null {
+  return parseDate(extractStr(extraction.invoice_date)) ?? uploadDateYmd;
 }
 
 async function findExistingSupplierInvoice(
@@ -196,10 +212,10 @@ async function registerSinglePurchaseInvoice(
   documentType: AtlasDocumentType | null,
   extraction: AtlasStructuredExtraction,
   regime: string,
+  uploadDateYmd: string | null,
   sourcePage?: number,
 ): Promise<{ invoiceId: string; journalLineCount: number; tvaAmount: number }> {
-  const parsedDate =
-    parseDate(extractStr(extraction.invoice_date)) ?? new Date().toISOString().slice(0, 10);
+  const parsedDate = resolvePersistedInvoiceDate(extraction, uploadDateYmd);
   const amountHt = extractNum(extraction.subtotal_ht);
   const vatAmount = extractNum(extraction.tva_amount);
   const amountTtc = extractNum(extraction.total_ttc) || amountHt + vatAmount;
@@ -248,14 +264,21 @@ async function registerSinglePurchaseInvoice(
   const invoiceId = String(inv?.id);
 
   const isPurchase = documentType !== 'sales_invoice';
-  const journalLines = buildJournalLines(documentId, extraction, isPurchase, invoiceId);
+  const journalLines = buildJournalLines(documentId, extraction, isPurchase, invoiceId, uploadDateYmd);
   let journalLineCount = 0;
   if (journalLines.length > 0) {
     const jr = await persistJournalLines(admin, userId, companyId, journalLines);
     if (jr.ok) journalLineCount = jr.ids.length;
   }
 
-  const tvaSuggestion = buildTvaSuggestion(documentId, extraction, isPurchase, invoiceId, regime);
+  const tvaSuggestion = buildTvaSuggestion(
+    documentId,
+    extraction,
+    isPurchase,
+    invoiceId,
+    regime,
+    uploadDateYmd,
+  );
   let tvaAmount = 0;
   if (tvaSuggestion) {
     const tr = await persistTvaSuggestion(admin, userId, companyId, tvaSuggestion);
@@ -272,9 +295,12 @@ async function registerSingleSalesInvoice(
   documentId: string,
   extraction: AtlasStructuredExtraction,
   regime: string,
+  uploadDateYmd: string | null,
 ): Promise<{ invoiceId: string; journalLineCount: number; tvaAmount: number }> {
-  const parsedDate =
-    parseDate(extractStr(extraction.invoice_date)) ?? new Date().toISOString().slice(0, 10);
+  const parsedDate = resolvePersistedInvoiceDate(extraction, uploadDateYmd);
+  if (!parsedDate) {
+    throw new Error('Sales invoice requires OCR invoice_date or document upload date');
+  }
   const dueDate = parseDate(extractStr(extraction.due_date)) ?? parsedDate;
   const amountHt = extractNum(extraction.subtotal_ht);
   const vatRate = extractNum(extraction.tva_rate) || 20;
@@ -317,14 +343,21 @@ async function registerSingleSalesInvoice(
   if (error) throw new Error(`Sales invoice creation failed: ${error.message}`);
   const invoiceId = String(inv?.id);
 
-  const journalLines = buildJournalLines(documentId, extraction, false, invoiceId);
+  const journalLines = buildJournalLines(documentId, extraction, false, invoiceId, uploadDateYmd);
   let journalLineCount = 0;
   if (journalLines.length > 0) {
     const jr = await persistJournalLines(admin, userId, companyId, journalLines);
     if (jr.ok) journalLineCount = jr.ids.length;
   }
 
-  const tvaSuggestion = buildTvaSuggestion(documentId, extraction, false, invoiceId, regime);
+  const tvaSuggestion = buildTvaSuggestion(
+    documentId,
+    extraction,
+    false,
+    invoiceId,
+    regime,
+    uploadDateYmd,
+  );
   let tvaAmount = 0;
   if (tvaSuggestion) {
     const tr = await persistTvaSuggestion(admin, userId, companyId, tvaSuggestion);
@@ -342,6 +375,7 @@ async function registerInvoiceFromExtraction(
   docType: AtlasDocumentType | null,
   extraction: AtlasStructuredExtraction,
   regime: string,
+  uploadDateYmd: string | null,
   sourcePage?: number,
 ): Promise<{ invoiceId: string; journalLineCount: number; tvaAmount: number }> {
   if (isPurchaseDocument(docType, extraction)) {
@@ -353,10 +387,19 @@ async function registerInvoiceFromExtraction(
       docType,
       extraction,
       regime,
+      uploadDateYmd,
       sourcePage,
     );
   }
-  return registerSingleSalesInvoice(admin, userId, companyId, documentId, extraction, regime);
+  return registerSingleSalesInvoice(
+    admin,
+    userId,
+    companyId,
+    documentId,
+    extraction,
+    regime,
+    uploadDateYmd,
+  );
 }
 
 function resolveInvoicesToRegister(
@@ -376,7 +419,7 @@ export async function registerValidatedDocumentRecords(
 ): Promise<DocumentValidationResult> {
   const { data: row, error: fetchErr } = await admin
     .from('atlas_documents')
-    .select('id, company_id, processing_status, validation_status, document_type, metadata, content')
+    .select('id, company_id, processing_status, validation_status, document_type, metadata, content, created_at')
     .eq('id', documentId)
     .eq('user_id', userId)
     .maybeSingle();
@@ -419,6 +462,7 @@ export async function registerValidatedDocumentRecords(
     (docRow.document_type as AtlasDocumentType | null) ??
     (classificationFromMetadata(metadata)?.detected_type ?? 'purchase_invoice');
   const invoicesPlan = resolveInvoicesToRegister(atlasDoc, structured);
+  const uploadDateYmd = uploadDateFromDocument(docRow);
 
   const invoiceIds: string[] = [];
   let journalLineCount = 0;
@@ -471,6 +515,7 @@ export async function registerValidatedDocumentRecords(
           docType,
           extraction,
           regime,
+          uploadDateYmd,
         );
         invoiceIds.push(r.invoiceId);
         journalLineCount += r.journalLineCount;
@@ -526,6 +571,7 @@ export async function registerValidatedDocumentRecords(
           docType,
           extraction,
           regime,
+          uploadDateYmd,
           isPurchase ? sourcePage : undefined,
         );
         invoiceIds.push(r.invoiceId);

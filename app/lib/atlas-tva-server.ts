@@ -105,21 +105,39 @@ function isTvaDeductibleAccount(compte: string): boolean {
   return c.startsWith('4456') || c.startsWith('3455') || c.startsWith('3456');
 }
 
-/** Prefer invoice date; fall back to created/updated, then today so rows stay in the active period. */
-function resolveEffectiveDateYmd(
-  primary: string | null | undefined,
+/** Parse a date string to YYYY-MM-DD without inventing today's date. */
+function parseStrictDateYmd(raw: string | null | undefined): string | null {
+  if (!raw) return null;
+  const trimmed = String(raw).trim();
+  if (/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) return trimmed;
+  const parts = trimmed.match(/(\d{1,2})[\/\-\.](\d{1,2})[\/\-\.](\d{2,4})/);
+  if (!parts) return null;
+  const [, d, m, y] = parts;
+  const year = y.length === 2 ? `20${y}` : y;
+  return `${year}-${m.padStart(2, '0')}-${d.padStart(2, '0')}`;
+}
+
+/**
+ * Period assignment date: extracted invoice date first, then upload created_at only.
+ * Never defaults to today or the active quarter.
+ */
+function resolveInvoicePeriodDateYmd(
+  invoiceDate: string | null | undefined,
   createdAt: string | null | undefined,
-  updatedAt: string | null | undefined,
-  opts?: { fallbackToday?: boolean },
-): string {
-  const candidates = [primary, createdAt, updatedAt];
-  for (const raw of candidates) {
-    if (!raw) continue;
-    const ymd = String(raw).slice(0, 10);
-    if (/^\d{4}-\d{2}-\d{2}$/.test(ymd)) return ymd;
-  }
-  if (opts?.fallbackToday) return new Date().toISOString().slice(0, 10);
-  return '';
+): string | null {
+  return parseStrictDateYmd(invoiceDate) ?? parseStrictDateYmd(createdAt);
+}
+
+function resolveAccountingEntryDateYmd(
+  entryDate: string | null | undefined,
+  entryJsonDate: string | null | undefined,
+  createdAt: string | null | undefined,
+): string | null {
+  return (
+    parseStrictDateYmd(entryDate) ??
+    parseStrictDateYmd(entryJsonDate) ??
+    parseStrictDateYmd(createdAt)
+  );
 }
 
 function isIncludedClientInvoiceStatus(status: string | null | undefined): boolean {
@@ -236,7 +254,6 @@ export async function computeTvaPeriod(
   userId?: string,
 ): Promise<AtlasTvaPeriodCalculation> {
   const { periodStart, periodEnd, periodLabel } = parsePeriodBounds(periodKey, periodType);
-  const dateOpts = { fallbackToday: true };
 
   const [clientInvoices, supplierInvoices, accountingEntries, suggestions] = await Promise.all([
     fetchCompanyScopedRows<InvoiceRow>(
@@ -291,8 +308,8 @@ export async function computeTvaPeriod(
   for (const row of clientInvoices) {
     if (!isIncludedClientInvoiceStatus(row.status)) continue;
 
-    const issueDate = resolveEffectiveDateYmd(row.issue_date, row.created_at, row.updated_at, dateOpts);
-    if (!inPeriod(issueDate, periodStart, periodEnd)) continue;
+    const issueDate = resolveInvoicePeriodDateYmd(row.issue_date, row.created_at);
+    if (!issueDate || !inPeriod(issueDate, periodStart, periodEnd)) continue;
 
     const amountHT = Number(row.amount_ht ?? 0);
     const vatAmount = Number(row.vat_amount ?? 0);
@@ -321,8 +338,8 @@ export async function computeTvaPeriod(
     if (String(row.status).toLowerCase() === 'cancelled') continue;
     if (!isIncludedSupplierValidationStatus(row.validation_status)) continue;
 
-    const issueDate = resolveEffectiveDateYmd(row.invoice_date, row.created_at, row.updated_at, dateOpts);
-    if (!inPeriod(issueDate, periodStart, periodEnd)) continue;
+    const issueDate = resolveInvoicePeriodDateYmd(row.invoice_date, row.created_at);
+    if (!issueDate || !inPeriod(issueDate, periodStart, periodEnd)) continue;
 
     const amountHT = Number(row.amount_ht ?? 0);
     const vatAmount = Number(row.vat_amount ?? 0);
@@ -353,10 +370,8 @@ export async function computeTvaPeriod(
     const linkedId = row.source_invoice_id ? String(row.source_invoice_id) : '';
     if (linkedId && countedInvoiceIds.has(linkedId)) continue;
 
-    const issueDate = resolveEffectiveDateYmd(row.invoice_date, row.created_at, row.updated_at, dateOpts);
-    const inPeriodByDate = inPeriod(issueDate, periodStart, periodEnd);
-    const inPeriodByKey = String(row.period_key) === periodKey;
-    if (!inPeriodByDate && !inPeriodByKey) continue;
+    const issueDate = resolveInvoicePeriodDateYmd(row.invoice_date, row.created_at);
+    if (!issueDate || !inPeriod(issueDate, periodStart, periodEnd)) continue;
 
     const vatAmount = Number(row.amount ?? 0);
     const amountHT = Number(row.base_ht ?? 0);
@@ -378,7 +393,7 @@ export async function computeTvaPeriod(
       kind: isDeductible ? 'purchase' : 'sale',
       reference: String(row.invoice_number ?? row.source_document_id.slice(0, 8)),
       counterparty: String(row.supplier_name ?? 'Suggestion TVA'),
-      issueDate: issueDate || periodStart,
+      issueDate,
       amountHT,
       vatAmount,
       totalTTC: amountHT + vatAmount,
@@ -397,10 +412,12 @@ export async function computeTvaPeriod(
     const entry = asRecord(row.entry_json);
     if (!entry) continue;
 
-    const date =
-      resolveEffectiveDateYmd(row.entry_date, row.created_at, row.updated_at, dateOpts) ||
-      String(entry.date ?? '').slice(0, 10);
-    if (!inPeriod(date, periodStart, periodEnd)) continue;
+    const date = resolveAccountingEntryDateYmd(
+      row.entry_date,
+      String(entry.date ?? ''),
+      row.created_at,
+    );
+    if (!date || !inPeriod(date, periodStart, periodEnd)) continue;
 
     const compte = String(entry.compte ?? '');
     const debit = Number(entry.debit ?? 0);
@@ -415,7 +432,7 @@ export async function computeTvaPeriod(
         kind: 'sale',
         reference: compte,
         counterparty: libelle,
-        issueDate: date || periodStart,
+        issueDate: date,
         amountHT: 0,
         vatAmount: credit,
         totalTTC: credit,
@@ -429,7 +446,7 @@ export async function computeTvaPeriod(
         kind: 'purchase',
         reference: compte,
         counterparty: libelle,
-        issueDate: date || periodStart,
+        issueDate: date,
         amountHT: 0,
         vatAmount: debit,
         totalTTC: debit,
