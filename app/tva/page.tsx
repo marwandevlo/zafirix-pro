@@ -323,7 +323,8 @@ export default function TVAPage() {
                   <ul className="space-y-1 text-xs">
                     <li>{current?.salesCount ?? 0} facture(s) client</li>
                     <li>{current?.purchasesCount ?? 0} facture(s) fournisseur</li>
-                    <li>Écritures comptables 4455 / 4456</li>
+                    <li>Écritures comptables 4455 / 4456 / 3455</li>
+                    <li>Suggestions TVA (Documents IA)</li>
                   </ul>
                   <p className="text-xs text-gray-400 mt-3">
                     Validez toujours avec votre expert-comptable avant dépôt sur SIMPL-TVA.

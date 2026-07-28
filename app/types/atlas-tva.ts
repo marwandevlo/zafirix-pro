@@ -11,7 +11,7 @@ export type AtlasTvaLineItem = {
   vatAmount: number;
   totalTTC: number;
   vatRate?: number;
-  source: 'invoice' | 'supplier_invoice' | 'accounting_entry';
+  source: 'invoice' | 'supplier_invoice' | 'accounting_entry' | 'tva_suggestion';
 };
 
 export type AtlasTvaPeriodCalculation = {

@@ -101,7 +101,33 @@ function isTvaCollecteeAccount(compte: string): boolean {
 
 function isTvaDeductibleAccount(compte: string): boolean {
   const c = compte.replace(/\s/g, '');
-  return c.startsWith('4456') || c.startsWith('3456');
+  // PCGE: 4456 (TVA récupérable), 3455x (TVA déductible — used by Documents IA journal lines)
+  return c.startsWith('4456') || c.startsWith('3455') || c.startsWith('3456');
+}
+
+/** Prefer invoice date; fall back to created/updated so OCR-validated rows are not dropped. */
+function resolveEffectiveDateYmd(
+  primary: string | null | undefined,
+  createdAt: string | null | undefined,
+  updatedAt: string | null | undefined,
+): string {
+  const candidates = [primary, createdAt, updatedAt];
+  for (const raw of candidates) {
+    if (!raw) continue;
+    const ymd = String(raw).slice(0, 10);
+    if (/^\d{4}-\d{2}-\d{2}$/.test(ymd)) return ymd;
+  }
+  return '';
+}
+
+function isIncludedInvoiceValidationStatus(status: string | null | undefined): boolean {
+  const s = String(status ?? 'draft').toLowerCase();
+  return !['rejected', 'archived', 'cancelled'].includes(s);
+}
+
+function isIncludedTvaSuggestionStatus(status: string | null | undefined): boolean {
+  const s = String(status ?? 'pending').toLowerCase();
+  return !['rejected'].includes(s);
 }
 
 type InvoiceRow = {
@@ -110,10 +136,13 @@ type InvoiceRow = {
   client_name: string;
   issue_date: string;
   status: string;
+  validation_status?: string | null;
   amount_ht: number | string | null;
   vat_amount: number | string | null;
   total_ttc: number | string | null;
   vat_rate: number | string | null;
+  created_at?: string | null;
+  updated_at?: string | null;
 };
 
 type SupplierRow = {
@@ -122,16 +151,40 @@ type SupplierRow = {
   invoice_number: string | null;
   invoice_date: string | null;
   status: string;
+  validation_status?: string | null;
   amount_ht: number | string | null;
   vat_amount: number | string | null;
   amount_ttc: number | string | null;
   vat_rate: number | string | null;
+  created_at?: string | null;
+  updated_at?: string | null;
 };
 
 type AccountingRow = {
   id: string;
   entry_json: unknown;
   entry_date: string | null;
+  source_invoice_id?: string | null;
+  validation_status?: string | null;
+  created_at?: string | null;
+  updated_at?: string | null;
+};
+
+type TvaSuggestionRow = {
+  id: string;
+  tva_type: string;
+  amount: number | string | null;
+  rate: number | string | null;
+  base_ht: number | string | null;
+  period_key: string;
+  invoice_date: string | null;
+  invoice_number: string | null;
+  supplier_name: string | null;
+  source_document_id: string;
+  source_invoice_id: string | null;
+  validation_status: string;
+  created_at?: string | null;
+  updated_at?: string | null;
 };
 
 export async function computeTvaPeriod(
@@ -142,30 +195,35 @@ export async function computeTvaPeriod(
 ): Promise<AtlasTvaPeriodCalculation> {
   const { periodStart, periodEnd, periodLabel } = parsePeriodBounds(periodKey, periodType);
 
-  const [invRes, supRes, accRes] = await Promise.all([
+  const [invRes, supRes, accRes, tvaRes] = await Promise.all([
     db
       .from('atlas_invoices')
-      .select('id, number, client_name, issue_date, status, amount_ht, vat_amount, total_ttc, vat_rate')
-      .eq('company_id', companyId)
-      .gte('issue_date', periodStart)
-      .lte('issue_date', periodEnd),
+      .select(
+        'id, number, client_name, issue_date, status, validation_status, amount_ht, vat_amount, total_ttc, vat_rate, created_at, updated_at',
+      )
+      .eq('company_id', companyId),
     db
       .from('atlas_supplier_invoices')
-      .select('id, supplier_name, invoice_number, invoice_date, status, amount_ht, vat_amount, amount_ttc, vat_rate')
-      .eq('company_id', companyId)
-      .gte('invoice_date', periodStart)
-      .lte('invoice_date', periodEnd),
+      .select(
+        'id, supplier_name, invoice_number, invoice_date, status, validation_status, amount_ht, vat_amount, amount_ttc, vat_rate, created_at, updated_at',
+      )
+      .eq('company_id', companyId),
     db
       .from('atlas_accounting_entries')
-      .select('id, entry_json, entry_date')
-      .eq('company_id', companyId)
-      .gte('entry_date', periodStart)
-      .lte('entry_date', periodEnd),
+      .select('id, entry_json, entry_date, source_invoice_id, validation_status, created_at, updated_at')
+      .eq('company_id', companyId),
+    db
+      .from('zafirix_tva_suggestions')
+      .select(
+        'id, tva_type, amount, rate, base_ht, period_key, invoice_date, invoice_number, supplier_name, source_document_id, source_invoice_id, validation_status, created_at, updated_at',
+      )
+      .eq('company_id', companyId),
   ]);
 
   if (invRes.error) throw new Error(invRes.error.message);
   if (supRes.error) throw new Error(supRes.error.message);
   if (accRes.error) throw new Error(accRes.error.message);
+  if (tvaRes.error) throw new Error(tvaRes.error.message);
 
   const lines: AtlasTvaLineItem[] = [];
   let tvaCollectee = 0;
@@ -174,17 +232,24 @@ export async function computeTvaPeriod(
   let achatsHT = 0;
   let salesCount = 0;
   let purchasesCount = 0;
+  const countedInvoiceIds = new Set<string>();
 
   for (const row of (invRes.data ?? []) as InvoiceRow[]) {
     if (String(row.status) === 'cancelled') continue;
-    const issueDate = String(row.issue_date);
-    if (!inPeriod(issueDate, periodStart, periodEnd)) continue;
+    if (!isIncludedInvoiceValidationStatus(row.validation_status)) continue;
+
+    const issueDate = resolveEffectiveDateYmd(row.issue_date, row.created_at, row.updated_at);
+    if (!issueDate || !inPeriod(issueDate, periodStart, periodEnd)) continue;
+
     const amountHT = Number(row.amount_ht ?? 0);
     const vatAmount = Number(row.vat_amount ?? 0);
     const totalTTC = Number(row.total_ttc ?? amountHT + vatAmount);
+    if (vatAmount <= 0 && amountHT <= 0) continue;
+
     tvaCollectee += vatAmount;
     caHT += amountHT;
     salesCount += 1;
+    countedInvoiceIds.add(String(row.id));
     lines.push({
       id: String(row.id),
       kind: 'sale',
@@ -200,15 +265,21 @@ export async function computeTvaPeriod(
   }
 
   for (const row of (supRes.data ?? []) as SupplierRow[]) {
-    const issueDate = row.invoice_date ? String(row.invoice_date) : '';
+    if (String(row.status).toLowerCase() === 'cancelled') continue;
+    if (!isIncludedInvoiceValidationStatus(row.validation_status)) continue;
+
+    const issueDate = resolveEffectiveDateYmd(row.invoice_date, row.created_at, row.updated_at);
     if (!issueDate || !inPeriod(issueDate, periodStart, periodEnd)) continue;
+
     const amountHT = Number(row.amount_ht ?? 0);
     const vatAmount = Number(row.vat_amount ?? 0);
     const totalTTC = Number(row.amount_ttc ?? amountHT + vatAmount);
     if (vatAmount <= 0 && amountHT <= 0) continue;
+
     tvaDeductible += vatAmount;
     achatsHT += amountHT;
     purchasesCount += 1;
+    countedInvoiceIds.add(String(row.id));
     lines.push({
       id: String(row.id),
       kind: 'purchase',
@@ -223,12 +294,61 @@ export async function computeTvaPeriod(
     });
   }
 
+  for (const row of (tvaRes.data ?? []) as TvaSuggestionRow[]) {
+    if (!isIncludedTvaSuggestionStatus(row.validation_status)) continue;
+
+    const linkedId = row.source_invoice_id ? String(row.source_invoice_id) : '';
+    if (linkedId && countedInvoiceIds.has(linkedId)) continue;
+
+    const issueDate = resolveEffectiveDateYmd(row.invoice_date, row.created_at, row.updated_at);
+    const inPeriodByDate = issueDate ? inPeriod(issueDate, periodStart, periodEnd) : false;
+    const inPeriodByKey = String(row.period_key) === periodKey;
+    if (!inPeriodByDate && !inPeriodByKey) continue;
+
+    const vatAmount = Number(row.amount ?? 0);
+    const amountHT = Number(row.base_ht ?? 0);
+    if (vatAmount <= 0) continue;
+
+    const isDeductible = String(row.tva_type).toLowerCase() === 'deductible';
+    if (isDeductible) {
+      tvaDeductible += vatAmount;
+      achatsHT += amountHT;
+      purchasesCount += 1;
+    } else {
+      tvaCollectee += vatAmount;
+      caHT += amountHT;
+      salesCount += 1;
+    }
+
+    lines.push({
+      id: `tva-${row.id}`,
+      kind: isDeductible ? 'purchase' : 'sale',
+      reference: String(row.invoice_number ?? row.source_document_id.slice(0, 8)),
+      counterparty: String(row.supplier_name ?? 'Suggestion TVA'),
+      issueDate: issueDate || periodStart,
+      amountHT,
+      vatAmount,
+      totalTTC: amountHT + vatAmount,
+      vatRate: row.rate != null ? Number(row.rate) : undefined,
+      source: 'tva_suggestion',
+    });
+  }
+
   let accountingAdjust = 0;
   for (const row of (accRes.data ?? []) as AccountingRow[]) {
+    if (!isIncludedInvoiceValidationStatus(row.validation_status)) continue;
+
+    const linkedId = row.source_invoice_id ? String(row.source_invoice_id) : '';
+    if (linkedId && countedInvoiceIds.has(linkedId)) continue;
+
     const entry = asRecord(row.entry_json);
     if (!entry) continue;
-    const date = String(row.entry_date ?? entry.date ?? '');
+
+    const date =
+      resolveEffectiveDateYmd(row.entry_date, row.created_at, row.updated_at) ||
+      String(entry.date ?? '').slice(0, 10);
     if (date && !inPeriod(date, periodStart, periodEnd)) continue;
+
     const compte = String(entry.compte ?? '');
     const debit = Number(entry.debit ?? 0);
     const credit = Number(entry.credit ?? 0);
