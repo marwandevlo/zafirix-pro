@@ -120,6 +120,11 @@ function resolveEffectiveDateYmd(
   return '';
 }
 
+function isIncludedClientInvoiceStatus(status: string | null | undefined): boolean {
+  const s = String(status ?? 'sent').toLowerCase();
+  return s !== 'cancelled';
+}
+
 function isIncludedInvoiceValidationStatus(status: string | null | undefined): boolean {
   const s = String(status ?? 'draft').toLowerCase();
   return !['rejected', 'archived', 'cancelled'].includes(s);
@@ -136,7 +141,6 @@ type InvoiceRow = {
   client_name: string;
   issue_date: string;
   status: string;
-  validation_status?: string | null;
   amount_ht: number | string | null;
   vat_amount: number | string | null;
   total_ttc: number | string | null;
@@ -199,7 +203,7 @@ export async function computeTvaPeriod(
     db
       .from('atlas_invoices')
       .select(
-        'id, number, client_name, issue_date, status, validation_status, amount_ht, vat_amount, total_ttc, vat_rate, created_at, updated_at',
+        'id, number, client_name, issue_date, status, amount_ht, vat_amount, total_ttc, vat_rate, created_at, updated_at',
       )
       .eq('company_id', companyId),
     db
@@ -235,8 +239,7 @@ export async function computeTvaPeriod(
   const countedInvoiceIds = new Set<string>();
 
   for (const row of (invRes.data ?? []) as InvoiceRow[]) {
-    if (String(row.status) === 'cancelled') continue;
-    if (!isIncludedInvoiceValidationStatus(row.validation_status)) continue;
+    if (!isIncludedClientInvoiceStatus(row.status)) continue;
 
     const issueDate = resolveEffectiveDateYmd(row.issue_date, row.created_at, row.updated_at);
     if (!issueDate || !inPeriod(issueDate, periodStart, periodEnd)) continue;

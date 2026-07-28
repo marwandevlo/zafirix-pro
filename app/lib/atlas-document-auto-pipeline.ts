@@ -219,7 +219,7 @@ async function markDocumentNeedsCorrection(
 export async function runDocumentAutoPipeline(
   userId: string,
   documentId: string,
-  source: 'ocr_runner' | 'register' | 'retrigger' = 'ocr_runner',
+  source: 'ocr_runner' | 'register' | 'retrigger' | 'api_run' = 'ocr_runner',
 ): Promise<AutoPipelineResult> {
   const admin = getSupabaseServiceRoleClient();
 
