@@ -25,6 +25,9 @@ import {
   sourcePageForDetectedInvoice,
   validateDetectedInvoiceFields,
 } from '@/app/lib/atlas-ocr-invoices-detect';
+import { createBankStatementFromDocument } from '@/app/lib/atlas-bank-server';
+import { parseNestedClassification } from '@/app/lib/atlas-ai-json-parse';
+import { isBankStatementType } from '@/app/lib/atlas-document-type-utils';
 
 export type DocumentValidationDetail = {
   page: number;
@@ -36,11 +39,14 @@ export type DocumentValidationDetail = {
 export type DocumentValidationResult =
   | {
       ok: true;
+      documentKind: 'invoice' | 'bank_statement';
       invoicesCreated: number;
       invoicesSkipped: number;
       invoiceIds: string[];
       journalLineCount: number;
       tvaAmount: number;
+      statementId?: string;
+      transactionCount?: number;
     }
   | {
       ok: false;
@@ -93,9 +99,62 @@ function structuredExtractionFromMetadata(metadata: Record<string, unknown>): At
 }
 
 function classificationFromMetadata(metadata: Record<string, unknown>) {
-  const raw = metadata.classification;
-  if (!raw || typeof raw !== 'object') return null;
-  return raw as { detected_type?: AtlasDocumentType };
+  const parsed = parseNestedClassification(metadata.classification);
+  if (!parsed?.detected_type) return null;
+  return { detected_type: parsed.detected_type as AtlasDocumentType };
+}
+
+function validateBankStatementExtraction(
+  _extraction: AtlasStructuredExtraction,
+  _metadata: Record<string, unknown>,
+): { ok: true } | { ok: false; missing: string[] } {
+  // Classification confirmed as bank_statement — invoice fields (HT, TVA, N° facture) are not required.
+  return { ok: true };
+}
+
+async function findExistingBankStatement(
+  admin: SupabaseClient,
+  userId: string,
+  documentId: string,
+): Promise<string | null> {
+  const { data } = await admin
+    .from('zafirix_bank_statements')
+    .select('id')
+    .eq('user_id', userId)
+    .eq('source_document_id', documentId)
+    .maybeSingle();
+  return data?.id ? String(data.id) : null;
+}
+
+async function registerBankStatementFromDocument(
+  admin: SupabaseClient,
+  userId: string,
+  companyId: string,
+  documentId: string,
+  extraction: AtlasStructuredExtraction,
+  metadata: Record<string, unknown>,
+): Promise<{ statementId: string; transactionCount: number }> {
+  const existing = await findExistingBankStatement(admin, userId, documentId);
+  if (existing) {
+    const { data: stmt } = await admin
+      .from('zafirix_bank_statements')
+      .select('transaction_count')
+      .eq('id', existing)
+      .maybeSingle();
+    return {
+      statementId: existing,
+      transactionCount: typeof stmt?.transaction_count === 'number' ? stmt.transaction_count : 0,
+    };
+  }
+
+  const result = await createBankStatementFromDocument(admin, {
+    userId,
+    companyId,
+    documentId,
+    extraction,
+    metadata,
+  });
+  return { statementId: result.statementId, transactionCount: result.transactionCount };
 }
 
 function extractNum(field?: { value?: string | number | null; user_corrected_value?: string } | null): number {
@@ -460,7 +519,51 @@ export async function registerValidatedDocumentRecords(
   const structured = structuredExtractionFromMetadata(metadata);
   const docType =
     (docRow.document_type as AtlasDocumentType | null) ??
-    (classificationFromMetadata(metadata)?.detected_type ?? 'purchase_invoice');
+    (classificationFromMetadata(metadata)?.detected_type ?? null);
+
+  if (isBankStatementType(docType)) {
+    const valid = validateBankStatementExtraction(structured, metadata);
+    if (!valid.ok) {
+      return {
+        ok: false,
+        error: 'validation_failed',
+        message: `Relevé bancaire incomplet: ${valid.missing.join(', ')}`,
+        details: [{ page: 1, missing: valid.missing }],
+      };
+    }
+
+    try {
+      const { statementId, transactionCount } = await registerBankStatementFromDocument(
+        admin,
+        userId,
+        companyId,
+        documentId,
+        structured,
+        metadata,
+      );
+      return {
+        ok: true,
+        documentKind: 'bank_statement',
+        invoicesCreated: 0,
+        invoicesSkipped: 0,
+        invoiceIds: [],
+        journalLineCount: 0,
+        tvaAmount: 0,
+        statementId,
+        transactionCount,
+      };
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      return {
+        ok: false,
+        error: 'registration_failed',
+        message,
+        details: [{ page: 1, error: message }],
+      };
+    }
+  }
+
+  const resolvedDocType = docType ?? 'purchase_invoice';
   const invoicesPlan = resolveInvoicesToRegister(atlasDoc, structured);
   const uploadDateYmd = uploadDateFromDocument(docRow);
 
@@ -493,7 +596,7 @@ export async function registerValidatedDocumentRecords(
     }
 
     try {
-      const isPurchase = isPurchaseDocument(docType, extraction);
+      const isPurchase = isPurchaseDocument(resolvedDocType, extraction);
       const existing = isPurchase
         ? await findExistingSupplierInvoice(
             admin,
@@ -512,7 +615,7 @@ export async function registerValidatedDocumentRecords(
           userId,
           companyId,
           documentId,
-          docType,
+          resolvedDocType,
           extraction,
           regime,
           uploadDateYmd,
@@ -546,7 +649,7 @@ export async function registerValidatedDocumentRecords(
       }
 
       const extraction = detectedInvoiceToStructuredExtraction(detected);
-      const isPurchase = isPurchaseDocument(docType, extraction);
+      const isPurchase = isPurchaseDocument(resolvedDocType, extraction);
       try {
         const existing = isPurchase
           ? await findExistingSupplierInvoice(
@@ -568,7 +671,7 @@ export async function registerValidatedDocumentRecords(
           userId,
           companyId,
           documentId,
-          docType,
+          resolvedDocType,
           extraction,
           regime,
           uploadDateYmd,
@@ -601,6 +704,7 @@ export async function registerValidatedDocumentRecords(
 
   return {
     ok: true,
+    documentKind: 'invoice',
     invoicesCreated,
     invoicesSkipped,
     invoiceIds,
@@ -635,11 +739,14 @@ export async function markDocumentValidated(
       metadata: {
         ...meta,
         validation_summary: {
+          document_kind: registration.documentKind,
           invoices_created: registration.invoicesCreated,
           invoices_skipped: registration.invoicesSkipped,
           invoice_ids: registration.invoiceIds,
           journal_line_count: registration.journalLineCount,
           tva_amount: registration.tvaAmount,
+          statement_id: registration.statementId ?? null,
+          transaction_count: registration.transactionCount ?? null,
           validated_at: now,
         },
       },

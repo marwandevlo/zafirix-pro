@@ -44,6 +44,7 @@ export default function RootLayout({
   return (
     <html lang="fr" className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}>
       <head>
+        <meta charSet="utf-8" />
         <link rel="manifest" href="/manifest.json?v=3" />
         <link rel="icon" href="/zafirix-favicon.png?v=3" type="image/png" />
         <link rel="shortcut icon" href="/zafirix-favicon.png?v=3" />

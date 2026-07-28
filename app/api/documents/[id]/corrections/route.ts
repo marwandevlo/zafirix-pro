@@ -21,6 +21,8 @@ type CorrectionBody = {
   confidenceBefore?: number;
   correctionReason?: string;
   sourcePage?: number;
+  transactionIndex?: number;
+  transactionField?: string;
 };
 
 export async function GET(
@@ -81,7 +83,13 @@ export async function POST(
   }
 
   const fieldName = String(body.fieldName ?? '').trim();
-  if (!fieldName) {
+  const transactionIndex =
+    typeof body.transactionIndex === 'number' && body.transactionIndex >= 0
+      ? body.transactionIndex
+      : null;
+  const transactionField = String(body.transactionField ?? '').trim();
+
+  if (!fieldName && transactionIndex == null) {
     return NextResponse.json({ error: 'field_name_required' }, { status: 400 });
   }
 
@@ -98,6 +106,11 @@ export async function POST(
     return NextResponse.json({ error: 'document_not_found' }, { status: 404 });
   }
 
+  const correctionFieldName =
+    transactionIndex != null && transactionField
+      ? `transaction_${transactionIndex}_${transactionField}`
+      : fieldName;
+
   // Store correction
   const { data: correction, error: insertErr } = await admin
     .from('zafirix_corrections')
@@ -107,7 +120,7 @@ export async function POST(
       module: 'documents',
       entity_type: 'document',
       entity_id: documentId,
-      field_name: fieldName,
+      field_name: correctionFieldName,
       old_value: body.oldValue ?? null,
       new_value: body.newValue ?? null,
       raw_value: body.rawValue ?? null,
@@ -123,30 +136,58 @@ export async function POST(
     return NextResponse.json({ error: 'insert_failed', message: insertErr.message }, { status: 500 });
   }
 
-  // Update the user_corrected_value in the document's extraction metadata
+  // Update extraction field or bank transaction row in metadata
   if (doc.metadata && typeof doc.metadata === 'object') {
     const meta = doc.metadata as Record<string, unknown>;
-    const extraction = (meta.extraction && typeof meta.extraction === 'object')
-      ? { ...(meta.extraction as Record<string, unknown>) }
-      : {};
 
-    const field = (extraction[fieldName] && typeof extraction[fieldName] === 'object')
-      ? { ...(extraction[fieldName] as Record<string, unknown>) }
-      : {};
+    if (transactionIndex != null && transactionField) {
+      const transactions = Array.isArray(meta.transactions)
+        ? [...(meta.transactions as Array<Record<string, unknown>>)]
+        : [];
+      const row = transactions[transactionIndex]
+        ? { ...(transactions[transactionIndex] as Record<string, unknown>) }
+        : null;
+      if (row) {
+        const parsedNum = parseFloat(String(body.newValue ?? '').replace(/\s/g, '').replace(',', '.'));
+        row[transactionField] =
+          transactionField === 'debit' || transactionField === 'credit' || transactionField === 'balance'
+            ? (Number.isFinite(parsedNum) ? parsedNum : body.newValue ?? null)
+            : body.newValue ?? null;
+        transactions[transactionIndex] = row;
+      }
 
-    field.user_corrected_value = body.newValue ?? null;
-    field.user_verified = true;
-    extraction[fieldName] = field;
+      await admin
+        .from('atlas_documents')
+        .update({
+          metadata: { ...meta, transactions },
+          validation_status: 'needs_correction',
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', documentId)
+        .eq('user_id', auth.userId);
+    } else if (fieldName) {
+      const extraction = (meta.extraction && typeof meta.extraction === 'object')
+        ? { ...(meta.extraction as Record<string, unknown>) }
+        : {};
 
-    await admin
-      .from('atlas_documents')
-      .update({
-        metadata: { ...meta, extraction },
-        validation_status: 'needs_correction',
-        updated_at: new Date().toISOString(),
-      })
-      .eq('id', documentId)
-      .eq('user_id', auth.userId);
+      const field = (extraction[fieldName] && typeof extraction[fieldName] === 'object')
+        ? { ...(extraction[fieldName] as Record<string, unknown>) }
+        : {};
+
+      field.user_corrected_value = body.newValue ?? null;
+      field.user_verified = true;
+      extraction[fieldName] = field;
+
+      await admin
+        .from('atlas_documents')
+        .update({
+          metadata: { ...meta, extraction },
+          validation_status: 'needs_correction',
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', documentId)
+        .eq('user_id', auth.userId);
+    }
   }
 
   // Log event

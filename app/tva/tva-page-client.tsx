@@ -1,4 +1,4 @@
-﻿'use client';
+'use client';
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
@@ -21,7 +21,7 @@ import type { ExportColumn } from '@/app/components/ExportMenu';
 import { EntityAuditTable } from '@/app/components/history/EntityAuditTable';
 
 const TVA_LINE_EXPORT_COLUMNS: ExportColumn[] = [
-  { key: 'reference', label: 'R├®f├®rence' },
+  { key: 'reference', label: 'Référence' },
   { key: 'counterparty', label: 'Tiers' },
   { key: 'issueDate', label: 'Date' },
   { key: 'amountHT', label: 'Montant HT (MAD)', format: v => typeof v === 'number' ? v.toFixed(2) : String(v ?? '') },
@@ -43,10 +43,10 @@ type TvaQuarterSelection = 'T1' | 'T2' | 'T3' | 'T4' | 'AN';
 const TVA_YEARS = [2024, 2025, 2026, 2027] as const;
 
 const QUARTER_OPTIONS: { value: TvaQuarterSelection; label: string }[] = [
-  { value: 'T1', label: 'Trimestre 1 (Jan ÔÇô Mar)' },
-  { value: 'T2', label: 'Trimestre 2 (Avr ÔÇô Jun)' },
-  { value: 'T3', label: 'Trimestre 3 (Jul ÔÇô Sep)' },
-  { value: 'T4', label: 'Trimestre 4 (Oct ÔÇô D├®c)' },
+  { value: 'T1', label: 'Trimestre 1 (Jan – Mar)' },
+  { value: 'T2', label: 'Trimestre 2 (Avr – Jun)' },
+  { value: 'T3', label: 'Trimestre 3 (Jul – Sep)' },
+  { value: 'T4', label: 'Trimestre 4 (Oct – Déc)' },
   { value: 'AN', label: 'Annuel' },
 ];
 
@@ -86,7 +86,7 @@ function statusBadge(status: string) {
   if (status === 'declared') {
     return (
       <span className="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full bg-green-100 text-green-700">
-        <CheckCircle size={12} /> D├®clar├®e
+        <CheckCircle size={12} /> Déclarée
       </span>
     );
   }
@@ -166,7 +166,7 @@ export default function TvaPageClient() {
           setHistory(histRes.data.periods ?? []);
         }
       } catch {
-        setError('Erreur r├®seau.');
+        setError('Erreur réseau.');
       } finally {
         setLoading(false);
       }
@@ -257,7 +257,7 @@ export default function TvaPageClient() {
         },
       );
       if (!ok) {
-        setError(data.error ?? '├ëchec de la d├®claration.');
+        setError(data.error ?? 'Échec de la déclaration.');
         return;
       }
       await reload();
@@ -271,7 +271,7 @@ export default function TvaPageClient() {
     { id: 'ventes', label: 'Ventes', icon: Receipt },
     { id: 'achats', label: 'Achats', icon: ShoppingCart },
     { id: 'historique', label: 'Historique', icon: History },
-    { id: 'audit', label: 'Activit├® IA', icon: History },
+    { id: 'audit', label: 'Activité IA', icon: History },
   ];
 
   if (!supabaseEnabled) {
@@ -281,9 +281,9 @@ export default function TvaPageClient() {
         <main className="flex-1 flex items-center justify-center p-8">
           <div className="max-w-md text-center space-y-3">
             <AlertCircle className="mx-auto text-amber-600" size={32} />
-            <h1 className="text-lg font-semibold text-gray-800">TVA ÔÇö persistance requise</h1>
+            <h1 className="text-lg font-semibold text-gray-800">TVA — persistance requise</h1>
             <p className="text-sm text-gray-500">
-              Le module TVA utilise vos factures et ├®critures en base Supabase. Activez la persistance cloud pour acc├®der au tableau de bord.
+              Le module TVA utilise vos factures et écritures en base Supabase. Activez la persistance cloud pour accéder au tableau de bord.
             </p>
           </div>
         </main>
@@ -313,17 +313,17 @@ export default function TvaPageClient() {
         <header className="bg-white border-b border-gray-200 px-8 py-4 flex items-center justify-between shrink-0">
           <div>
             <div className="flex items-center gap-2">
-              <h1 className="text-xl font-bold text-gray-800">D├®claration TVA</h1>
+              <h1 className="text-xl font-bold text-gray-800">Déclaration TVA</h1>
               <BetaSurfaceBadge />
             </div>
             <p className="text-xs text-gray-400 mt-0.5">
-              Calculs r├®els ├á partir de vos factures clients, fournisseurs et ├®critures comptables
+              Calculs réels à partir de vos factures clients, fournisseurs et écritures comptables
             </p>
           </div>
           <div className="flex flex-wrap items-center gap-3">
             <div className="flex items-center gap-2">
               <label htmlFor="tva-year" className="text-xs text-gray-500">
-                Ann├®e
+                Année
               </label>
               <select
                 id="tva-year"
@@ -341,7 +341,7 @@ export default function TvaPageClient() {
             </div>
             <div className="flex items-center gap-2">
               <label htmlFor="tva-quarter" className="text-xs text-gray-500">
-                P├®riode
+                Période
               </label>
               <select
                 id="tva-quarter"
@@ -372,7 +372,7 @@ export default function TvaPageClient() {
               disabled={!current}
               className="flex items-center gap-2 px-4 py-2 bg-blue-500 text-white rounded-lg text-sm hover:bg-blue-600 transition-colors disabled:opacity-50"
             >
-              <FileCode size={16} /> G├®n├®rer XML DGI
+              <FileCode size={16} /> Générer XML DGI
             </button>
             <button
               type="button"
@@ -388,7 +388,7 @@ export default function TvaPageClient() {
           {loading && (
             <div className="flex items-center justify-center py-16 text-gray-400 gap-2">
               <Loader2 className="animate-spin" size={20} />
-              Chargement TVAÔÇª
+              Chargement TVA…
             </div>
           )}
 
@@ -398,7 +398,7 @@ export default function TvaPageClient() {
 
           {!loading && !companyId && (
             <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
-              S├®lectionnez ou cr├®ez une soci├®t├® active pour afficher la TVA.
+              Sélectionnez ou créez une société active pour afficher la TVA.
             </div>
           )}
 
@@ -406,18 +406,18 @@ export default function TvaPageClient() {
             <>
               <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
                 <div className="bg-white rounded-xl p-5 shadow-sm border border-gray-100">
-                  <p className="text-xs text-gray-400">P├®riode s├®lectionn├®e</p>
+                  <p className="text-xs text-gray-400">Période sélectionnée</p>
                   <p className="text-lg font-bold text-gray-800 mt-1">{current?.periodLabel}</p>
                   <p className="text-xs text-gray-400 mt-1">
-                    R├®gime {dashboard.regimeTVA} ┬À {current?.periodStart} ÔåÆ {current?.periodEnd}
+                    Régime {dashboard.regimeTVA} · {current?.periodStart} → {current?.periodEnd}
                   </p>
                 </div>
                 <div className="bg-white rounded-xl p-5 shadow-sm border border-gray-100">
-                  <p className="text-xs text-gray-400">TVA collect├®e</p>
+                  <p className="text-xs text-gray-400">TVA collectée</p>
                   <p className="text-2xl font-bold text-blue-600 mt-1">{formatMad(current?.tvaCollectee ?? 0)}</p>
                 </div>
                 <div className="bg-white rounded-xl p-5 shadow-sm border border-gray-100">
-                  <p className="text-xs text-gray-400">TVA d├®ductible</p>
+                  <p className="text-xs text-gray-400">TVA déductible</p>
                   <p className="text-2xl font-bold text-green-600 mt-1">{formatMad(current?.tvaDeductible ?? 0)}</p>
                 </div>
                 <div
@@ -425,7 +425,7 @@ export default function TvaPageClient() {
                     (current?.tvaNette ?? 0) > 0 ? 'bg-red-50 border-red-200' : 'bg-green-50 border-green-200'
                   }`}
                 >
-                  <p className="text-xs text-gray-400">TVA nette ├á payer</p>
+                  <p className="text-xs text-gray-400">TVA nette à payer</p>
                   <p
                     className={`text-2xl font-bold mt-1 ${
                       (current?.tvaNette ?? 0) > 0 ? 'text-red-600' : 'text-green-600'
@@ -438,10 +438,10 @@ export default function TvaPageClient() {
 
               <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
                 <div className="bg-white rounded-xl p-5 shadow-sm border border-gray-100 lg:col-span-2">
-                  <h2 className="font-semibold text-gray-700 mb-3">Situation d├®clarative</h2>
+                  <h2 className="font-semibold text-gray-700 mb-3">Situation déclarative</h2>
                   <dl className="grid grid-cols-2 gap-3 text-sm">
                     <div>
-                      <dt className="text-gray-400">Prochaine ├®ch├®ance</dt>
+                      <dt className="text-gray-400">Prochaine échéance</dt>
                       <dd className="font-medium text-gray-800">{dashboard.nextDeclarationDate}</dd>
                     </div>
                     <div>
@@ -465,7 +465,7 @@ export default function TvaPageClient() {
                       className="flex items-center gap-2 px-4 py-2 bg-[#1B2A4A] text-white rounded-lg text-sm hover:bg-[#243660] disabled:opacity-50"
                     >
                       {declaring ? <Loader2 size={14} className="animate-spin" /> : <CheckCircle size={14} />}
-                      {current?.status === 'declared' ? 'P├®riode d├®clar├®e' : 'Marquer comme d├®clar├®e'}
+                      {current?.status === 'declared' ? 'Période déclarée' : 'Marquer comme déclarée'}
                     </button>
                   </div>
                 </div>
@@ -474,11 +474,11 @@ export default function TvaPageClient() {
                   <ul className="space-y-1 text-xs">
                     <li>{current?.salesCount ?? 0} facture(s) client</li>
                     <li>{current?.purchasesCount ?? 0} facture(s) fournisseur</li>
-                    <li>├ëcritures comptables 4455 / 4456 / 3455</li>
+                    <li>Écritures comptables 4455 / 4456 / 3455</li>
                     <li>Suggestions TVA (Documents IA)</li>
                   </ul>
                   <p className="text-xs text-gray-400 mt-3">
-                    Validez toujours avec votre expert-comptable avant d├®p├┤t sur SIMPL-TVA.
+                    Validez toujours avec votre expert-comptable avant dépôt sur SIMPL-TVA.
                   </p>
                 </div>
               </div>
@@ -486,22 +486,22 @@ export default function TvaPageClient() {
               {xmlDone && (
                 <div className="bg-green-50 border border-green-200 rounded-xl p-4 flex items-center gap-3">
                   <CheckCircle size={20} className="text-green-500 shrink-0" />
-                  <p className="text-sm text-green-700">Fichier XML g├®n├®r├® ├á partir de vos donn├®es r├®elles.</p>
+                  <p className="text-sm text-green-700">Fichier XML généré à partir de vos données réelles.</p>
                 </div>
               )}
             </>
           )}
 
           {!loading && current && tab === 'ventes' && (
-            <InvoiceTable title="Factures ventes (TVA collect├®e)" lines={salesLines} counterpartyLabel="Client" />
+            <InvoiceTable title="Factures ventes (TVA collectée)" lines={salesLines} counterpartyLabel="Client" />
           )}
 
           {!loading && current && tab === 'achats' && (
-            <InvoiceTable title="Factures achats (TVA d├®ductible)" lines={purchaseLines} counterpartyLabel="Fournisseur" />
+            <InvoiceTable title="Factures achats (TVA déductible)" lines={purchaseLines} counterpartyLabel="Fournisseur" />
           )}
 
           {!loading && tab === 'audit' && (
-            <EntityAuditTable entityType="tva_suggestion" title="Activit├® IA ÔÇö Suggestions TVA" />
+            <EntityAuditTable entityType="tva_suggestion" title="Activité IA — Suggestions TVA" />
           )}
 
           {!loading && tab === 'historique' && (
@@ -509,17 +509,17 @@ export default function TvaPageClient() {
               <div className="px-5 py-4 border-b border-gray-100">
                 <h2 className="font-semibold text-gray-700">Historique TVA</h2>
                 <p className="text-xs text-gray-400 mt-0.5">
-                  P├®riodes trimestrielles et annuelles ÔÇö {selectedYear}
+                  Périodes trimestrielles et annuelles — {selectedYear}
                 </p>
               </div>
               <table className="w-full text-sm">
                 <thead>
                   <tr className="text-left text-xs text-gray-400 border-b border-gray-100">
-                    <th className="px-4 py-3">P├®riode</th>
-                    <th className="px-4 py-3 text-right">Collect├®e</th>
-                    <th className="px-4 py-3 text-right">D├®ductible</th>
+                    <th className="px-4 py-3">Période</th>
+                    <th className="px-4 py-3 text-right">Collectée</th>
+                    <th className="px-4 py-3 text-right">Déductible</th>
                     <th className="px-4 py-3 text-right">Nette</th>
-                    <th className="px-4 py-3">├ëch├®ance</th>
+                    <th className="px-4 py-3">Échéance</th>
                     <th className="px-4 py-3">Statut</th>
                   </tr>
                 </thead>
@@ -527,7 +527,7 @@ export default function TvaPageClient() {
                   {history.length === 0 && (
                     <tr>
                       <td colSpan={6} className="px-4 py-8 text-center text-gray-400">
-                        Aucune p├®riode enregistr├®e.
+                        Aucune période enregistrée.
                       </td>
                     </tr>
                   )}
@@ -579,7 +579,7 @@ function InvoiceTable({
       <table className="w-full text-sm">
         <thead>
           <tr className="text-left text-xs text-gray-400 border-b border-gray-100">
-            <th className="px-4 py-3">R├®f.</th>
+            <th className="px-4 py-3">Réf.</th>
             <th className="px-4 py-3">{counterpartyLabel}</th>
             <th className="px-4 py-3">Date</th>
             <th className="px-4 py-3 text-right">HT</th>
@@ -598,7 +598,7 @@ function InvoiceTable({
           )}
           {lines.map((f) => (
             <tr key={f.id} className="border-b border-gray-50 hover:bg-gray-50">
-              <td className="px-4 py-3 font-medium text-gray-700">{f.reference || 'ÔÇö'}</td>
+              <td className="px-4 py-3 font-medium text-gray-700">{f.reference || '—'}</td>
               <td className="px-4 py-3 text-gray-600">{f.counterparty}</td>
               <td className="px-4 py-3 text-gray-500">{f.issueDate}</td>
               <td className="px-4 py-3 text-right">{formatMad(f.amountHT)}</td>

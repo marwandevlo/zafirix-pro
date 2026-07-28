@@ -22,20 +22,30 @@ export default function ISPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [xmlGenerated, setXmlGenerated] = useState(false);
+  const [exportingXml, setExportingXml] = useState(false);
 
   const loadHistory = useCallback(async (cid: string) => {
     const res = await apiFetch<{ drafts?: AtlasIsDraft[] }>(`/api/is/drafts?companyId=${encodeURIComponent(cid)}`);
-    if (res.ok) setHistory(res.data.drafts ?? []);
-  }, []);
+    if (res.ok) {
+      const drafts = res.data.drafts ?? [];
+      setHistory(drafts);
+      const forYear = drafts.find((d) => d.fiscalYear === fiscalYear) ?? null;
+      setDraft(forYear);
+    }
+  }, [fiscalYear]);
 
   useEffect(() => {
     void (async () => {
       if (!isAtlasSupabaseDataEnabled()) return;
       const cid = await getActiveCompanyDbRowId();
       setCompanyId(cid);
-      if (cid) await loadHistory(cid);
     })();
-  }, [loadHistory]);
+  }, []);
+
+  useEffect(() => {
+    if (!companyId || !isAtlasSupabaseDataEnabled()) return;
+    void loadHistory(companyId);
+  }, [companyId, fiscalYear, loadHistory]);
 
   const computeIs = async () => {
     if (!companyId) return;
@@ -63,30 +73,50 @@ export default function ISPage() {
     if (res.ok && res.data.draft) setDraft(res.data.draft);
   };
 
-  const generateXML = () => {
-    if (!draft) return;
-    const xml = `<?xml version="1.0" encoding="UTF-8"?>
-<DeclarationIS xmlns="http://www.tax.gov.ma/is/v1">
-  <Entete><Exercice>${draft.fiscalYear}</Exercice><FormulaVersion>${draft.formulaVersion}</FormulaVersion></Entete>
-  <ResultatFiscal>
-    <ChiffreAffaires>${draft.revenueHT}</ChiffreAffaires>
-    <TotalCharges>${draft.supplierExpensesHT + draft.payrollTotal + draft.accountingCharges}</TotalCharges>
-    <ResultatFiscalNet>${draft.taxableResult}</ResultatFiscalNet>
-  </ResultatFiscal>
-  <CalculIS>
-    <ISCalcule>${draft.estimatedIS.toFixed(2)}</ISCalcule>
-    <CotisationMinimale>${draft.minimalContribution.toFixed(2)}</CotisationMinimale>
-    <ISAPayer>${draft.isDue.toFixed(2)}</ISAPayer>
-  </CalculIS>
-</DeclarationIS>`;
-    const blob = new Blob([xml], { type: 'application/xml' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `IS_${draft.fiscalYear}_DGI.xml`;
-    a.click();
-    URL.revokeObjectURL(url);
-    setXmlGenerated(true);
+  const generateXML = async () => {
+    if (!companyId) return;
+    if (!draft) {
+      setError('Calculez d\'abord le brouillon IS pour cet exercice.');
+      return;
+    }
+    setExportingXml(true);
+    setError('');
+    setXmlGenerated(false);
+    try {
+      const params = new URLSearchParams({
+        companyId,
+        fiscalYear: String(draft.fiscalYear),
+        draftId: draft.id,
+      });
+
+      const res = await fetch(`/api/is/export?${params.toString()}`, { credentials: 'include' });
+      const contentType = res.headers.get('content-type') ?? '';
+      if (!res.ok) {
+        const body = (await res.json().catch(() => ({}))) as { error?: string; message?: string };
+        setError(body.message ?? body.error ?? 'Export XML impossible.');
+        return;
+      }
+      if (!contentType.includes('xml')) {
+        setError('Réponse export invalide (attendu XML).');
+        return;
+      }
+      const blob = await res.blob();
+      if (blob.size < 600) {
+        setError('Fichier XML trop petit — vérifiez que le brouillon IS contient des données.');
+        return;
+      }
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `IS_${draft.fiscalYear}_DGI.xml`;
+      a.click();
+      URL.revokeObjectURL(url);
+      setXmlGenerated(true);
+    } catch {
+      setError('Erreur réseau lors de l\'export XML IS.');
+    } finally {
+      setExportingXml(false);
+    }
   };
 
   const bareme = draft
@@ -121,9 +151,18 @@ export default function ISPage() {
             </div>
             <p className="text-xs text-amber-700 mt-0.5">{EXPERT_DISCLAIMER} · Données factures / achats / paie / comptabilité</p>
           </div>
-          {draft && (
+          {(draft || companyId) && (
             <div className="flex gap-2">
-              <button type="button" onClick={generateXML} className="flex items-center gap-2 px-4 py-2 bg-blue-500 text-white rounded-lg text-sm"><FileCode size={16} /> XML DGI</button>
+              <button
+                type="button"
+                onClick={() => void generateXML()}
+                disabled={!companyId || !draft || exportingXml}
+                className="flex items-center gap-2 px-4 py-2 bg-blue-500 text-white rounded-lg text-sm disabled:opacity-50"
+                title={draft ? 'Exporter le brouillon IS en XML DGI' : 'Calculez le brouillon IS avant export'}
+              >
+                {exportingXml ? <Loader2 size={16} className="animate-spin" /> : <FileCode size={16} />}
+                XML DGI
+              </button>
               <button type="button" onClick={() => window.open('https://www.tax.gov.ma', '_blank')} className="flex items-center gap-2 px-4 py-2 bg-green-500 text-white rounded-lg text-sm"><Globe size={16} /> SIMPL-IS</button>
             </div>
           )}

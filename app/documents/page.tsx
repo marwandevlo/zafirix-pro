@@ -39,7 +39,8 @@ import {
 import type { AtlasSupplierInvoice } from '@/app/types/atlas-supplier-invoice';
 import { normalizePaymentTerms } from '@/app/types/atlas-payment-terms';
 import { isAtlasSupabaseDataEnabled } from '@/app/lib/atlas-data-source';
-import type { AtlasDocument, AtlasOcrDetectedInvoice, AtlasOcrError, AtlasOcrExtraction } from '@/app/types/atlas-document';
+import type { AtlasDocument, AtlasOcrDetectedInvoice, AtlasOcrError, AtlasOcrExtraction, AtlasDocumentType } from '@/app/types/atlas-document';
+import { isBankStatementType } from '@/app/lib/atlas-document-type-utils';
 import {
   creatableOcrInvoices,
   sourcePageForDetectedInvoice,
@@ -62,6 +63,8 @@ import {
   ocrUiStatus,
   saveAtlasDocumentOcrResult,
   searchDocuments,
+  bankTransactionsFromDocument,
+  structuredExtractionFromDocument,
 } from '@/app/lib/atlas-documents-repository';
 import { createAtlasLink } from '@/app/lib/atlas-links-repository';
 import { listAtlasCompanies } from '@/app/lib/atlas-companies-repository';
@@ -83,8 +86,11 @@ import {
   ocrErrorFromAiBody,
   OCR_PROVIDER,
   parseOcrJsonResponse,
+  parseOcrClientPayload,
   type OcrAiErrorBody,
 } from '@/app/lib/atlas-ocr';
+import { looksLikeRawJsonText } from '@/app/lib/atlas-ai-json-parse';
+import type { NormalizedOcrPayload } from '@/app/lib/atlas-ocr-normalize';
 import { AppSidebar } from '@/app/components/shell/AppSidebar';
 import { EmptyStateCta } from '@/app/components/ui/EmptyStateCta';
 import { BetaSurfaceBadge } from '@/app/components/safety/BetaSurfaceBadge';
@@ -106,11 +112,16 @@ type OcrDisplayRow = {
   key: string;
   nom: string;
   statut: 'analysé' | 'en cours' | 'erreur';
+  detectedType?: AtlasDocumentType | null;
   numero_facture?: string;
   fournisseur?: string;
   montant_ht?: number;
   montant_tva?: number;
   montant_ttc?: number;
+  bank_name?: string;
+  statement_period?: string;
+  transaction_count?: number;
+  closing_balance?: number;
   fileSizeLabel?: string;
   pageProgressLabel?: string;
   errorDetail?: string;
@@ -524,16 +535,37 @@ export default function DocumentsPage() {
               ? `${prog.total} page${prog.total > 1 ? 's' : ''}`
               : undefined;
         const fail = ocrFailureFromDocument(doc);
+        const detectedType = documentTypeFromDocument(doc);
+        const structured = structuredExtractionFromDocument(doc);
+        const bankTx = isBankStatementType(detectedType) ? bankTransactionsFromDocument(doc) : [];
+        const fieldStr = (key: string) => {
+          const f = structured?.[key as keyof typeof structured];
+          if (!f || typeof f !== 'object' || Array.isArray(f)) return undefined;
+          const field = f as { value?: unknown; user_corrected_value?: unknown };
+          const raw = field.user_corrected_value != null ? field.user_corrected_value : field.value;
+          return raw != null ? String(raw) : undefined;
+        };
+        const fieldNum = (key: string) => {
+          const s = fieldStr(key);
+          if (!s) return undefined;
+          const n = parseFloat(s.replace(/\s/g, '').replace(',', '.'));
+          return Number.isFinite(n) ? n : undefined;
+        };
 
         return {
           key: docId,
           nom: doc.filename ?? doc.title,
           statut: ocrUiStatus(doc),
+          detectedType,
           numero_facture: extraction?.numero_facture,
           fournisseur: extraction?.fournisseur,
           montant_ht: extraction?.montant_ht,
           montant_tva: extraction?.montant_tva,
           montant_ttc: extraction?.montant_ttc,
+          bank_name: fieldStr('bank_name'),
+          statement_period: fieldStr('statement_period'),
+          transaction_count: bankTx.length || undefined,
+          closing_balance: fieldNum('closing_balance'),
           fileSizeLabel: formatDocumentSizeBytes(doc.sizeBytes),
           pageProgressLabel: doc.processingStatus === 'processing' ? pageLabel : undefined,
           errorDetail: fail?.message,
@@ -562,6 +594,17 @@ export default function DocumentsPage() {
       localDoc: d,
     }));
   }, [supabaseMode, ocrDocuments, localDocuments, supplierInvoiceKeys]);
+
+  const ocrTableMode = useMemo<'invoice' | 'bank' | 'mixed'>(() => {
+    const types = ocrRows
+      .map((r) => r.detectedType)
+      .filter((t): t is AtlasDocumentType => Boolean(t));
+    const hasBank = types.some((t) => isBankStatementType(t));
+    const hasInvoice = types.some((t) => !isBankStatementType(t));
+    if (hasBank && hasInvoice) return 'mixed';
+    if (hasBank) return 'bank';
+    return 'invoice';
+  }, [ocrRows]);
 
   const ocrPageSummary = useMemo(() => {
     if (ocrPageInfo) return ocrPageInfo;
@@ -659,23 +702,41 @@ export default function DocumentsPage() {
       }
 
       try {
-        const parsed = JSON.parse(data.response) as AtlasOcrExtraction;
-        setLocalDocuments((prev) =>
-          prev.map((d) =>
-            d.id === newDoc.id
-              ? {
-                  ...d,
-                  statut: 'analysé',
-                  numero_facture: parsed.numero_facture,
-                  fournisseur: parsed.fournisseur,
-                  montant_ht: parsed.montant_ht,
-                  montant_tva: parsed.montant_tva,
-                  montant_ttc: parsed.montant_ttc,
-                  taux_tva: parsed.taux_tva,
-                }
-              : d,
-          ),
-        );
+        const parsed: NormalizedOcrPayload =
+          data.parsed && typeof data.parsed === 'object'
+            ? (data.parsed as NormalizedOcrPayload)
+            : parseOcrClientPayload(String(data.response ?? ''));
+
+        if (parsed.type === 'bank_statement') {
+          setLocalDocuments((prev) =>
+            prev.map((d) =>
+              d.id === newDoc.id
+                ? {
+                    ...d,
+                    statut: 'analysé',
+                    fournisseur: parsed.bankName || 'Relevé bancaire',
+                  }
+                : d,
+            ),
+          );
+        } else {
+          setLocalDocuments((prev) =>
+            prev.map((d) =>
+              d.id === newDoc.id
+                ? {
+                    ...d,
+                    statut: 'analysé',
+                    numero_facture: parsed.numero_facture,
+                    fournisseur: parsed.fournisseur,
+                    montant_ht: parsed.montant_ht,
+                    montant_tva: parsed.montant_tva,
+                    montant_ttc: parsed.montant_ttc,
+                    taux_tva: parsed.taux_tva,
+                  }
+                : d,
+            ),
+          );
+        }
       } catch {
         setLocalDocuments((prev) => prev.map((d) => (d.id === newDoc.id ? { ...d, statut: 'erreur' } : d)));
       }
@@ -1185,11 +1246,31 @@ export default function DocumentsPage() {
                 <thead>
                   <tr className="text-left text-xs text-gray-400 border-b border-gray-100 bg-gray-50">
                     <th className="px-4 py-3">Fichier</th>
-                    <th className="px-4 py-3">N° Facture</th>
-                    <th className="px-4 py-3">Fournisseur</th>
-                    <th className="px-4 py-3 text-right">HT</th>
-                    <th className="px-4 py-3 text-right">TVA</th>
-                    <th className="px-4 py-3 text-right">TTC</th>
+                    {ocrTableMode === 'bank' ? (
+                      <>
+                        <th className="px-4 py-3">Banque</th>
+                        <th className="px-4 py-3">Période</th>
+                        <th className="px-4 py-3 text-right">Opérations</th>
+                        <th className="px-4 py-3 text-right">Solde clôture</th>
+                        <th className="px-4 py-3"></th>
+                      </>
+                    ) : ocrTableMode === 'mixed' ? (
+                      <>
+                        <th className="px-4 py-3">Type</th>
+                        <th className="px-4 py-3">Détail</th>
+                        <th className="px-4 py-3 text-right">Montant / Solde</th>
+                        <th className="px-4 py-3"></th>
+                        <th className="px-4 py-3"></th>
+                      </>
+                    ) : (
+                      <>
+                        <th className="px-4 py-3">N° Facture</th>
+                        <th className="px-4 py-3">Fournisseur</th>
+                        <th className="px-4 py-3 text-right">HT</th>
+                        <th className="px-4 py-3 text-right">TVA</th>
+                        <th className="px-4 py-3 text-right">TTC</th>
+                      </>
+                    )}
                     <th className="px-4 py-3">Statut</th>
                     <th className="px-4 py-3"></th>
                   </tr>
@@ -1200,6 +1281,7 @@ export default function DocumentsPage() {
                       ? creatableOcrInvoices(d.detectedInvoices)
                       : [];
                     const showInvoiceRows = supabaseMode && creatable.length > 1;
+                    const isBankRow = isBankStatementType(d.detectedType);
 
                     return (
                     <Fragment key={d.key}>
@@ -1209,6 +1291,11 @@ export default function DocumentsPage() {
                           <div className="flex items-center gap-2">
                             <FileText size={14} className="text-gray-400" />
                             <span className="text-gray-700 text-xs">{d.nom.substring(0, 20)}</span>
+                            {isBankRow && (
+                              <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-sky-100 text-sky-800">
+                                Relevé bancaire
+                              </span>
+                            )}
                           </div>
                           {supabaseMode && d.fileSizeLabel && (
                             <span className="text-[10px] text-gray-400 pl-5">{d.fileSizeLabel}</span>
@@ -1219,7 +1306,7 @@ export default function DocumentsPage() {
                           {supabaseMode && d.statut === 'erreur' && d.errorDetail && (
                             <span className="text-[10px] text-red-600 pl-5 line-clamp-2">{d.errorDetail}</span>
                           )}
-                          {supabaseMode && d.statut === 'analysé' && d.textPreview && (
+                          {supabaseMode && d.statut === 'analysé' && d.textPreview && !looksLikeRawJsonText(d.textPreview) && (
                             <span className="text-[10px] text-gray-500 pl-5 line-clamp-2" title={d.textPreview}>
                               {d.textPreview}
                             </span>
@@ -1238,11 +1325,57 @@ export default function DocumentsPage() {
                           )}
                         </div>
                       </td>
-                      <td className="px-4 py-3 text-gray-600 text-xs">{showInvoiceRows ? '—' : (d.numero_facture || '-')}</td>
-                      <td className="px-4 py-3 text-gray-600 text-xs">{showInvoiceRows ? '—' : (d.fournisseur || '-')}</td>
-                      <td className="px-4 py-3 text-right text-gray-700 text-xs">{showInvoiceRows ? '—' : (d.montant_ht ? d.montant_ht.toLocaleString() + ' MAD' : '-')}</td>
-                      <td className="px-4 py-3 text-right text-blue-600 text-xs">{showInvoiceRows ? '—' : (d.montant_tva ? d.montant_tva.toLocaleString() + ' MAD' : '-')}</td>
-                      <td className="px-4 py-3 text-right font-medium text-xs">{showInvoiceRows ? '—' : (d.montant_ttc ? d.montant_ttc.toLocaleString() + ' MAD' : '-')}</td>
+                      {ocrTableMode === 'bank' ? (
+                        <>
+                          <td className="px-4 py-3 text-gray-600 text-xs">{d.bank_name || '-'}</td>
+                          <td className="px-4 py-3 text-gray-600 text-xs">{d.statement_period || '-'}</td>
+                          <td className="px-4 py-3 text-right text-gray-700 text-xs">
+                            {d.transaction_count != null ? d.transaction_count : '-'}
+                          </td>
+                          <td className="px-4 py-3 text-right font-medium text-xs">
+                            {d.closing_balance != null
+                              ? `${d.closing_balance.toLocaleString('fr-MA', { minimumFractionDigits: 2 })} MAD`
+                              : '-'}
+                          </td>
+                          <td className="px-4 py-3"></td>
+                        </>
+                      ) : ocrTableMode === 'mixed' ? (
+                        <>
+                          <td className="px-4 py-3 text-indigo-700 text-xs font-medium">
+                            {d.detectedType ? documentTypeLabel(d.detectedType) : '-'}
+                          </td>
+                          <td className="px-4 py-3 text-gray-600 text-xs">
+                            {isBankRow
+                              ? [d.bank_name, d.statement_period].filter(Boolean).join(' · ') || '-'
+                              : showInvoiceRows
+                                ? '—'
+                                : [d.numero_facture, d.fournisseur].filter(Boolean).join(' · ') || '-'}
+                          </td>
+                          <td className="px-4 py-3 text-right text-gray-700 text-xs">
+                            {isBankRow
+                              ? d.closing_balance != null
+                                ? `${d.closing_balance.toLocaleString('fr-MA', { minimumFractionDigits: 2 })} MAD`
+                                : d.transaction_count != null
+                                  ? `${d.transaction_count} op.`
+                                  : '-'
+                              : showInvoiceRows
+                                ? '—'
+                                : d.montant_ttc
+                                  ? `${d.montant_ttc.toLocaleString('fr-MA', { minimumFractionDigits: 2 })} MAD`
+                                  : '-'}
+                          </td>
+                          <td className="px-4 py-3"></td>
+                          <td className="px-4 py-3"></td>
+                        </>
+                      ) : (
+                        <>
+                          <td className="px-4 py-3 text-gray-600 text-xs">{showInvoiceRows ? '—' : (d.numero_facture || '-')}</td>
+                          <td className="px-4 py-3 text-gray-600 text-xs">{showInvoiceRows ? '—' : (d.fournisseur || '-')}</td>
+                          <td className="px-4 py-3 text-right text-gray-700 text-xs">{showInvoiceRows ? '—' : (d.montant_ht ? d.montant_ht.toLocaleString() + ' MAD' : '-')}</td>
+                          <td className="px-4 py-3 text-right text-blue-600 text-xs">{showInvoiceRows ? '—' : (d.montant_tva ? d.montant_tva.toLocaleString() + ' MAD' : '-')}</td>
+                          <td className="px-4 py-3 text-right font-medium text-xs">{showInvoiceRows ? '—' : (d.montant_ttc ? d.montant_ttc.toLocaleString() + ' MAD' : '-')}</td>
+                        </>
+                      )}
                       <td className="px-4 py-3">
                         <div className="flex flex-col gap-1">
                           <span className={`flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium w-fit ${d.statut === 'analysé' ? 'bg-green-100 text-green-700' : d.statut === 'en cours' ? 'bg-amber-100 text-amber-700' : 'bg-red-100 text-red-700'}`}>
@@ -1280,11 +1413,15 @@ export default function DocumentsPage() {
                           {supabaseMode && d.statut === 'analysé' && d.supabaseId && (
                             <button
                               onClick={() => setValidationDocId(d.supabaseId!)}
-                              className="flex items-center gap-1 text-xs font-medium text-indigo-700 hover:text-indigo-800 bg-indigo-50 hover:bg-indigo-100 px-2 py-1 rounded-lg transition-colors"
-                              title="Ouvrir le centre de validation"
+                              className={`flex items-center gap-1 text-xs font-medium px-2 py-1 rounded-lg transition-colors ${
+                                isBankRow
+                                  ? 'text-sky-800 hover:text-sky-900 bg-sky-50 hover:bg-sky-100'
+                                  : 'text-indigo-700 hover:text-indigo-800 bg-indigo-50 hover:bg-indigo-100'
+                              }`}
+                              title={isBankRow ? 'Voir les opérations bancaires' : 'Ouvrir le centre de validation'}
                             >
                               <ShieldCheck size={12} />
-                              Valider
+                              {isBankRow ? 'Voir opérations' : 'Valider'}
                             </button>
                           )}
                           {!supabaseMode && d.statut === 'analysé' && d.fournisseur && d.montant_ttc && d.localDoc && (
@@ -1304,7 +1441,7 @@ export default function DocumentsPage() {
                               {retryingOcrId === d.supabaseId ? 'Relancement\u2026' : "R\u00e9essayer l'analyse"}
                             </button>
                           )}
-                          {supabaseMode && d.statut === 'analysé' && d.supabaseId && (d.creatableInvoiceCount ?? 0) > 0 && (
+                          {supabaseMode && d.statut === 'analysé' && d.supabaseId && !isBankRow && (d.creatableInvoiceCount ?? 0) > 0 && (
                             d.hasAllSupplierInvoices ? (
                               <span className="text-xs text-gray-400">
                                 {(d.creatableInvoiceCount ?? 0) > 1

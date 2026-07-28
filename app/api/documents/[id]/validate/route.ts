@@ -104,11 +104,14 @@ export async function POST(
     return NextResponse.json({
       ok: true,
       validation_status: 'validated',
+      documentKind: registration.documentKind,
       invoicesCreated: registration.invoicesCreated,
       invoicesSkipped: registration.invoicesSkipped,
       invoiceIds: registration.invoiceIds,
       journalLineCount: registration.journalLineCount,
       tvaAmount: registration.tvaAmount,
+      statementId: registration.statementId ?? null,
+      transactionCount: registration.transactionCount ?? null,
     });
   }
 

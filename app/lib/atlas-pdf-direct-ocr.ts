@@ -18,6 +18,12 @@ import type {
   AtlasStructuredExtraction,
 } from '@/app/types/atlas-document';
 import { getAnthropicApiKey } from '@/app/lib/anthropic-env';
+import {
+  looksLikeRawJsonText,
+  parseAiJsonResponse,
+  sanitizeClassificationReason,
+} from '@/app/lib/atlas-ai-json-parse';
+import { documentTypeLabel } from '@/app/lib/atlas-document-routing';
 
 const PDF_OCR_SYSTEM = `Tu es un expert en analyse de documents financiers marocains (factures, relevés bancaires, bulletins de paie, contrats, déclarations fiscales).
 
@@ -53,8 +59,23 @@ Analyse le document PDF fourni et retourne un JSON valide avec cette structure E
     "payment_method": { "value": "...", "confidence": 0.00, "source_page": 1 },
     "category_suggestion": { "value": "...", "confidence": 0.00, "source_page": 1 },
     "accounting_account": { "value": "...", "confidence": 0.00, "source_page": 1 },
-    "is_purchase": { "value": true, "confidence": 0.00, "source_page": 1 }
+    "is_purchase": { "value": true, "confidence": 0.00, "source_page": 1 },
+    "bank_name": { "value": "...", "confidence": 0.00, "source_page": 1 },
+    "account_number": { "value": "...", "confidence": 0.00, "source_page": 1 },
+    "statement_period": { "value": "...", "confidence": 0.00, "source_page": 1 },
+    "opening_balance": { "value": 0.00, "confidence": 0.00, "source_page": 1 },
+    "closing_balance": { "value": 0.00, "confidence": 0.00, "source_page": 1 }
   },
+  "transactions": [
+    {
+      "date": "jj/mm/aaaa",
+      "description": "...",
+      "debit": 0.00,
+      "credit": 0.00,
+      "balance": 0.00,
+      "reference": "..."
+    }
+  ],
   "line_items": [
     { "description": "...", "quantity": 1, "unit_price": 0.00, "total_ht": 0.00, "tva_rate": 20 }
   ],
@@ -85,7 +106,7 @@ Règles strictes :
 - Les montants sont des nombres (float), jamais des chaînes
 - Réponds UNIQUEMENT avec le JSON valide, sans texte supplémentaire ni markdown
 - Si plusieurs factures sont présentes, liste-les toutes dans invoices[]
-- Pour les relevés bancaires, ignorer les champs facture et extraire les soldes`;
+- Pour les relevés bancaires (detected_type=bank_statement) : remplir bank_name, account_number, statement_period, opening_balance, closing_balance et lister TOUTES les opérations dans transactions[] (date, description, debit, credit, balance). Mettre les champs facture à null.`;
 
 // ── Public types ──────────────────────────────────────────────────────────────
 
@@ -96,6 +117,7 @@ export type DirectPdfOcrSuccess = {
   extraction: AtlasStructuredExtraction;
   invoices: AtlasOcrDetectedInvoice[];
   merged: AtlasOcrExtraction;
+  bankTransactions?: Array<Record<string, unknown>>;
   extractedText: string;
 };
 
@@ -149,12 +171,26 @@ type RawLineItem = {
   tva_rate?: number;
 };
 
+type RawBankTransaction = {
+  transaction_date?: string;
+  value_date?: string;
+  date?: string;
+  description?: string;
+  label?: string;
+  reference?: string;
+  debit?: number;
+  credit?: number;
+  amount?: number;
+  balance?: number;
+};
+
 type RawPdfResponse = {
   total_pages?: number;
   classification?: RawClassification;
   extraction?: Record<string, RawField>;
   line_items?: RawLineItem[];
   invoices?: RawInvoice[];
+  transactions?: RawBankTransaction[];
 };
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -181,11 +217,37 @@ function toConfidence(v: unknown): number {
 }
 
 function parseRawResponse(text: string): RawPdfResponse {
-  const clean = text
-    .replace(/^```(?:json)?\s*/i, '')
-    .replace(/\s*```$/i, '')
-    .trim();
-  return JSON.parse(clean) as RawPdfResponse;
+  return parseAiJsonResponse<RawPdfResponse>(text);
+}
+
+function buildBankTransactions(raw: RawPdfResponse): RawBankTransaction[] {
+  if (!Array.isArray(raw.transactions)) return [];
+  return raw.transactions.filter((t) => t && typeof t === 'object');
+}
+
+export function buildOcrExtractedTextSummary(
+  classification: AtlasDocumentClassification,
+  extraction: AtlasStructuredExtraction,
+  transactionCount = 0,
+): string {
+  const typeLabel = documentTypeLabel(classification.detected_type);
+  const reason = sanitizeClassificationReason(classification.classification_reason);
+  if (classification.detected_type === 'bank_statement') {
+    const bank = extraction.bank_name?.value != null ? String(extraction.bank_name.value) : '';
+    const period = extraction.statement_period?.value != null ? String(extraction.statement_period.value) : '';
+    const parts = [typeLabel];
+    if (bank) parts.push(bank);
+    if (period) parts.push(period);
+    if (transactionCount > 0) parts.push(`${transactionCount} opération(s)`);
+    return parts.join(' · ');
+  }
+  const supplier = extraction.supplier_name?.value != null ? String(extraction.supplier_name.value) : '';
+  const invoice = extraction.invoice_number?.value != null ? String(extraction.invoice_number.value) : '';
+  const parts = [typeLabel];
+  if (supplier) parts.push(supplier);
+  if (invoice) parts.push(`N° ${invoice}`);
+  if (reason && !looksLikeRawJsonText(reason)) parts.push(reason);
+  return parts.join(' · ');
 }
 
 function buildClassification(raw?: RawClassification): AtlasDocumentClassification {
@@ -317,6 +379,54 @@ function buildMerged(invoices: AtlasOcrDetectedInvoice[], extraction: AtlasStruc
 
 // ── Main export ───────────────────────────────────────────────────────────────
 
+function processOcrAiRawText(rawText: string): DirectPdfOcrResult {
+  if (!rawText.trim()) {
+    return { ok: false, code: 'empty_response', step: 'ai_provider', message: 'Empty response from AI' };
+  }
+
+  let parsed: RawPdfResponse;
+  try {
+    parsed = parseRawResponse(rawText);
+  } catch (e) {
+    return {
+      ok: false,
+      code: 'json_parse_failed',
+      step: 'json_parse',
+      message: e instanceof Error ? e.message : 'JSON parse failed',
+      rawError: rawText.slice(0, 500),
+    };
+  }
+
+  const classification = buildClassification(parsed.classification);
+  const extraction = buildExtraction(parsed.extraction);
+  const lineItems = buildLineItems(parsed.line_items);
+  const invoices = buildInvoices(parsed);
+  const bankTransactions = buildBankTransactions(parsed);
+  const merged = buildMerged(invoices, extraction);
+  const totalPages = typeof parsed.total_pages === 'number' && parsed.total_pages > 0
+    ? parsed.total_pages
+    : Math.max(1, ...invoices.map(i => i.page_number), 1);
+
+  extraction.line_items = lineItems;
+
+  const extractedText = buildOcrExtractedTextSummary(
+    classification,
+    extraction,
+    bankTransactions.length,
+  );
+
+  return {
+    ok: true,
+    totalPages,
+    classification,
+    extraction,
+    invoices,
+    merged,
+    bankTransactions,
+    extractedText,
+  };
+}
+
 /** Send a PDF buffer directly to Anthropic — no local rendering needed. */
 export async function runDirectPdfOcrExtraction(
   pdfBuffer: Buffer,
@@ -362,44 +472,52 @@ export async function runDirectPdfOcrExtraction(
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const content = (response as any).content as Array<{ type: string; text?: string }> | undefined;
     const rawText = content?.[0]?.type === 'text' ? (content[0].text ?? '') : '';
-    if (!rawText.trim()) {
-      return { ok: false, code: 'empty_response', step: 'ai_provider', message: 'Empty response from AI' };
-    }
+    return processOcrAiRawText(rawText);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    const code = message.includes('overloaded') ? 'ai_provider_overloaded'
+      : message.includes('timeout') ? 'ocr_timeout'
+      : 'ai_provider_error';
+    return { ok: false, code, step: 'ai_provider', message, rawError: message };
+  }
+}
 
-    let parsed: RawPdfResponse;
-    try {
-      parsed = parseRawResponse(rawText);
-    } catch (e) {
-      return {
-        ok: false,
-        code: 'json_parse_failed',
-        step: 'json_parse',
-        message: e instanceof Error ? e.message : 'JSON parse failed',
-        rawError: rawText.slice(0, 500),
-      };
-    }
+/** Image OCR with the same classification + extraction pipeline as PDF. */
+export async function runDirectImageOcrExtraction(
+  imageBase64: string,
+  mimeType: 'image/jpeg' | 'image/png' | 'image/gif' | 'image/webp',
+  fileName?: string | null,
+): Promise<DirectPdfOcrResult> {
+  const apiKey = getAnthropicApiKey();
+  if (!apiKey) {
+    return { ok: false, code: 'ocr_not_configured', step: 'auth', message: 'ANTHROPIC_API_KEY missing' };
+  }
 
-    const classification = buildClassification(parsed.classification);
-    const extraction = buildExtraction(parsed.extraction);
-    const lineItems = buildLineItems(parsed.line_items);
-    const invoices = buildInvoices(parsed);
-    const merged = buildMerged(invoices, extraction);
-    const totalPages = typeof parsed.total_pages === 'number' && parsed.total_pages > 0
-      ? parsed.total_pages
-      : Math.max(1, ...invoices.map(i => i.page_number), 1);
+  try {
+    const client = new Anthropic({ apiKey });
+    const response = await client.messages.create({
+      model: 'claude-sonnet-4-5',
+      max_tokens: 8192,
+      system: PDF_OCR_SYSTEM,
+      messages: [
+        {
+          role: 'user',
+          content: [
+            {
+              type: 'image',
+              source: { type: 'base64', media_type: mimeType, data: imageBase64 },
+            },
+            {
+              type: 'text',
+              text: `Analyse ce document${fileName ? ` (${fileName})` : ''} et retourne le JSON complet demandé.`,
+            },
+          ],
+        },
+      ],
+    });
 
-    // Attach line items to extraction for persistence
-    extraction.line_items = lineItems;
-
-    return {
-      ok: true,
-      totalPages,
-      classification,
-      extraction,
-      invoices,
-      merged,
-      extractedText: rawText,
-    };
+    const text = response.content[0]?.type === 'text' ? response.content[0].text : '';
+    return processOcrAiRawText(text);
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     const code = message.includes('overloaded') ? 'ai_provider_overloaded'

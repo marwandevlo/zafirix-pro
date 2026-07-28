@@ -13,6 +13,12 @@ import type {
 } from '@/app/types/atlas-document';
 import { asRecord } from '@/app/lib/atlas-json';
 import { logAtlasServerEvent } from '@/app/lib/atlas-server-log';
+import { parseNestedClassification } from '@/app/lib/atlas-ai-json-parse';
+import { isBankStatementType } from '@/app/lib/atlas-document-type-utils';
+import {
+  parseBankTransactionsFromDocument,
+  statementHeaderFromExtraction,
+} from '@/app/lib/atlas-bank-extraction';
 import { ocrInvoicesFromDocument } from '@/app/lib/atlas-documents-repository';
 import { creatableOcrInvoices } from '@/app/lib/atlas-ocr-invoices-detect';
 import {
@@ -71,9 +77,35 @@ function structuredFromMetadata(metadata: Record<string, unknown>): AtlasStructu
 }
 
 function classificationFromMetadata(metadata: Record<string, unknown>): AtlasDocumentClassification | null {
-  const raw = metadata.classification;
-  if (!raw || typeof raw !== 'object') return null;
-  return raw as AtlasDocumentClassification;
+  const parsed = parseNestedClassification(metadata.classification);
+  if (!parsed?.detected_type) return null;
+  return {
+    detected_type: parsed.detected_type as AtlasDocumentType,
+    type_confidence: Number(parsed.type_confidence ?? 0),
+    classification_reason: String(parsed.classification_reason ?? ''),
+    possible_types: [],
+    detected_language: String(parsed.detected_language ?? 'fr'),
+    detected_country: String(parsed.detected_country ?? 'MA'),
+    detected_currency: String(parsed.detected_currency ?? 'MAD'),
+  };
+}
+
+function bankStatementHasValidData(
+  structured: AtlasStructuredExtraction,
+  metadata: Record<string, unknown>,
+): boolean {
+  const header = statementHeaderFromExtraction(structured);
+  const transactions = parseBankTransactionsFromDocument(structured, metadata);
+  const hasHeader =
+    Boolean(header.bankName) ||
+    Boolean(header.accountNumber) ||
+    Boolean(extractStr(structured.statement_period));
+  const hasBalances =
+    header.openingBalance != null ||
+    header.closingBalance != null ||
+    extractNum(structured.opening_balance) > 0 ||
+    extractNum(structured.closing_balance) > 0;
+  return transactions.length > 0 || hasHeader || hasBalances;
 }
 
 function extractNum(field?: { value?: string | number | null; user_corrected_value?: string } | null): number {
@@ -142,6 +174,16 @@ export function evaluateAutoValidationStatus(doc: AtlasDocument): {
   const metadata = asRecord(doc.metadata) ?? {};
   const structured = structuredFromMetadata(metadata);
   const classification = classificationFromMetadata(metadata);
+  const docType =
+    doc.documentType ?? classification?.detected_type ?? null;
+
+  if (isBankStatementType(docType)) {
+    if (bankStatementHasValidData(structured, metadata)) {
+      return { status: 'validated', reason: 'auto_validated_bank_statement' };
+    }
+    return { status: 'needs_correction', reason: 'missing_bank_statement_data' };
+  }
+
   const detected = creatableOcrInvoices(ocrInvoicesFromDocument(doc));
 
   if (detected.length > 0) {
@@ -243,7 +285,10 @@ export async function runDocumentAutoPipeline(
   }
 
   const existingSummary = asRecord(asRecord(docRow.metadata)?.validation_summary);
-  if (docRow.validation_status === 'validated' && existingSummary?.invoice_ids) {
+  if (
+    docRow.validation_status === 'validated' &&
+    (existingSummary?.invoice_ids || existingSummary?.statement_id)
+  ) {
     logAtlasServerEvent('documents/auto-pipeline', 'info', 'skip_already_validated', { documentId, userId });
     revalidateDocumentSurfaces();
     return { ok: true, validationStatus: 'validated', reason: 'already_validated' };

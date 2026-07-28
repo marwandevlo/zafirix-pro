@@ -8,6 +8,7 @@ import {
   anthropicImageMediaType,
   isPdfMimeType,
   OCR_PROVIDER,
+  parseOcrClientPayload,
 } from '@/app/lib/atlas-ocr';
 import { captureAtlasServerException } from '@/app/lib/atlas-server-log';
 import { getAnthropicApiKey } from '@/app/lib/anthropic-env';
@@ -220,6 +221,24 @@ export async function POST(request: NextRequest) {
 
     const text = response.content[0].type === 'text' ? response.content[0].text : '';
 
+    if (type === 'ocr') {
+      if (!text.trim()) {
+        return aiError(422, 'ai_provider', 'empty_response', 'OCR provider returned empty response');
+      }
+      try {
+        const parsed = parseOcrClientPayload(text);
+        return NextResponse.json({
+          response: JSON.stringify(parsed),
+          parsed,
+          safetyNotice: ATLAS_AI_SAFETY_NOTICE,
+          ...(IS_DEV ? { provider: OCR_PROVIDER, step: 'complete' } : {}),
+        });
+      } catch (err) {
+        const message = err instanceof Error ? err.message : 'json_parse_failed';
+        return aiError(422, 'json_parse', 'json_parse_failed', message, IS_DEV ? { raw: text.slice(0, 500) } : undefined);
+      }
+    }
+
     if (type === 'assistant') {
       const parsed = tryParseAssistantJson(text);
       if (parsed) {
@@ -231,7 +250,6 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({
       response: text,
       safetyNotice: ATLAS_AI_SAFETY_NOTICE,
-      ...(IS_DEV && type === 'ocr' ? { provider: OCR_PROVIDER, step: 'complete' } : {}),
     });
   } catch (error) {
     await captureAtlasServerException(error, { route: '/api/ai' });

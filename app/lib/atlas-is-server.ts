@@ -174,6 +174,7 @@ export async function computeAndSaveIsDraft(
     .from('atlas_is_drafts')
     .select('id, status')
     .eq('company_id', companyId)
+    .eq('user_id', userId)
     .eq('fiscal_year', fiscalYear)
     .maybeSingle();
 
@@ -218,4 +219,67 @@ export async function validateIsDraft(
   if (error) throw new Error(error.message);
   if (!data) throw new Error('draft_not_found');
   return rowToIsDraft(data as Record<string, unknown>);
+}
+
+export async function getIsDraftForYear(
+  db: SupabaseClient,
+  userId: string,
+  companyId: string,
+  fiscalYear: number,
+): Promise<AtlasIsDraft | null> {
+  await assertCompanyOwned(db, userId, companyId);
+  const { data, error } = await db
+    .from('atlas_is_drafts')
+    .select('*')
+    .eq('company_id', companyId)
+    .eq('user_id', userId)
+    .eq('fiscal_year', fiscalYear)
+    .maybeSingle();
+  if (error) throw new Error(error.message);
+  return data ? rowToIsDraft(data as Record<string, unknown>) : null;
+}
+
+export async function getIsDraftById(
+  db: SupabaseClient,
+  userId: string,
+  draftId: string,
+): Promise<AtlasIsDraft | null> {
+  const { data, error } = await db
+    .from('atlas_is_drafts')
+    .select('*')
+    .eq('id', draftId)
+    .eq('user_id', userId)
+    .maybeSingle();
+  if (error) throw new Error(error.message);
+  return data ? rowToIsDraft(data as Record<string, unknown>) : null;
+}
+
+export type AtlasIsExportCompanyInfo = {
+  name: string | null;
+  legal_name: string | null;
+  trade_name: string | null;
+  if_fiscal: string | null;
+  if_number: string | null;
+};
+
+export async function loadCompanyIsExportInfo(
+  db: SupabaseClient,
+  companyId: string,
+): Promise<AtlasIsExportCompanyInfo | null> {
+  const { data, error } = await db
+    .from('atlas_companies')
+    .select('name, legal_name, trade_name, if_fiscal, if_number, company_json')
+    .eq('id', companyId)
+    .maybeSingle();
+  if (error || !data) return null;
+  const row = data as Record<string, unknown>;
+  const json = asRecord(row.company_json);
+  return {
+    name: row.name == null ? null : String(row.name),
+    legal_name: row.legal_name == null ? null : String(row.legal_name),
+    trade_name: row.trade_name == null ? null : String(row.trade_name),
+    if_fiscal:
+      row.if_fiscal == null ? (json?.if_fiscal == null ? null : String(json.if_fiscal)) : String(row.if_fiscal),
+    if_number: row.if_number == null ? null : String(row.if_number),
+  };
 }

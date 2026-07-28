@@ -16,8 +16,8 @@ import { prepareUploadedImageForOcr } from '@/app/lib/atlas-document-image-uploa
 import { isPdfMimeType } from '@/app/lib/atlas-document-storage';
 import { PDF_OCR_RENDERED_MIME } from '@/app/lib/atlas-pdf-ocr-render';
 import { logAtlasServerEvent } from '@/app/lib/atlas-server-log';
-import { runInvoiceOcrExtraction } from '@/app/lib/atlas-ocr-invoice-server';
-import { runDirectPdfOcrExtraction } from '@/app/lib/atlas-pdf-direct-ocr';
+import { runDirectPdfOcrExtraction, runDirectImageOcrExtraction } from '@/app/lib/atlas-pdf-direct-ocr';
+import { anthropicImageMediaType } from '@/app/lib/atlas-ocr';
 
 type DocumentRow = {
   id: string;
@@ -139,6 +139,7 @@ export async function runPdfOcrJob(
     structuredExtraction: ocrResult.extraction,
     classification: ocrResult.classification,
     extractedText: ocrResult.extractedText,
+    transactions: ocrResult.bankTransactions,
     pdfMeta,
     preserveFileMeta: { filename: row.filename, mimeType, sizeBytes: row.size_bytes, existingMetadata: row.metadata },
   });
@@ -241,7 +242,13 @@ export async function runImageOcrJob(
     return { ok: false, status: 422, code: 'image_compress_failed', message: 'Compression failed' };
   }
 
-  const ocrResult = await runInvoiceOcrExtraction(ocrBuffer.toString('base64'), ocrMime);
+  const imageMediaType = anthropicImageMediaType(ocrMime) ?? ocrMime;
+
+  const ocrResult = await runDirectImageOcrExtraction(
+    ocrBuffer.toString('base64'),
+    imageMediaType,
+    row.filename,
+  );
 
   if (!ocrResult.ok) {
     await persistDocumentOcrResult(supabase, userId, documentId, {
@@ -250,6 +257,7 @@ export async function runImageOcrJob(
         step: ocrResult.step,
         code: ocrResult.code,
         message: frenchOcrErrorMessage(ocrResult.code, ocrResult.message),
+        raw_error: ocrResult.rawError,
       },
       preserveFileMeta: {
         filename: row.filename,
@@ -268,8 +276,21 @@ export async function runImageOcrJob(
 
   const persist = await persistDocumentOcrResult(supabase, userId, documentId, {
     processingStatus: 'processed',
-    extraction: ocrResult.extraction,
-    extractedText: JSON.stringify(ocrResult.extraction, null, 2),
+    extraction: ocrResult.merged,
+    structuredExtraction: ocrResult.extraction,
+    classification: ocrResult.classification,
+    extractedText: ocrResult.extractedText,
+    transactions: ocrResult.bankTransactions,
+    pdfMeta: {
+      original_mime_type: mimeType,
+      page_count: ocrResult.totalPages,
+      total_pages: ocrResult.totalPages,
+      processed_pages: ocrResult.totalPages,
+      processed_page_count: ocrResult.totalPages,
+      pages_processed: ocrResult.totalPages,
+      invoices: ocrResult.invoices,
+      rendered_image_mime_type: imageMediaType,
+    },
     preserveFileMeta: {
       filename: row.filename,
       mimeType,

@@ -1,4 +1,5 @@
 import type { AtlasOcrError, AtlasOcrExtraction } from '@/app/types/atlas-document';
+import { normalizeOcrAiResponse, type NormalizedOcrPayload } from '@/app/lib/atlas-ocr-normalize';
 
 export const OCR_PROVIDER = 'anthropic';
 
@@ -30,12 +31,25 @@ export function anthropicImageMediaType(
   return null;
 }
 
-/** Strip markdown fences and parse OCR JSON from model output. */
+/** Strip markdown fences / "json" prefix and parse OCR JSON from model output. */
 export function parseOcrJsonResponse(raw: string): AtlasOcrExtraction {
-  const trimmed = raw.trim();
-  const fenced = trimmed.match(/```(?:json)?\s*([\s\S]*?)```/i);
-  const jsonStr = (fenced ? fenced[1] : trimmed).trim();
-  return JSON.parse(jsonStr) as AtlasOcrExtraction;
+  const normalized = normalizeOcrAiResponse(raw);
+  if (normalized.type === 'bank_statement') {
+    return {
+      description: [
+        normalized.bankName,
+        normalized.period,
+        normalized.transactions.length ? `${normalized.transactions.length} opération(s)` : '',
+      ].filter(Boolean).join(' · '),
+    };
+  }
+  const { type: _type, ...invoice } = normalized;
+  return invoice as AtlasOcrExtraction;
+}
+
+/** Parse OCR AI text and return a typed payload for the client. */
+export function parseOcrClientPayload(raw: string): NormalizedOcrPayload {
+  return normalizeOcrAiResponse(raw);
 }
 
 export function formatOcrUiMessage(code: string, fallbackMessage?: string): string {

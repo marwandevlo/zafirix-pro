@@ -232,6 +232,7 @@ export type PersistDocumentOcrInput = {
   structuredExtraction?: AtlasStructuredExtraction;
   classification?: AtlasDocumentClassification;
   extractedText?: string;
+  transactions?: Array<Record<string, unknown>>;
   ocrError?: AtlasOcrError;
   pdfMeta?: DocumentOcrPdfMeta;
   preserveFileMeta?: {
@@ -310,6 +311,7 @@ export async function persistDocumentOcrResult(
         ocr: ocrMeta,
         ...(input.classification ? { classification: input.classification } : {}),
         ...(input.structuredExtraction ? { extraction: input.structuredExtraction } : {}),
+        ...(input.transactions?.length ? { transactions: input.transactions } : {}),
       },
       updated_at: now,
     })

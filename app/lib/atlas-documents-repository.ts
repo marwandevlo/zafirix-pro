@@ -13,6 +13,10 @@ import type {
   AtlasOcrExtraction,
   AtlasStructuredExtraction,
 } from '@/app/types/atlas-document';
+import { parseNestedClassification, looksLikeRawJsonText, sanitizeClassificationReason } from '@/app/lib/atlas-ai-json-parse';
+import { documentTypeLabel } from '@/app/lib/atlas-document-routing';
+import { parseBankTransactionsFromDocument } from '@/app/lib/atlas-bank-extraction';
+import { isBankStatementType, extractionFieldKeysForType } from '@/app/lib/atlas-document-type-utils';
 import {
   buildDetectedInvoicesFromExtraction,
   creatableOcrInvoices,
@@ -670,11 +674,27 @@ export function ocrPageProgressFromDocument(doc: AtlasDocument): {
 
 /** Returns the classification stored in document metadata, or null. */
 export function classificationFromDocument(doc: AtlasDocument): AtlasDocumentClassification | null {
-  const c = doc.metadata?.classification;
-  if (!c || typeof c !== 'object') return null;
-  const rec = c as Record<string, unknown>;
-  if (!rec.detected_type) return null;
-  return rec as unknown as AtlasDocumentClassification;
+  const raw = doc.metadata?.classification;
+  const parsed = parseNestedClassification(raw);
+  if (!parsed?.detected_type) return null;
+  return {
+    detected_type: parsed.detected_type as AtlasDocumentType,
+    type_confidence: Number(parsed.type_confidence ?? 0),
+    classification_reason: sanitizeClassificationReason(String(parsed.classification_reason ?? '')),
+    possible_types: Array.isArray(parsed.possible_types)
+      ? (parsed.possible_types as AtlasDocumentType[])
+      : [],
+    detected_language: String(parsed.detected_language ?? 'fr'),
+    detected_country: String(parsed.detected_country ?? 'MA'),
+    detected_currency: String(parsed.detected_currency ?? 'MAD'),
+  };
+}
+
+/** Bank transactions stored in metadata or extraction. */
+export function bankTransactionsFromDocument(doc: AtlasDocument): Array<Record<string, unknown>> {
+  const metadata = asRecord(doc.metadata) ?? {};
+  const extraction = structuredExtractionFromDocument(doc) ?? {};
+  return parseBankTransactionsFromDocument(extraction, metadata);
 }
 
 /** Returns the structured extraction stored in document metadata, or null. */
@@ -702,8 +722,17 @@ export function validationStatusFromDocument(doc: AtlasDocument): AtlasDocumentV
 }
 
 export function ocrTextPreviewFromDocument(doc: AtlasDocument, maxLen = 160): string | undefined {
+  const classification = classificationFromDocument(doc);
+  if (classification) {
+    const summary = `${documentTypeLabel(classification.detected_type)}${
+      classification.classification_reason ? ` — ${classification.classification_reason}` : ''
+    }`;
+    if (summary.length <= maxLen) return summary;
+    return `${summary.slice(0, maxLen)}…`;
+  }
+
   const text = doc.extractedText?.trim();
-  if (!text) return undefined;
+  if (!text || looksLikeRawJsonText(text)) return undefined;
   const flat = text.replace(/\s+/g, ' ').trim();
   if (flat.length <= maxLen) return flat;
   return `${flat.slice(0, maxLen)}…`;

@@ -28,9 +28,11 @@ import {
   structuredExtractionFromDocument,
   validationStatusFromDocument,
   ocrInvoicesFromDocument,
+  bankTransactionsFromDocument,
 } from '@/app/lib/atlas-documents-repository';
 import { creatableOcrInvoices } from '@/app/lib/atlas-ocr-invoices-detect';
 import type { AtlasOcrDetectedInvoice } from '@/app/types/atlas-document';
+import { isBankStatementType, extractionFieldKeysForType } from '@/app/lib/atlas-document-type-utils';
 import {
   confidenceColor,
   confidenceLabel,
@@ -73,6 +75,8 @@ type CorrectionState = {
   fieldName: string;
   currentValue: string;
   newValue: string;
+  transactionIndex?: number;
+  transactionField?: string;
 };
 
 // ── Field display helpers ─────────────────────────────────────────────────────
@@ -121,6 +125,20 @@ function fieldValueDisplay(field: AtlasExtractedField): string {
 
 function isAmountField(key: string): boolean {
   return ['subtotal_ht', 'tva_amount', 'total_ttc', 'opening_balance', 'closing_balance', 'gross_salary', 'net_salary', 'cnss_amount', 'ir_amount'].includes(key);
+}
+
+function formatAmount(value: unknown): string {
+  if (value == null || value === '') return '—';
+  const n = typeof value === 'number' ? value : parseFloat(String(value).replace(/\s/g, '').replace(',', '.'));
+  if (!Number.isFinite(n)) return String(value);
+  return n.toLocaleString('fr-MA', { minimumFractionDigits: 2 });
+}
+
+function transactionCellValue(row: Record<string, unknown>, key: string): string {
+  const v = row[key] ?? row[key === 'description' ? 'label' : key] ?? row[key === 'transaction_date' ? 'date' : key];
+  if (v == null || v === '') return '—';
+  if (key === 'debit' || key === 'credit' || key === 'balance') return formatAmount(v);
+  return String(v);
 }
 
 // ── Confidence badge ──────────────────────────────────────────────────────────
@@ -245,12 +263,19 @@ export function ValidationCenter({ document, onClose, onValidated, onRetryOcr }:
   const classification = classificationFromDocument(document);
   const extraction = structuredExtractionFromDocument(document);
   const validationStatus = localValidationStatus ?? validationStatusFromDocument(document);
+  const isBankStatement = isBankStatementType(classification?.detected_type);
+  const bankTransactions = useMemo(
+    () => (isBankStatement ? bankTransactionsFromDocument(document) : []),
+    [document, isBankStatement],
+  );
+  const allowedFieldKeys = extractionFieldKeysForType(classification?.detected_type ?? null);
 
   const detectedInvoices = useMemo(
     () => creatableOcrInvoices(ocrInvoicesFromDocument(document)),
     [document],
   );
   const isMultiInvoice = detectedInvoices.length > 1;
+  const classificationConfirmed = Boolean(classification?.detected_type && classification.detected_type !== 'unknown');
 
   const routingSuggestions = classification?.detected_type
     ? getRoutingSuggestions(classification.detected_type)
@@ -300,6 +325,9 @@ export function ValidationCenter({ document, onClose, onValidated, onRetryOcr }:
         invoicesSkipped?: number;
         journalLineCount?: number;
         tvaAmount?: number;
+        documentKind?: 'invoice' | 'bank_statement';
+        statementId?: string;
+        transactionCount?: number;
       };
 
       if (!res.ok) {
@@ -311,21 +339,31 @@ export function ValidationCenter({ document, onClose, onValidated, onRetryOcr }:
       setLocalValidationStatus(action);
 
       if (action === 'validated') {
-        const created = body.invoicesCreated ?? 0;
-        const skipped = body.invoicesSkipped ?? 0;
-        const journal = body.journalLineCount ?? 0;
-        const tva = body.tvaAmount ?? 0;
-        let successMsg = created > 1
-          ? `Document validé — ${created} factures enregistrées.`
-          : created === 1
-            ? 'Document validé — facture enregistrée.'
-            : 'Document validé.';
-        if (skipped > 0) successMsg += ` ${skipped} page(s) ignorée(s) (données incomplètes).`;
-        if (journal > 0) successMsg += ` ${journal} écriture(s) comptable(s).`;
-        if (tva > 0) {
-          successMsg += ` TVA: ${tva.toLocaleString('fr-MA', { minimumFractionDigits: 2 })} MAD.`;
+        if (body.documentKind === 'bank_statement') {
+          const count = body.transactionCount ?? 0;
+          showMessage(
+            'success',
+            count > 0
+              ? `Relevé bancaire validé — ${count} opération(s) importée(s).`
+              : 'Relevé bancaire validé.',
+          );
+        } else {
+          const created = body.invoicesCreated ?? 0;
+          const skipped = body.invoicesSkipped ?? 0;
+          const journal = body.journalLineCount ?? 0;
+          const tva = body.tvaAmount ?? 0;
+          let successMsg = created > 1
+            ? `Document validé — ${created} factures enregistrées.`
+            : created === 1
+              ? 'Document validé — facture enregistrée.'
+              : 'Document validé.';
+          if (skipped > 0) successMsg += ` ${skipped} page(s) ignorée(s) (données incomplètes).`;
+          if (journal > 0) successMsg += ` ${journal} écriture(s) comptable(s).`;
+          if (tva > 0) {
+            successMsg += ` TVA: ${tva.toLocaleString('fr-MA', { minimumFractionDigits: 2 })} MAD.`;
+          }
+          showMessage('success', successMsg);
         }
-        showMessage('success', successMsg);
       } else {
         showMessage(
           'success',
@@ -342,13 +380,31 @@ export function ValidationCenter({ document, onClose, onValidated, onRetryOcr }:
     }
   }, [document.id, onValidated, router]);
 
-  const handleSaveCorrection = useCallback(async (fieldName: string, oldValue: string, newValue: string, reason: string, sourcePage?: number, confidenceBefore?: number) => {
+  const handleSaveCorrection = useCallback(async (
+    fieldName: string,
+    oldValue: string,
+    newValue: string,
+    reason: string,
+    sourcePage?: number,
+    confidenceBefore?: number,
+    transactionIndex?: number,
+    transactionField?: string,
+  ) => {
     try {
       const res = await fetch(`/api/documents/${document.id}/corrections`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
-        body: JSON.stringify({ fieldName, oldValue, newValue, correctionReason: reason, sourcePage, confidenceBefore }),
+        body: JSON.stringify({
+          fieldName,
+          oldValue,
+          newValue,
+          correctionReason: reason,
+          sourcePage,
+          confidenceBefore,
+          transactionIndex,
+          transactionField,
+        }),
       });
       if (!res.ok) {
         showMessage('error', 'Échec de l\'enregistrement de la correction.');
@@ -420,13 +476,18 @@ export function ValidationCenter({ document, onClose, onValidated, onRetryOcr }:
   const visibleFields = extraction
     ? Object.entries(extraction).filter(([key, field]) => {
         if (key === 'line_items') return false;
+        if (allowedFieldKeys && !allowedFieldKeys.has(key)) return false;
         if (!field || typeof field !== 'object') return false;
         const f = field as AtlasExtractedField;
         return f.value != null || (f.user_corrected_value != null);
       })
     : [];
 
-  const lineItems = Array.isArray(extraction?.line_items) ? extraction!.line_items : [];
+  const lineItems = !isBankStatement && Array.isArray(extraction?.line_items) ? extraction!.line_items : [];
+
+  const canValidateDocument = isBankStatement
+    ? classificationConfirmed
+    : classificationConfirmed || visibleFields.length > 0 || detectedInvoices.length > 0;
 
   const statusColors: Record<string, string> = {
     pending_review: 'bg-amber-50 border-amber-200 text-amber-700',
@@ -456,6 +517,8 @@ export function ValidationCenter({ document, onClose, onValidated, onRetryOcr }:
               reason,
               field?.source_page,
               field?.confidence,
+              correction.transactionIndex,
+              correction.transactionField,
             );
           }}
           onCancel={() => setCorrection(null)}
@@ -532,7 +595,7 @@ export function ValidationCenter({ document, onClose, onValidated, onRetryOcr }:
           </section>
 
           {/* Multi-invoice pages detected */}
-          {isMultiInvoice && (
+          {!isBankStatement && isMultiInvoice && (
             <section>
               <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-3">
                 Factures détectées ({detectedInvoices.length})
@@ -565,6 +628,72 @@ export function ValidationCenter({ document, onClose, onValidated, onRetryOcr }:
               <p className="text-[11px] text-gray-500 mt-2">
                 La validation enregistrera chaque facture détectée (comptabilité + TVA).
               </p>
+            </section>
+          )}
+
+          {/* Bank transactions */}
+          {isBankStatement && (
+            <section>
+              <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-3">
+                Opérations bancaires ({bankTransactions.length})
+              </h3>
+              {bankTransactions.length === 0 ? (
+                <div className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-xl px-4 py-3">
+                  Aucune opération extraite — vérifiez les champs banque / période ou relancez l&apos;OCR.
+                </div>
+              ) : (
+                <div className="overflow-x-auto border border-gray-100 rounded-xl">
+                  <table className="w-full text-xs">
+                    <thead>
+                      <tr className="bg-gray-50 text-gray-500 text-left">
+                        <th className="px-3 py-2">Date</th>
+                        <th className="px-3 py-2">Libellé</th>
+                        <th className="px-3 py-2 text-right">Débit</th>
+                        <th className="px-3 py-2 text-right">Crédit</th>
+                        <th className="px-3 py-2 text-right">Solde</th>
+                        <th className="px-3 py-2"></th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {bankTransactions.map((row, index) => (
+                        <tr key={index} className="border-t border-gray-50 group hover:bg-gray-50">
+                          <td className="px-3 py-2 text-gray-700 whitespace-nowrap">
+                            {transactionCellValue(row, 'transaction_date')}
+                          </td>
+                          <td className="px-3 py-2 text-gray-800">
+                            {transactionCellValue(row, 'description')}
+                          </td>
+                          <td className="px-3 py-2 text-right text-red-600">
+                            {transactionCellValue(row, 'debit')}
+                          </td>
+                          <td className="px-3 py-2 text-right text-green-700">
+                            {transactionCellValue(row, 'credit')}
+                          </td>
+                          <td className="px-3 py-2 text-right text-gray-700">
+                            {transactionCellValue(row, 'balance')}
+                          </td>
+                          <td className="px-3 py-2">
+                            <button
+                              type="button"
+                              onClick={() => setCorrection({
+                                fieldName: `transaction_${index}_description`,
+                                currentValue: transactionCellValue(row, 'description'),
+                                newValue: transactionCellValue(row, 'description'),
+                                transactionIndex: index,
+                                transactionField: 'description',
+                              })}
+                              className="opacity-0 group-hover:opacity-100 text-gray-400 hover:text-rose-600"
+                              title="Corriger le libellé"
+                            >
+                              <Edit3 size={13} />
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
             </section>
           )}
 
@@ -726,8 +855,8 @@ export function ValidationCenter({ document, onClose, onValidated, onRetryOcr }:
             </section>
           )}
 
-          {/* TVA Consistency Alert — shown when HT × rate ≠ detected TVA */}
-          {extraction && (
+          {/* TVA Consistency Alert — invoices only */}
+          {!isBankStatement && extraction && (
             <TvaConsistencyAlert
               amountHt={
                 extraction.subtotal_ht?.user_corrected_value != null
@@ -893,15 +1022,22 @@ export function ValidationCenter({ document, onClose, onValidated, onRetryOcr }:
         {/* Action buttons */}
         <div className="p-4 border-t border-gray-100 space-y-2">
           {validationStatus !== 'validated' && (
-            <button
-              type="button"
-              onClick={() => void handleValidate('validated')}
-              disabled={validating}
-              className="w-full flex items-center justify-center gap-2 px-4 py-2.5 bg-green-600 text-white rounded-xl hover:bg-green-700 disabled:opacity-50 font-medium text-sm"
-            >
-              <CheckCircle size={16} />
-              {validating ? 'Validation…' : 'Valider le document'}
-            </button>
+            <>
+              {isBankStatement && classificationConfirmed && (
+                <p className="text-[11px] text-sky-700 bg-sky-50 border border-sky-100 rounded-lg px-3 py-2">
+                  Classification relevé bancaire confirmée — les champs facture (HT, TVA, N° facture) ne sont pas requis.
+                </p>
+              )}
+              <button
+                type="button"
+                onClick={() => void handleValidate('validated')}
+                disabled={validating || !canValidateDocument}
+                className="w-full flex items-center justify-center gap-2 px-4 py-2.5 bg-green-600 text-white rounded-xl hover:bg-green-700 disabled:opacity-50 font-medium text-sm"
+              >
+                <CheckCircle size={16} />
+                {validating ? 'Validation…' : isBankStatement ? 'Valider le relevé' : 'Valider le document'}
+              </button>
+            </>
           )}
 
           <div className="flex gap-2">
