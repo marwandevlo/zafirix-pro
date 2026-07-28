@@ -7,7 +7,6 @@
  * Body: { action: 'validated' | 'rejected' | 'needs_correction', note?: string }
  */
 
-import { revalidatePath } from 'next/cache';
 import { NextRequest, NextResponse } from 'next/server';
 import { documentUploadSessionUserId } from '@/app/lib/atlas-document-upload-auth';
 import {
@@ -15,6 +14,7 @@ import {
   registerValidatedDocumentRecords,
 } from '@/app/lib/atlas-document-validation-server';
 import { logDocumentEvent } from '@/app/lib/atlas-document-events';
+import { revalidateDocumentSurfaces } from '@/app/lib/revalidate-document-surfaces';
 import { getSupabaseServiceRoleClient } from '@/app/lib/supabase-admin';
 
 export const runtime = 'nodejs';
@@ -24,13 +24,6 @@ type ValidateBody = {
   action?: string;
   note?: string;
 };
-
-function revalidateDocumentSurfaces(): void {
-  revalidatePath('/documents');
-  revalidatePath('/comptabilite');
-  revalidatePath('/tva');
-  revalidatePath('/declarations');
-}
 
 export async function POST(
   request: NextRequest,

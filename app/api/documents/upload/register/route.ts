@@ -138,11 +138,16 @@ export async function POST(request: NextRequest) {
     fileSize: sizeBytes,
   });
 
-  // If an existing processed document was reused, skip OCR — it's already done.
+  // If an existing processed document was reused, skip OCR — run auto-posting if needed.
   if (!result.existingDocumentReused) {
     scheduleVercelBackground(async () => {
       const { executeDocumentOcrServer } = await import('@/app/lib/atlas-document-ocr-runner');
       await executeDocumentOcrServer(userId, result.document.id, 'register');
+    });
+  } else {
+    scheduleVercelBackground(async () => {
+      const { runDocumentAutoPipeline } = await import('@/app/lib/atlas-document-auto-pipeline');
+      await runDocumentAutoPipeline(userId, result.document.id, 'register');
     });
   }
 

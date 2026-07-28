@@ -72,6 +72,8 @@ export async function executeDocumentOcrServer(
 
   if (row.processing_status === 'processed') {
     logAtlasServerEvent('documents/ocr', 'info', 'ocr_runner_skip_already_processed', { documentId, userId });
+    const { runDocumentAutoPipeline } = await import('@/app/lib/atlas-document-auto-pipeline');
+    await runDocumentAutoPipeline(userId, documentId, source);
     return;
   }
 
@@ -129,6 +131,8 @@ export async function executeDocumentOcrServer(
       return;
     }
     logAtlasServerEvent('documents/ocr', 'info', 'ocr_runner_complete', { documentId, userId });
+    const { runDocumentAutoPipeline } = await import('@/app/lib/atlas-document-auto-pipeline');
+    await runDocumentAutoPipeline(userId, documentId, 'ocr_runner');
   } catch (err) {
     const code = err instanceof Error && err.message === 'ocr_job_timeout' ? 'ocr_timeout' : 'ocr_failed';
     const message =
