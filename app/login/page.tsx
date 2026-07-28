@@ -71,7 +71,16 @@ export default function LoginPage() {
     setSuccess('');
 
     if (mode === 'register') {
-      const { data, error } = await supabase.auth.signUp({ email, password });
+      const { data, error } = await supabase.auth.signUp({
+        email,
+        password,
+        options: {
+          emailRedirectTo:
+            typeof window !== 'undefined'
+              ? `${window.location.origin}/auth/callback?next=/dashboard`
+              : undefined,
+        },
+      });
       if (error) setError(error.message);
       else {
         if (isAtlasSupabaseDataEnabled() && data.session) {

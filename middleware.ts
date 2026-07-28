@@ -54,10 +54,12 @@ const PUBLIC_PATHS = new Set([
   '/terms',
   '/privacy',
   '/access-denied',
+  '/auth/callback',
 ]);
 
 function isPublicPath(pathname: string): boolean {
   if (PUBLIC_PATHS.has(pathname)) return true;
+  if (pathname.startsWith('/auth/')) return true;
   if (pathname === '/legal' || pathname.startsWith('/legal/')) return true;
   if (pathname.startsWith('/_next')) return true;
   if (pathname.startsWith('/zafirix-')) return true;

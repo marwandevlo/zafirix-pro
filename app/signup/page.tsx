@@ -202,6 +202,15 @@ export default function SignUpPage() {
       const { data: signUpData, error } = await supabase.auth.signUp({
         email: trimmedEmail,
         password,
+        options: {
+          emailRedirectTo:
+            typeof window !== 'undefined'
+              ? `${window.location.origin}/auth/callback?next=/dashboard`
+              : undefined,
+          data: {
+            full_name: trimmedFullName || undefined,
+          },
+        },
       });
       if (error) {
         const msg = String(error.message ?? '');
