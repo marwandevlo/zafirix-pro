@@ -9,6 +9,7 @@
     "lint": "eslint",
     "generate:icons": "node scripts/generate-zafirix-icons.mjs",
     "apply:routing-migration": "node scripts/apply-routing-migration.mjs",
+    "apply:production-migrations": "node scripts/apply-production-migrations.mjs",
     "verify:production": "node scripts/verify-production-readiness.mjs",
     "test:e2e": "playwright test",
     "test:e2e:ui": "playwright test --ui"

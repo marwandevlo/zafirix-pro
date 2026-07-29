@@ -6,6 +6,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { documentUploadSessionUserId } from '@/app/lib/atlas-document-upload-auth';
 import { detectAtlasAiAnomalies, persistAtlasAiAnomalies } from '@/app/lib/atlas-ai-anomalies';
 import { logAtlasAiInteraction } from '@/app/lib/atlas-ai-interactions';
+import { isMissingTableError } from '@/app/lib/atlas-api-company-guard';
 import { getSupabaseServiceRoleClient } from '@/app/lib/supabase-admin';
 
 export const runtime = 'nodejs';
@@ -67,7 +68,17 @@ export async function GET(request: NextRequest) {
   else q = q.is('company_id', null);
 
   const { data, error } = await q.limit(100);
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  if (error) {
+    if (isMissingTableError(error.message)) {
+      return NextResponse.json({
+        ok: true,
+        anomalies: [],
+        warning: 'Module IA en cours de déploiement — tables absentes.',
+        counts: { critical: 0, warning: 0, info: 0, total: 0 },
+      });
+    }
+    return NextResponse.json({ ok: false, error: error.message }, { status: 500 });
+  }
 
   const anomalies = (data ?? []).map((r) => mapAnomalyRow(r as Record<string, unknown>));
 

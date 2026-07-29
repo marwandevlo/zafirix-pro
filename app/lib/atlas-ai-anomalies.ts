@@ -4,6 +4,7 @@
 
 import type { SupabaseClient } from '@supabase/supabase-js';
 import type { AiAnomalySeverity, AtlasAiAnomaly } from '@/app/types/atlas-ai-copilot';
+import { isMissingTableError } from '@/app/lib/atlas-api-company-guard';
 import { ATLAS_AI_READINESS_THRESHOLD, ATLAS_AI_TVA_TOLERANCE_PCT } from '@/app/lib/atlas-ai-constants';
 import { runLiasseEngine } from '@/app/lib/atlas-liasse-engine';
 
@@ -220,7 +221,8 @@ export async function persistAtlasAiAnomalies(
   let del = db.from('atlas_ai_anomalies').delete().eq('user_id', userId).eq('status', 'open');
   if (companyId) del = del.eq('company_id', companyId);
   else del = del.is('company_id', null);
-  await del;
+  const delResult = await del;
+  if (delResult.error && isMissingTableError(delResult.error.message)) return [];
 
   if (detected.length === 0) return [];
 
@@ -238,7 +240,10 @@ export async function persistAtlasAiAnomalies(
   }));
 
   const { data, error } = await db.from('atlas_ai_anomalies').insert(rows).select('*');
-  if (error) throw new Error(error.message);
+  if (error) {
+    if (isMissingTableError(error.message)) return [];
+    throw new Error(error.message);
+  }
 
   return (data ?? []).map((r) => {
     const details = (r.details && typeof r.details === 'object') ? r.details as Record<string, unknown> : {};

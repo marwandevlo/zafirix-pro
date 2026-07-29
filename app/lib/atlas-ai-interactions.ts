@@ -1,5 +1,6 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import type { AiSourceRef, AtlasAiInteraction } from '@/app/types/atlas-ai-copilot';
+import { isMissingTableError } from '@/app/lib/atlas-api-company-guard';
 
 export async function logAtlasAiInteraction(
   db: SupabaseClient,
@@ -29,7 +30,10 @@ export async function logAtlasAiInteraction(
     .select('id')
     .single();
 
-  if (error) throw new Error(error.message);
+  if (error) {
+    if (isMissingTableError(error.message)) return '';
+    throw new Error(error.message);
+  }
   return String(data.id);
 }
 
@@ -46,7 +50,10 @@ export async function listConversationHistory(
     .order('created_at', { ascending: true })
     .limit(50);
 
-  if (error) throw new Error(error.message);
+  if (error) {
+    if (isMissingTableError(error.message)) return [];
+    throw new Error(error.message);
+  }
 
   return (data ?? []).map((r) => ({
     id: String(r.id),
@@ -87,15 +94,19 @@ export async function getOrCreateConversation(
     .select('id')
     .single();
 
-  if (error) throw new Error(error.message);
+  if (error) {
+    if (isMissingTableError(error.message)) return crypto.randomUUID();
+    throw new Error(error.message);
+  }
   return String(data.id);
 }
 
 export async function touchConversation(db: SupabaseClient, conversationId: string): Promise<void> {
-  await db
+  const { error } = await db
     .from('atlas_ai_conversations')
     .update({ updated_at: new Date().toISOString() })
     .eq('id', conversationId);
+  if (error && !isMissingTableError(error.message)) throw new Error(error.message);
 }
 
 export type AtlasAiConversationRow = {
@@ -127,7 +138,10 @@ export async function listConversations(
   if (search) q = q.ilike('title', `%${search}%`);
 
   const { data, error } = await q;
-  if (error) throw new Error(error.message);
+  if (error) {
+    if (isMissingTableError(error.message)) return [];
+    throw new Error(error.message);
+  }
 
   const rows = data ?? [];
   const enriched: AtlasAiConversationRow[] = [];
