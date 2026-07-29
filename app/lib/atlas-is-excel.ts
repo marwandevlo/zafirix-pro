@@ -231,7 +231,27 @@ export async function generateIsDeclarationExcelBuffer(
   row += 1;
   writeAmountRow(ws, row, 'Cotisation Minimale (0,5% CA)', draft.minimalContribution);
   row += 1;
+  const cotisationMinAppliquee = draft.sourcesJson.cotisationMinimaleAppliquee === true;
+  writeTextRow(ws, row, 'Cotisation minimale appliquée:', cotisationMinAppliquee ? 'Oui (impôt dû = max(IS, 0,5% CA))' : 'Non');
+  row += 1;
   writeAmountRow(ws, row, 'Impôt Dû', draft.isDue, { bold: true, total: true });
+  row += 2;
+
+  const acomptesRaw = draft.sourcesJson.acomptesProvisionnels;
+  if (Array.isArray(acomptesRaw) && acomptesRaw.length) {
+    writeSectionHeader(ws, row, 'Acomptes Provisionnels (exercice suivant)');
+    row += 1;
+    for (const item of acomptesRaw) {
+      const a = item as Record<string, unknown>;
+      const trimestre = Number(a.trimestre ?? 0);
+      const echeance = String(a.echeance ?? '');
+      const montant = Number(a.montant ?? 0);
+      writeAmountRow(ws, row, `T${trimestre} — échéance ${echeance}`, montant);
+      row += 1;
+    }
+    const totalAcomptes = Number(draft.sourcesJson.totalAcomptes ?? 0);
+    writeAmountRow(ws, row, 'Total acomptes provisionnels', totalAcomptes, { bold: true, total: true });
+  }
 
   autoFitColumns(ws, COL_COUNT);
 

@@ -1,4 +1,5 @@
 import type { AtlasIsDraft } from '@/app/types/atlas-payroll';
+import type { AtlasIsAcompteTrimestriel } from '@/app/lib/atlas-payroll-calculations';
 import {
   escapeDgiXml,
   formatDgiAmount,
@@ -18,6 +19,23 @@ export type IsExportValidation = {
 
 function totalCharges(draft: AtlasIsDraft): number {
   return draft.supplierExpensesHT + draft.payrollTotal + draft.accountingCharges;
+}
+
+function parseAcomptes(draft: AtlasIsDraft): AtlasIsAcompteTrimestriel[] {
+  const raw = draft.sourcesJson.acomptesProvisionnels;
+  if (!Array.isArray(raw)) return [];
+  return raw
+    .map((item) => {
+      const r = item as Record<string, unknown>;
+      const trimestre = Number(r.trimestre);
+      if (trimestre < 1 || trimestre > 4) return null;
+      return {
+        trimestre: trimestre as 1 | 2 | 3 | 4,
+        echeance: String(r.echeance ?? ''),
+        montant: Number(r.montant ?? 0),
+      };
+    })
+    .filter((a): a is AtlasIsAcompteTrimestriel => a != null);
 }
 
 /** Ensure draft contains computable fiscal activity before exporting. */
@@ -67,6 +85,8 @@ export function generateIsDeclarationXml(
     typeof draft.sourcesJson.appliedRate === 'string'
       ? escapeDgiXml(draft.sourcesJson.appliedRate)
       : '';
+  const cotisationMinAppliquee = draft.sourcesJson.cotisationMinimaleAppliquee === true;
+  const acomptes = parseAcomptes(draft);
 
   const lines = [
     '<?xml version="1.0" encoding="UTF-8"?>',
@@ -92,8 +112,22 @@ export function generateIsDeclarationXml(
     '  <liquidationIS>',
     `    <impotSurSocietesCalcule>${formatDgiAmount(draft.estimatedIS)}</impotSurSocietesCalcule>`,
     `    <cotisationMinimale>${formatDgiAmount(draft.minimalContribution)}</cotisationMinimale>`,
+    `    <cotisationMinimaleAppliquee>${cotisationMinAppliquee ? 'true' : 'false'}</cotisationMinimaleAppliquee>`,
     `    <impotDu>${formatDgiAmount(draft.isDue)}</impotDu>`,
     '  </liquidationIS>',
+    ...(acomptes.length
+      ? [
+          '  <acomptesProvisionnels>',
+          ...acomptes.flatMap((a) => [
+            '    <acompte>',
+            `      <trimestre>${a.trimestre}</trimestre>`,
+            `      <echeance>${escapeDgiXml(a.echeance)}</echeance>`,
+            `      <montant>${formatDgiAmount(a.montant)}</montant>`,
+            '    </acompte>',
+          ]),
+          '  </acomptesProvisionnels>',
+        ]
+      : []),
     '  <meta>',
     `    <formulaVersion>${escapeDgiXml(draft.formulaVersion)}</formulaVersion>`,
     `    <statutBrouillon>${draft.status}</statutBrouillon>`,

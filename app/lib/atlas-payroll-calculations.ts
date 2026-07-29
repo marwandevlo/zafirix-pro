@@ -63,3 +63,59 @@ export function isRateLabel(taxableResult: number): string {
   if (taxableResult <= 5_000_000) return '26%';
   return '31%';
 }
+
+export type AtlasIsAcompteTrimestriel = {
+  trimestre: 1 | 2 | 3 | 4;
+  echeance: string;
+  montant: number;
+};
+
+export type AtlasIsLiquidation = {
+  estimatedIS: number;
+  minimalContribution: number;
+  isDue: number;
+  /** True when cotisation minimale (0,5% CA) exceeds IS calculé. */
+  cotisationMinimaleAppliquee: boolean;
+  chiffreAffairesHT: number;
+  acomptes: AtlasIsAcompteTrimestriel[];
+  totalAcomptes: number;
+  /** Exercice au titre duquel les acomptes sont calculés (N+1). */
+  acomptesExercice: number;
+};
+
+/** Acomptes provisionnels IS — 4 versements égaux basés sur l'impôt dû de l'exercice. */
+export function calculateIsAcomptesProvisionnels(
+  isDue: number,
+  fiscalYear: number,
+): AtlasIsAcompteTrimestriel[] {
+  const montant = roundMad(Math.max(0, isDue) / 4);
+  const paymentYear = fiscalYear + 1;
+  return [
+    { trimestre: 1, echeance: `${paymentYear}-03-31`, montant },
+    { trimestre: 2, echeance: `${paymentYear}-06-30`, montant },
+    { trimestre: 3, echeance: `${paymentYear}-09-30`, montant },
+    { trimestre: 4, echeance: `${paymentYear}-12-31`, montant },
+  ];
+}
+
+/** Liquidation IS complète : IS calculé, cotisation minimale, impôt dû et acomptes. */
+export function computeIsLiquidation(
+  revenueHT: number,
+  taxableResult: number,
+  fiscalYear: number,
+): AtlasIsLiquidation {
+  const estimatedIS = calculateEstimatedIS(taxableResult);
+  const minimalContribution = calculateMinimalISContribution(revenueHT);
+  const isDue = roundMad(Math.max(estimatedIS, minimalContribution));
+  const acomptes = calculateIsAcomptesProvisionnels(isDue, fiscalYear);
+  return {
+    estimatedIS,
+    minimalContribution,
+    isDue,
+    cotisationMinimaleAppliquee: minimalContribution > estimatedIS,
+    chiffreAffairesHT: revenueHT,
+    acomptes,
+    totalAcomptes: roundMad(acomptes.reduce((s, a) => s + a.montant, 0)),
+    acomptesExercice: fiscalYear + 1,
+  };
+}

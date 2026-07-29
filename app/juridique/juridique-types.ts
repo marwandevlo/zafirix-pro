@@ -1,5 +1,6 @@
 export type JuridiqueCompany = {
-  id: number;
+  id: number | string;
+  dbRowId?: string;
   raisonSociale: string;
   formeJuridique: string;
   if_fiscal: string;
@@ -11,6 +12,7 @@ export type JuridiqueCompany = {
   telephone: string;
   email: string;
   activite: string;
+  capitalSocial?: string;
 };
 
 export type LegalProcedureField = {

@@ -6,7 +6,7 @@ import { AppSidebar } from '@/app/components/shell/AppSidebar';
 import { BetaSurfaceBadge } from '@/app/components/safety/BetaSurfaceBadge';
 import { getActiveCompanyDbRowId } from '@/app/lib/atlas-active-company';
 import { isAtlasSupabaseDataEnabled } from '@/app/lib/atlas-data-source';
-import { EXPERT_DISCLAIMER } from '@/app/lib/atlas-payroll-calculations';
+import { EXPERT_DISCLAIMER, computeIsLiquidation } from '@/app/lib/atlas-payroll-calculations';
 import type { AtlasIsDraft } from '@/app/types/atlas-payroll';
 
 async function apiFetch<T>(path: string, init?: RequestInit): Promise<{ ok: boolean; data: T }> {
@@ -162,6 +162,10 @@ export default function ISPage() {
     }
   };
 
+  const liquidation = draft
+    ? computeIsLiquidation(draft.revenueHT, draft.taxableResult, draft.fiscalYear)
+    : null;
+
   const bareme = draft
     ? [
         { tranche: '0 - 300 000 MAD', taux: '10%', actif: draft.taxableResult > 0 && draft.taxableResult <= 300_000 },
@@ -170,8 +174,6 @@ export default function ISPage() {
         { tranche: 'Plus de 5 000 000 MAD', taux: '31%', actif: draft.taxableResult > 5_000_000 },
       ]
     : [];
-
-  const acompte = draft ? draft.isDue / 4 : 0;
 
   if (!isAtlasSupabaseDataEnabled()) {
     return (
@@ -255,6 +257,11 @@ export default function ISPage() {
                 <p>Masse salariale (paie): <strong>{draft.payrollTotal.toLocaleString()} MAD</strong></p>
                 <p>Charges comptables: <strong>{draft.accountingCharges.toLocaleString()} MAD</strong></p>
                 <p>Cotisation minimale (0,5% CA): <strong>{draft.minimalContribution.toLocaleString()} MAD</strong></p>
+                {liquidation?.cotisationMinimaleAppliquee && (
+                  <p className="sm:col-span-2 text-amber-700 bg-amber-50 rounded-lg px-3 py-2">
+                    La cotisation minimale s&apos;applique — impôt dû = max(IS calculé, 0,5% du chiffre d&apos;affaires HT).
+                  </p>
+                )}
               </div>
 
               <div className="grid grid-cols-2 gap-6">
@@ -267,8 +274,22 @@ export default function ISPage() {
                   ))}
                 </div>
                 <div className="bg-white rounded-xl p-6 border">
-                  <h2 className="font-semibold mb-4">Acomptes trimestriels (indicatif)</h2>
-                  <p className="text-2xl font-bold text-amber-600">{acompte.toFixed(0)} MAD / trimestre</p>
+                  <h2 className="font-semibold mb-4">Acomptes provisionnels IS ({liquidation?.acomptesExercice})</h2>
+                  {liquidation?.acomptes.length ? (
+                    <div className="space-y-2">
+                      {liquidation.acomptes.map((a) => (
+                        <div key={a.trimestre} className="flex justify-between text-sm px-3 py-2 bg-gray-50 rounded-lg">
+                          <span>T{a.trimestre} — échéance {a.echeance}</span>
+                          <span className="font-bold text-amber-600">{a.montant.toLocaleString()} MAD</span>
+                        </div>
+                      ))}
+                      <p className="text-xs text-gray-400 pt-2">
+                        Total acomptes : {liquidation.totalAcomptes.toLocaleString()} MAD (4 × 25% de l&apos;impôt dû {draft.fiscalYear})
+                      </p>
+                    </div>
+                  ) : (
+                    <p className="text-sm text-gray-500">Calculez le brouillon IS pour voir les acomptes.</p>
+                  )}
                 </div>
               </div>
 

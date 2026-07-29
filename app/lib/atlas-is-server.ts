@@ -2,8 +2,7 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import type { AtlasIsDraft } from '@/app/types/atlas-payroll';
 import { asRecord } from '@/app/lib/atlas-json';
 import {
-  calculateEstimatedIS,
-  calculateMinimalISContribution,
+  computeIsLiquidation,
   EXPERT_DISCLAIMER,
   IS_FORMULA_VERSION,
   isRateLabel,
@@ -138,9 +137,10 @@ export async function computeAndSaveIsDraft(
 
   const totalExpenses = roundMad(supplierExpensesHT + payrollTotal + accountingCharges);
   const taxableResult = roundMad(revenueHT - totalExpenses);
-  const estimatedIS = calculateEstimatedIS(taxableResult);
-  const minimalContribution = calculateMinimalISContribution(revenueHT);
-  const isDue = roundMad(Math.max(estimatedIS, minimalContribution));
+  const liquidation = computeIsLiquidation(revenueHT, taxableResult, fiscalYear);
+  const estimatedIS = liquidation.estimatedIS;
+  const minimalContribution = liquidation.minimalContribution;
+  const isDue = liquidation.isDue;
 
   const now = new Date().toISOString();
   const payload = {
@@ -166,6 +166,10 @@ export async function computeAndSaveIsDraft(
       accountingEntryCount: (accRes.data ?? []).length,
       payrollRunCount: payrollRes.error ? 0 : (payrollRes.data ?? []).length,
       appliedRate: isRateLabel(taxableResult),
+      cotisationMinimaleAppliquee: liquidation.cotisationMinimaleAppliquee,
+      acomptesProvisionnels: liquidation.acomptes,
+      acomptesExercice: liquidation.acomptesExercice,
+      totalAcomptes: liquidation.totalAcomptes,
     },
     updated_at: now,
   };

@@ -10,6 +10,7 @@ import { isAtlasSupabaseDataEnabled } from '@/app/lib/atlas-data-source';
 import { listAtlasCompanies } from '@/app/lib/atlas-companies-repository';
 import { BetaSurfaceBadge } from '@/app/components/safety/BetaSurfaceBadge';
 import { JuridiqueDocumentsPanel } from '@/app/juridique/JuridiqueDocumentsPanel';
+import { JuridiquePvGeneratorPanel } from '@/app/juridique/JuridiquePvGeneratorPanel';
 import { JuridiqueFormalitesPanel } from '@/app/juridique/JuridiqueFormalitesPanel';
 import { JuridiqueModuleTabs, type JuridiqueTabId } from '@/app/juridique/JuridiqueModuleTabs';
 import { EntityAuditTable } from '@/app/components/history/EntityAuditTable';
@@ -1271,6 +1272,8 @@ export default function JuridiquePage() {
           <div className="p-4 lg:p-6">
             <EntityAuditTable entityType="legal_document" title="Historique — Contrats et documents juridiques" />
           </div>
+        ) : activeTab === 'pv' ? (
+          <JuridiquePvGeneratorPanel companies={companies} />
         ) : (
           <JuridiqueDocumentsPanel companies={companies} />
         )}

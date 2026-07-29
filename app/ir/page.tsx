@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
-import { CheckCircle, FileCode, Globe, Loader2, RefreshCw } from 'lucide-react';
+import { CheckCircle, FileCode, FileSpreadsheet, Globe, Loader2, RefreshCw } from 'lucide-react';
 import { AppSidebar } from '@/app/components/shell/AppSidebar';
 import { BetaSurfaceBadge } from '@/app/components/safety/BetaSurfaceBadge';
 import { getActiveCompanyDbRowId } from '@/app/lib/atlas-active-company';
@@ -16,12 +16,15 @@ async function apiFetch<T>(path: string, init?: RequestInit): Promise<{ ok: bool
 
 export default function IRPage() {
   const [companyId, setCompanyId] = useState<string | null>(null);
+  const [fiscalYear, setFiscalYear] = useState(new Date().getFullYear());
   const [run, setRun] = useState<AtlasPayrollRun | null>(null);
   const [salaries, setSalaries] = useState<AtlasSalary[]>([]);
   const [snapshots, setSnapshots] = useState<AtlasIrSnapshot[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
-  const [xmlGenerated, setXmlGenerated] = useState(false);
+  const [exportMsg, setExportMsg] = useState('');
+  const [exportingXml, setExportingXml] = useState(false);
+  const [exportingExcel, setExportingExcel] = useState(false);
 
   const reload = useCallback(async () => {
     if (!isAtlasSupabaseDataEnabled()) {
@@ -63,31 +66,41 @@ export default function IRPage() {
     void reload();
   }, [reload]);
 
+  const downloadExport = async (kind: 'xml' | 'excel') => {
+    if (!companyId) return;
+    const setExporting = kind === 'xml' ? setExportingXml : setExportingExcel;
+    setExporting(true);
+    setError('');
+    setExportMsg('');
+    try {
+      const path = kind === 'xml' ? '/api/ir/export' : '/api/ir/export-excel';
+      const params = new URLSearchParams({ companyId, fiscalYear: String(fiscalYear) });
+      const res = await fetch(`${path}?${params.toString()}`, { credentials: 'include' });
+      if (!res.ok) {
+        const body = (await res.json().catch(() => ({}))) as { error?: string; message?: string };
+        setError(body.message ?? body.error ?? 'Export impossible.');
+        return;
+      }
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `Etat9421_${fiscalYear}_DGI.${kind === 'xml' ? 'xml' : 'xlsx'}`;
+      a.click();
+      URL.revokeObjectURL(url);
+      setExportMsg(`État 9421 ${fiscalYear} exporté (${kind === 'xml' ? 'XML DGI' : 'Excel'}).`);
+    } catch {
+      setError('Erreur réseau lors de l\'export État 9421.');
+    } finally {
+      setExporting(false);
+    }
+  };
+
   const totalBrut = run?.totalGross ?? 0;
   const totalCNSS = run?.totalCnssEmployee ?? 0;
-  const totalAMO = run?.totalAmoEmployee ?? 0;
   const totalIR = run?.totalIr ?? 0;
   const totalNet = run?.totalNet ?? 0;
   const cnssPatronal = salaries.reduce((s, e) => s + e.cnssEmployer, 0);
-  const amoPatronal = salaries.reduce((s, e) => s + e.amoEmployer, 0);
-
-  const generateXMLIR = () => {
-    const mois = new Date().toISOString().substring(0, 7);
-    const xml = `<?xml version="1.0" encoding="UTF-8"?>
-<Etat9421 xmlns="http://www.tax.gov.ma/ir/v1">
-  <Entete><Periode>${mois}</Periode><NombreEmployes>${salaries.length}</NombreEmployes></Entete>
-  <Salaries>${salaries.map((e) => `<Salarie><Nom>${e.employeeName ?? e.employeeId}</Nom><SalaireBrut>${e.grossSalary}</SalaireBrut><IR>${e.irAmount.toFixed(2)}</IR><SalaireNet>${e.netSalary.toFixed(2)}</SalaireNet></Salarie>`).join('')}</Salaries>
-  <Totaux><TotalBrut>${totalBrut}</TotalBrut><TotalIR>${totalIR.toFixed(2)}</TotalIR></Totaux>
-</Etat9421>`;
-    const blob = new Blob([xml], { type: 'application/xml' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `IR_9421_${mois}.xml`;
-    a.click();
-    URL.revokeObjectURL(url);
-    setXmlGenerated(true);
-  };
 
   if (!isAtlasSupabaseDataEnabled()) {
     return (
@@ -108,12 +121,41 @@ export default function IRPage() {
               <h1 className="text-xl font-bold text-gray-800">IR / Salaires / CNSS</h1>
               <BetaSurfaceBadge />
             </div>
-            <p className="text-xs text-amber-700 mt-0.5">{EXPERT_DISCLAIMER} · {run?.formulaVersion ?? '—'}</p>
+            <p className="text-xs text-amber-700 mt-0.5">{EXPERT_DISCLAIMER} · État 9421 annuel DGI SIMPL-IR</p>
           </div>
-          <div className="flex gap-2">
-            <button type="button" onClick={() => void reload()} className="flex items-center gap-2 px-3 py-2 border rounded-lg text-sm"><RefreshCw size={14} /> Actualiser paie</button>
-            <button type="button" onClick={generateXMLIR} disabled={!salaries.length} className="flex items-center gap-2 px-3 py-2 bg-blue-500 text-white rounded-lg text-sm disabled:opacity-50"><FileCode size={14} /> XML IR 9421</button>
-            <button type="button" onClick={() => window.open('https://www.tax.gov.ma', '_blank')} className="flex items-center gap-2 px-3 py-2 bg-amber-500 text-white rounded-lg text-sm"><Globe size={14} /> SIMPL-IR</button>
+          <div className="flex flex-wrap gap-2 items-center">
+            <select
+              value={fiscalYear}
+              onChange={(e) => setFiscalYear(Number(e.target.value))}
+              className="px-2 py-2 border rounded-lg text-sm"
+              aria-label="Exercice État 9421"
+            >
+              {[2026, 2025, 2024].map((y) => <option key={y} value={y}>{y}</option>)}
+            </select>
+            <button type="button" onClick={() => void reload()} className="flex items-center gap-2 px-3 py-2 border rounded-lg text-sm">
+              <RefreshCw size={14} /> Actualiser paie
+            </button>
+            <button
+              type="button"
+              onClick={() => void downloadExport('excel')}
+              disabled={!companyId || exportingExcel}
+              className="flex items-center gap-2 px-3 py-2 bg-[#1F497D] text-white rounded-lg text-sm disabled:opacity-50"
+            >
+              {exportingExcel ? <Loader2 size={14} className="animate-spin" /> : <FileSpreadsheet size={14} />}
+              Excel 9421
+            </button>
+            <button
+              type="button"
+              onClick={() => void downloadExport('xml')}
+              disabled={!companyId || exportingXml}
+              className="flex items-center gap-2 px-3 py-2 bg-blue-500 text-white rounded-lg text-sm disabled:opacity-50"
+            >
+              {exportingXml ? <Loader2 size={14} className="animate-spin" /> : <FileCode size={14} />}
+              XML 9421 DGI
+            </button>
+            <button type="button" onClick={() => window.open('https://www.tax.gov.ma', '_blank')} className="flex items-center gap-2 px-3 py-2 bg-amber-500 text-white rounded-lg text-sm">
+              <Globe size={14} /> SIMPL-IR
+            </button>
           </div>
         </header>
 
@@ -125,7 +167,7 @@ export default function IRPage() {
           {!loading && run && (
             <>
               <div className="grid grid-cols-5 gap-4">
-                <div className="bg-white rounded-xl p-4 border"><p className="text-xs text-gray-400">Masse salariale</p><p className="text-xl font-bold">{totalBrut.toLocaleString()} MAD</p></div>
+                <div className="bg-white rounded-xl p-4 border"><p className="text-xs text-gray-400">Masse salariale (mois courant)</p><p className="text-xl font-bold">{totalBrut.toLocaleString()} MAD</p></div>
                 <div className="bg-white rounded-xl p-4 border"><p className="text-xs text-gray-400">CNSS salarial</p><p className="text-xl font-bold text-blue-600">{totalCNSS.toFixed(0)} MAD</p></div>
                 <div className="bg-white rounded-xl p-4 border"><p className="text-xs text-gray-400">CNSS patronal</p><p className="text-xl font-bold text-purple-600">{cnssPatronal.toFixed(0)} MAD</p></div>
                 <div className="bg-white rounded-xl p-4 border"><p className="text-xs text-gray-400">IR à verser</p><p className="text-xl font-bold text-red-600">{totalIR.toFixed(0)} MAD</p></div>
@@ -165,10 +207,10 @@ export default function IRPage() {
                 </div>
               )}
 
-              {xmlGenerated && (
+              {exportMsg && (
                 <div className="bg-green-50 border border-green-200 rounded-xl p-4 flex items-center gap-3">
                   <CheckCircle size={20} className="text-green-500" />
-                  <p className="text-sm text-green-700">XML généré depuis les données paie persistées.</p>
+                  <p className="text-sm text-green-700">{exportMsg}</p>
                 </div>
               )}
             </>
