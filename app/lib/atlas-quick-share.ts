@@ -30,6 +30,16 @@ export function buildQuickShareMessage(params: {
   );
 }
 
+/** Open native mail client with pre-filled subject/body. */
+export function openMailtoShare(params: { to?: string; subject: string; body: string }): void {
+  if (typeof window === 'undefined') return;
+  const qs = new URLSearchParams();
+  if (params.to?.trim()) qs.set('to', params.to.trim());
+  qs.set('subject', params.subject);
+  qs.set('body', params.body);
+  window.open(`mailto:?${qs.toString()}`, '_self');
+}
+
 /** Open WhatsApp Web/App with a pre-filled message. */
 export function openWhatsAppShare(message: string, phoneE164?: string): void {
   if (typeof window === 'undefined') return;

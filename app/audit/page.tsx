@@ -7,6 +7,7 @@ import { ModuleEmptyState } from '@/app/components/onboarding/ModuleEmptyState';
 import { ExportMenu } from '@/app/components/ExportMenu';
 import type { ExportColumn } from '@/app/components/ExportMenu';
 import { FiscalCompliancePanel } from '@/app/components/compliance/FiscalCompliancePanel';
+import { AuditorPassWidget } from '@/app/components/dashboard/AuditorPassWidget';
 import { getActiveCompanyDbRowId } from '@/app/lib/atlas-active-company';
 import { isAtlasSupabaseDataEnabled } from '@/app/lib/atlas-data-source';
 
@@ -168,6 +169,8 @@ export default function AuditPage() {
                   <AlertTriangle size={16} /> Aucun risque majeur détecté pour cet exercice.
                 </p>
               )}
+
+              <AuditorPassWidget />
             </>
           ) : (
             <ModuleEmptyState module="audit" />

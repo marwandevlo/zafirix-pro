@@ -3,7 +3,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { Plus, Trash2, Download, Send, ReceiptText, CheckCircle2, Wallet, AlertTriangle, Archive, History, Eye, Share2, Edit3 } from 'lucide-react';
 import { EntityActionMenu, ConfirmDeleteDialog, EntityHistoryDrawer } from '@/app/components/actions';
 import type { ActionItem } from '@/app/components/actions';
-import { QuickShareHub } from '@/app/components/share';
+import { RowShareActionBar } from '@/app/components/share';
 import { invoiceShareMessage, createDocumentShareLink } from '@/app/lib/atlas-quick-share';
 import { copyTextToClipboard } from '@/app/lib/copy-to-clipboard';
 import { exportInvoiceFormat, INVOICE_EXPORT_FORMATS } from '@/app/lib/atlas-invoice-export';
@@ -301,6 +301,24 @@ export default function FacturesPage() {
       company,
       () => downloadPdf(r),
     );
+  };
+
+  const sendInvoiceNotificationReminder = async (r: FactureRow) => {
+    const companyId = await getActiveCompanyDbRowId();
+    await fetch('/api/notifications/send', {
+      method: 'POST',
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        channel: 'in_app',
+        category: 'invoice_reminder',
+        title: `Relance facture ${r.numero}`,
+        body: `${r.client} — ${Math.round(r.reste || r.ttc).toLocaleString('fr-MA')} MAD restants`,
+        companyId,
+        entityType: 'invoice',
+        entityId: r.id,
+      }),
+    });
   };
 
   const sendReminder = (r: FactureRow) => {
@@ -830,6 +848,19 @@ export default function FacturesPage() {
                     </td>
                     <td className="px-4 py-3">
                       <div className="flex items-center gap-1.5 justify-end flex-wrap min-w-0">
+                      <RowShareActionBar
+                        entityLabel={`Facture ${f.numero}`}
+                        whatsAppMessage={invoiceShareMessage(f.numero, f.client, f.ttc)}
+                        exportFormats={INVOICE_EXPORT_FORMATS}
+                        onExport={(fmt) => void exportInvoice(f, fmt)}
+                        onSendEmail={() => void sendInvoiceEmail(f)}
+                        onSendReminder={() => sendInvoiceNotificationReminder(f)}
+                        onCopySecureLink={() => copyInvoiceSecureLink(f)}
+                        mailto={{
+                          subject: `Facture ${f.numero}`,
+                          body: `Bonjour,\n\nVeuillez trouver ci-joint la facture ${f.numero} — ${Math.round(f.ttc).toLocaleString('fr-MA')} MAD.\n\nCordialement.`,
+                        }}
+                      >
                         {f.reste > 0 && (
                           <button
                             onClick={() => setPaymentForm({ openFor: f.id, amount: String(Math.round(f.reste)), paidAt: todayYmd() })}
@@ -846,14 +877,7 @@ export default function FacturesPage() {
                             Relancer
                           </button>
                         )}
-                        <QuickShareHub
-                          entityLabel={`Facture ${f.numero}`}
-                          exportFormats={INVOICE_EXPORT_FORMATS}
-                          onExport={(fmt) => void exportInvoice(f, fmt)}
-                          onSendEmail={() => void sendInvoiceEmail(f)}
-                          onCopySecureLink={() => copyInvoiceSecureLink(f)}
-                          whatsAppMessage={invoiceShareMessage(f.numero, f.client, f.ttc)}
-                        />
+                      </RowShareActionBar>
                         <EntityActionMenu
                           entityLabel={`Facture ${f.numero} · ${f.client}`}
                           actions={[

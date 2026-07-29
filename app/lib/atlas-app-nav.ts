@@ -22,6 +22,10 @@ import {
   CircleHelp,
   Wrench,
   Wand2,
+  Package,
+  Truck,
+  Wallet,
+  Gavel,
 } from 'lucide-react';
 
 export type AtlasNavItemId =
@@ -39,6 +43,10 @@ export type AtlasNavItemId =
   | 'comptabilite'
   | 'banque'
   | 'factures'
+  | 'inventaire'
+  | 'logistique'
+  | 'recouvrement'
+  | 'caisse'
   | 'juridique'
   | 'rh'
   | 'etude'
@@ -83,6 +91,10 @@ export const ATLAS_APP_NAV_ITEMS: AtlasAppNavItem[] = [
   { id: 'comptabilite', label: 'Comptabilité', labelAr: 'المحاسبة', icon: LayoutDashboard, href: '/comptabilite' },
   { id: 'banque', label: 'Banque', labelAr: 'البنك', icon: Landmark, href: '/banque' },
   { id: 'factures', label: 'Factures', labelAr: 'الفواتير', icon: FileText, href: '/factures' },
+  { id: 'inventaire', label: 'Inventaire', labelAr: 'المخزون', icon: Package, href: '/inventaire' },
+  { id: 'logistique', label: 'Logistique & COD', labelAr: 'اللوجستيك', icon: Truck, href: '/logistique' },
+  { id: 'recouvrement', label: 'Recouvrement', labelAr: 'التحصيل', icon: Gavel, href: '/recouvrement' },
+  { id: 'caisse', label: 'Caisse', labelAr: 'الصندوق', icon: Wallet, href: '/caisse' },
   { id: 'juridique', label: 'Juridique', labelAr: 'القانونية', icon: Scale, href: '/juridique' },
   { id: 'rh', label: 'Ressources humaines', labelAr: 'الموارد البشرية', icon: Users, href: '/rh' },
   { id: 'etude', label: 'Étude de projet', labelAr: 'دراسة الجدوى', icon: BarChart2, href: '/etude-projet' },

@@ -3,7 +3,7 @@ import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'rea
 import { Upload, FileText, CheckCircle, Clock, Trash2, Sparkles, ShieldCheck, Archive, History, Eye, Download, Share2, Wrench, Mail, Link2, FileJson, FileSpreadsheet, FileCode2, Package, CloudUpload, Loader2 as DriveLoader } from 'lucide-react';
 import { EntityActionMenu, ConfirmDeleteDialog, EntityHistoryDrawer } from '@/app/components/actions';
 import type { ActionItem } from '@/app/components/actions';
-import { QuickShareHub, DriveSyncBadge, DocumentExportChips, type DriveSyncState } from '@/app/components/share';
+import { RowShareActionBar, DriveSyncBadge, type DriveSyncState } from '@/app/components/share';
 import { downloadAuthenticatedExport, type ExportFormat } from '@/app/lib/atlas-export-engine';
 import { SendEmailModal } from '@/app/documents/components/SendEmailModal';
 import { ValidationCenter } from '@/app/documents/components/ValidationCenter';
@@ -1441,7 +1441,7 @@ export default function DocumentsPage() {
                         </div>
                       </td>
                       <td className="px-4 py-3">
-                        <div className="flex items-center justify-end gap-1.5 flex-wrap max-w-[14rem] sm:max-w-none ml-auto">
+                        <div className="flex items-center justify-end gap-1.5 flex-wrap min-w-0 ml-auto">
                           {supabaseMode && d.statut === 'analysé' && d.supabaseId && (
                             <DocumentExplainerButton documentId={d.supabaseId} className="inline-block" />
                           )}
@@ -1498,23 +1498,24 @@ export default function DocumentsPage() {
                             )
                           )}
                           {supabaseMode && d.supabaseId && d.statut === 'analysé' && (
-                            <>
-                              <DocumentExportChips
-                                formats={['pdf', 'xlsx', 'docx', 'xml']}
-                                onExport={(fmt) => downloadDocumentExport(d.supabaseId!, fmt)}
-                              />
-                              <QuickShareHub
-                                entityLabel={d.nom}
-                                documentId={d.supabaseId}
-                                exportFormats={['pdf', 'xlsx', 'docx', 'xml', 'zip']}
-                                onSendEmail={() => setEmailModalDocId(d.supabaseId!)}
-                                disabled={driveBackingUpId === d.supabaseId}
-                                driveSyncStatus={driveSyncByDocId[d.supabaseId] ?? 'idle'}
-                                onDriveSyncStatusChange={(status) =>
-                                  setDriveSyncByDocId((prev) => ({ ...prev, [d.supabaseId!]: status }))
-                                }
-                              />
-                            </>
+                            <RowShareActionBar
+                              entityLabel={d.nom}
+                              whatsAppMessage={`Bonjour,\n\nDocument « ${d.nom} » disponible sur Zafirix Pro.\n${typeof window !== 'undefined' ? window.location.origin : ''}/documents`}
+                              documentId={d.supabaseId}
+                              exportFormats={['pdf', 'xlsx', 'docx', 'xml']}
+                              menuExtraExportFormats={['zip']}
+                              onExport={(fmt) => downloadDocumentExport(d.supabaseId!, fmt)}
+                              onSendEmail={() => setEmailModalDocId(d.supabaseId!)}
+                              mailto={{
+                                subject: `Document — ${d.nom}`,
+                                body: `Bonjour,\n\nVeuillez consulter le document « ${d.nom} » sur Zafirix Pro.`,
+                              }}
+                              disabled={driveBackingUpId === d.supabaseId}
+                              driveSyncStatus={driveSyncByDocId[d.supabaseId] ?? 'idle'}
+                              onDriveSyncStatusChange={(status) =>
+                                setDriveSyncByDocId((prev) => ({ ...prev, [d.supabaseId!]: status }))
+                              }
+                            />
                           )}
                           {/* Three-dot action menu — all actions real */}
                           <EntityActionMenu

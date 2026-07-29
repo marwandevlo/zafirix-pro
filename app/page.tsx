@@ -7,7 +7,7 @@ import {
   TrendingUp, Upload, Bell, ChevronRight,
   AlertCircle, Brain,
   ArrowUpRight, ArrowDownRight, Calendar, Globe,
-  Users, Zap, Shield, Menu,
+  Users, Zap, Shield, Menu, Package, Truck, Wallet, Gavel,
 } from 'lucide-react';
 import { listAtlasInvoices } from '@/app/lib/atlas-invoices-repository';
 import type { AtlasInvoice } from '@/app/types/atlas-invoice';
@@ -44,6 +44,9 @@ import { CompanyMasterExportMenu } from '@/app/components/company/CompanyMasterE
 import { ConsolidatedDashboardWidget } from '@/app/components/cabinet/ConsolidatedDashboardWidget';
 import { SubscriptionWidget } from '@/app/components/billing/SubscriptionWidget';
 import { DeadlineRadarWidget } from '@/app/components/dashboard/DeadlineRadarWidget';
+import { LegalCalendarWidget } from '@/app/components/dashboard/LegalCalendarWidget';
+import { NotificationCenterWidget } from '@/app/components/dashboard/NotificationCenterWidget';
+import { AuditorPassWidget } from '@/app/components/dashboard/AuditorPassWidget';
 
 const ReferralPostOnboardingModal = dynamic(
   () =>
@@ -58,6 +61,10 @@ const modules = [
   { id: 'is', label: 'IS Fiscal', labelAr: 'الضريبة على الشركات', icon: Calculator, color: 'bg-purple-500', href: '/is', deadline: '31 Mars', urgent: false },
   { id: 'ir', label: 'IR / Salaires', labelAr: 'الضريبة على الدخل', icon: TrendingUp, color: 'bg-green-500', href: '/ir', deadline: '30 Avril', urgent: false },
   { id: 'factures', label: 'Factures', labelAr: 'الفواتير', icon: FileText, color: 'bg-amber-500', href: '/factures', deadline: null, urgent: false },
+  { id: 'inventaire', label: 'Inventaire', labelAr: 'المخزون', icon: Package, color: 'bg-teal-500', href: '/inventaire', deadline: null, urgent: false },
+  { id: 'logistique', label: 'Logistique', labelAr: 'اللوجستيك', icon: Truck, color: 'bg-slate-600', href: '/logistique', deadline: null, urgent: false },
+  { id: 'recouvrement', label: 'Recouvrement', labelAr: 'التحصيل', icon: Gavel, color: 'bg-red-600', href: '/recouvrement', deadline: null, urgent: false },
+  { id: 'caisse', label: 'Caisse', labelAr: 'الصندوق', icon: Wallet, color: 'bg-yellow-600', href: '/caisse', deadline: null, urgent: false },
   { id: 'clients', label: 'Clients', labelAr: 'العملاء', icon: Users, color: 'bg-emerald-500', href: '/clients', deadline: null, urgent: false },
   { id: 'comptabilite', label: 'Comptabilité', labelAr: 'المحاسبة', icon: LayoutDashboard, color: 'bg-cyan-500', href: '/comptabilite', deadline: null, urgent: false },
   { id: 'documents', label: 'Documents IA', labelAr: 'وثائق الذكاء الاصطناعي', icon: Upload, color: 'bg-rose-500', href: '/documents', deadline: null, urgent: false },
@@ -71,6 +78,8 @@ export default function Home() {
   const [connected, setConnected] = useState(true);
   const [invoices, setInvoices] = useState<AtlasInvoice[]>([]);
   const [fiscalUrgentCount, setFiscalUrgentCount] = useState(0);
+  const [notificationUnread, setNotificationUnread] = useState(0);
+  const [showNotifications, setShowNotifications] = useState(false);
   const t = (fr: string, ar: string) => lang === 'fr' ? fr : ar;
 
   useEffect(() => {
@@ -165,9 +174,18 @@ export default function Home() {
               <span className="hidden md:inline">{t('Consultant IA', 'المستشار')}</span>
             </button>
             <GlobalSearchButton />
-            <button className="relative p-2 rounded-lg hover:bg-gray-100">
+            <button
+              type="button"
+              onClick={() => setShowNotifications((v) => !v)}
+              className="relative p-2 rounded-lg hover:bg-gray-100"
+              aria-label={t('Notifications', 'الإشعارات')}
+            >
               <Bell size={18} className="text-gray-500" />
-              <span className="absolute top-1 right-1 w-2 h-2 bg-red-500 rounded-full"></span>
+              {notificationUnread > 0 && (
+                <span className="absolute top-1 right-1 min-w-[0.5rem] h-2 px-0.5 bg-red-500 rounded-full text-[8px] text-white font-bold flex items-center justify-center">
+                  {notificationUnread > 9 ? '9+' : notificationUnread}
+                </span>
+              )}
             </button>
             <div className="flex items-center gap-2">
               <div className={`w-2 h-2 rounded-full ${connected ? 'bg-green-500' : 'bg-red-500'}`}></div>
@@ -220,8 +238,9 @@ export default function Home() {
 
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 lg:gap-6">
             <DeadlineRadarWidget lang={lang} />
+            <LegalCalendarWidget lang={lang} />
 
-            <div className="lg:col-span-2">
+            <div className="lg:col-span-1">
               <div className="flex items-center justify-between mb-3">
                 <h2 className="font-semibold text-gray-700 text-sm">{t('Modules', 'الوحدات')}</h2>
                 <span className="text-xs text-gray-400">{modules.length} {t('modules', 'وحدات')}</span>
@@ -269,6 +288,14 @@ export default function Home() {
                 </button>
               </div>
             </div>
+          </div>
+
+          {/* ── Notifications + Auditor pass ─────────────────────────────── */}
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 lg:gap-6">
+            <div className={showNotifications ? 'lg:col-span-2' : 'lg:col-span-2'}>
+              <NotificationCenterWidget onUnreadChange={setNotificationUnread} />
+            </div>
+            <AuditorPassWidget />
           </div>
 
           {/* ── Alert Center + Legal + Audit ────────────────────────────── */}
