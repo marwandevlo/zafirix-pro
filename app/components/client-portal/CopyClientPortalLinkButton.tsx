@@ -4,6 +4,7 @@ import { useCallback, useState } from 'react';
 import { Check, Link2, Loader2, AlertCircle } from 'lucide-react';
 import type { AtlasCompany } from '@/app/types/atlas-company';
 import { buildClientPortalUrlForCompany } from '@/app/lib/atlas-client-portal-links';
+import { copyTextToClipboard } from '@/app/lib/copy-to-clipboard';
 import { useSoundEffects } from '@/app/components/sound/SoundEffectsProvider';
 
 type Props = {
@@ -12,6 +13,27 @@ type Props = {
 };
 
 type CopyState = 'idle' | 'loading' | 'copied' | 'error';
+
+async function resolvePortalShareUrl(company: AtlasCompany): Promise<string> {
+  let url = buildClientPortalUrlForCompany(company);
+
+  if (company.dbRowId) {
+    try {
+      const res = await fetch(
+        `/api/client-portal/link?companyId=${encodeURIComponent(company.dbRowId)}`,
+        { credentials: 'include' },
+      );
+      if (res.ok) {
+        const data = (await res.json()) as { url?: string };
+        if (data.url?.trim()) url = data.url.trim();
+      }
+    } catch {
+      /* use client-resolved fallback URL */
+    }
+  }
+
+  return url;
+}
 
 /** Copy shareable client portal URL for a company (clipboard, inline feedback). */
 export function CopyClientPortalLinkButton({ company, className = '' }: Props) {
@@ -23,51 +45,8 @@ export function CopyClientPortalLinkButton({ company, className = '' }: Props) {
     setState('loading');
     setHint('');
     try {
-      let url: string | null = null;
-
-      if (company.dbRowId) {
-        const res = await fetch(
-          `/api/client-portal/link?companyId=${encodeURIComponent(company.dbRowId)}`,
-          { credentials: 'include' },
-        );
-        const data = (await res.json()) as { url?: string; message?: string; error?: string };
-        if (!res.ok) {
-          setHint(data.message ?? 'Code portail client manquant pour cette société.');
-          setState('error');
-          play('error');
-          window.setTimeout(() => {
-            setState('idle');
-            setHint('');
-          }, 2800);
-          return;
-        }
-        url = data.url ?? null;
-      } else {
-        url = buildClientPortalUrlForCompany(company);
-        if (!url) {
-          setHint('Code portail client non configuré.');
-          setState('error');
-          play('error');
-          window.setTimeout(() => {
-            setState('idle');
-            setHint('');
-          }, 2800);
-          return;
-        }
-      }
-
-      if (!url) {
-        setHint('Lien portail indisponible.');
-        setState('error');
-        play('error');
-        window.setTimeout(() => {
-          setState('idle');
-          setHint('');
-        }, 2800);
-        return;
-      }
-
-      await navigator.clipboard.writeText(url);
+      const url = await resolvePortalShareUrl(company);
+      await copyTextToClipboard(url);
       setState('copied');
       play('success');
       window.setTimeout(() => setState('idle'), 2200);

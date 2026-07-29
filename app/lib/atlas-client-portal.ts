@@ -4,6 +4,7 @@
 
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { asRecord } from '@/app/lib/atlas-json';
+import { resolvePortalCodeForCompany } from '@/app/lib/atlas-client-portal-links';
 import { clientPortalDemoCode } from '@/app/lib/atlas-sprint0-flags';
 
 export type ClientPortalSession = {
@@ -71,8 +72,15 @@ export async function resolveClientPortalSession(
   for (const row of companies ?? []) {
     const r = row as Record<string, unknown>;
     const json = asRecord(r.company_json) ?? {};
-    const portalCode = String(json.clientPortalCode ?? json.client_portal_code ?? '').trim();
-    if (portalCode && portalCode === code) {
+    const computed = resolvePortalCodeForCompany({
+      clientPortalCode: String(json.clientPortalCode ?? json.client_portal_code ?? ''),
+      raisonSociale: String(r.name ?? ''),
+      tradeName: String(r.trade_name ?? ''),
+      legalName: String(r.legal_name ?? ''),
+      id: String(r.id),
+      dbRowId: String(r.id),
+    });
+    if (computed === code) {
       return {
         companyId: String(r.id),
         ownerUserId: String(r.user_id),

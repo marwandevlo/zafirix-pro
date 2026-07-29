@@ -1,7 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { asRecord } from '@/app/lib/atlas-json';
-import { buildClientPortalPath, buildClientPortalUrl } from '@/app/lib/atlas-client-portal-links';
-import { clientPortalDemoCode } from '@/app/lib/atlas-sprint0-flags';
+import {
+  buildClientPortalPath,
+  buildClientPortalUrl,
+  resolvePortalCodeForCompany,
+} from '@/app/lib/atlas-client-portal-links';
 import { getPublicAppUrl, getPortalBaseUrl } from '@/app/lib/atlas-app-url';
 import { documentUploadSessionUserId } from '@/app/lib/atlas-document-upload-auth';
 import { getSupabaseServiceRoleClient } from '@/app/lib/supabase-admin';
@@ -32,18 +35,14 @@ export async function GET(request: NextRequest) {
 
   const row = data as Record<string, unknown>;
   const json = asRecord(row.company_json) ?? {};
-  const portalCode = String(json.clientPortalCode ?? json.client_portal_code ?? '').trim();
-  const accessCode = portalCode || (process.env.NODE_ENV === 'development' ? clientPortalDemoCode() : '');
-
-  if (!accessCode) {
-    return NextResponse.json(
-      {
-        error: 'portal_code_missing',
-        message: 'Définissez clientPortalCode dans les paramètres société avant de partager un lien.',
-      },
-      { status: 422 },
-    );
-  }
+  const accessCode = resolvePortalCodeForCompany({
+    clientPortalCode: String(json.clientPortalCode ?? json.client_portal_code ?? ''),
+    raisonSociale: String(row.name ?? ''),
+    tradeName: String(row.trade_name ?? ''),
+    legalName: String(row.legal_name ?? ''),
+    id: companyId,
+    dbRowId: companyId,
+  });
 
   const path = buildClientPortalPath(accessCode);
   const url = buildClientPortalUrl(accessCode);

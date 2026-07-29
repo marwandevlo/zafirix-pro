@@ -58,12 +58,60 @@ export function resolvePortalCodeFromCompany(company: {
   return normalizePortalAccessCode(raw);
 }
 
-/** Build share URL from company metadata (client-side, no API). */
-export function buildClientPortalUrlForCompany(company: {
+export type PortalCodeCompanyInput = {
   clientPortalCode?: string;
   client_portal_code?: string;
-}): string | null {
-  const code = resolvePortalCodeFromCompany(company);
-  if (!code) return null;
-  return buildClientPortalUrl(code);
+  raisonSociale?: string;
+  tradeName?: string;
+  legalName?: string;
+  id?: number | string;
+  dbRowId?: string;
+};
+
+/** Slugify company name into a URL-safe portal code (e.g. "L2T Maroc Service" → "l2t-maroc-service"). */
+export function slugifyPortalAccessCode(raw: string): string | null {
+  const slug = raw
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .trim()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 32);
+  if (!slug) return null;
+  return normalizePortalAccessCode(slug);
+}
+
+function portalCodeFromCompanyId(id: number | string): string {
+  const compact = String(id).replace(/[^a-zA-Z0-9]/g, '').slice(0, 24);
+  const raw = compact ? `company-${compact}` : 'company-unknown';
+  return normalizePortalAccessCode(raw.slice(0, 32)) ?? 'company-unknown';
+}
+
+/**
+ * Resolve a portal access code with fallbacks:
+ * explicit code → slugified name → company-[id].
+ */
+export function resolvePortalCodeForCompany(company: PortalCodeCompanyInput): string {
+  const explicit = resolvePortalCodeFromCompany(company);
+  if (explicit) return explicit;
+
+  const name = String(
+    company.tradeName ?? company.raisonSociale ?? company.legalName ?? '',
+  ).trim();
+  const fromName = name ? slugifyPortalAccessCode(name) : null;
+  if (fromName) return fromName;
+
+  const id = company.dbRowId ?? company.id;
+  if (id !== undefined && id !== null && String(id).trim()) {
+    return portalCodeFromCompanyId(id);
+  }
+
+  return 'company-default';
+}
+
+/** Build share URL from company metadata (always returns a valid URL). */
+export function buildClientPortalUrlForCompany(company: PortalCodeCompanyInput): string {
+  const code = resolvePortalCodeForCompany(company);
+  return buildClientPortalUrl(code) ?? absoluteUrl(`/portal/${encodeURIComponent(code)}`, getPortalBaseUrl());
 }
