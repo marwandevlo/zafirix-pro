@@ -36,4 +36,7 @@ export type AtlasCompany = {
   logoUrl?: string;
   status?: 'active' | 'inactive' | 'archived';
   workspaceId?: string | null;
+
+  /** Client portal access code (stored in company_json). */
+  clientPortalCode?: string;
 };

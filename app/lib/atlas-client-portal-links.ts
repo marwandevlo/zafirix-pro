@@ -48,3 +48,22 @@ export function formatClientPortalLinkLabel(companyCode: string): string {
   const url = buildClientPortalUrl(companyCode);
   return url ?? buildClientPortalPath(companyCode) ?? `/portal/${companyCode}`;
 }
+
+/** Read portal access code from company row / company_json fields. */
+export function resolvePortalCodeFromCompany(company: {
+  clientPortalCode?: string;
+  client_portal_code?: string;
+}): string | null {
+  const raw = String(company.clientPortalCode ?? company.client_portal_code ?? '').trim();
+  return normalizePortalAccessCode(raw);
+}
+
+/** Build share URL from company metadata (client-side, no API). */
+export function buildClientPortalUrlForCompany(company: {
+  clientPortalCode?: string;
+  client_portal_code?: string;
+}): string | null {
+  const code = resolvePortalCodeFromCompany(company);
+  if (!code) return null;
+  return buildClientPortalUrl(code);
+}

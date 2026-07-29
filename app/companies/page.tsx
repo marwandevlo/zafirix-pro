@@ -28,6 +28,7 @@ import { ATLAS_STORAGE_KEYS } from '@/app/lib/atlas-storage-keys';
 import { EmptyStateCta } from '@/app/components/ui/EmptyStateCta';
 import { trackOnboardingMilestoneOnce } from '@/app/lib/atlas-onboarding-milestones';
 import { CompanyLimitProUpsell } from '@/app/components/conversion/CompanyLimitProUpsell';
+import { CopyClientPortalLinkButton } from '@/app/components/client-portal/CopyClientPortalLinkButton';
 import { AppSidebar } from '@/app/components/shell/AppSidebar';
 import { useManualSubscription } from '@/app/components/subscription/manual-subscription-context';
 
@@ -461,6 +462,7 @@ export default function CompaniesPage() {
                     </div>
                   </div>
                   <div className="flex items-center gap-2 shrink-0">
+                    <CopyClientPortalLinkButton company={c} />
                     {!c.actif && (
                       <button onClick={() => void selectCompany(c)} className="flex items-center gap-1 px-3 py-2 bg-[#1B2A4A] text-white rounded-lg text-xs hover:bg-[#243660]">
                         Sélectionner <ChevronRight size={12} />
