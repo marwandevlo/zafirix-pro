@@ -4,6 +4,7 @@
 
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { asRecord } from '@/app/lib/atlas-json';
+import { clientPortalDemoCode } from '@/app/lib/atlas-sprint0-flags';
 
 export type ClientPortalSession = {
   companyId: string;
@@ -11,24 +12,16 @@ export type ClientPortalSession = {
   companyName: string;
 };
 
-/** Resolve portal access code to company (demo: env or company_json.clientPortalCode). */
-export async function resolveClientPortalSession(
-  db: SupabaseClient,
-  accessCode: string,
-): Promise<ClientPortalSession | null> {
-  const code = accessCode.trim();
-  if (!code) return null;
+async function resolveDemoCompanyFromDb(db: SupabaseClient): Promise<ClientPortalSession | null> {
+  const envCompanyId = process.env.CLIENT_PORTAL_DEMO_COMPANY_ID?.trim();
+  const envOwnerId = process.env.CLIENT_PORTAL_DEMO_OWNER_USER_ID?.trim();
 
-  const demoCode = process.env.CLIENT_PORTAL_DEMO_CODE ?? '1234';
-  const demoCompanyId = process.env.CLIENT_PORTAL_DEMO_COMPANY_ID?.trim();
-  const demoOwnerId = process.env.CLIENT_PORTAL_DEMO_OWNER_USER_ID?.trim();
-
-  if (code === demoCode && demoCompanyId && demoOwnerId) {
+  if (envCompanyId && envOwnerId) {
     const { data } = await db
       .from('atlas_companies')
       .select('id, name, legal_name, trade_name, user_id')
-      .eq('id', demoCompanyId)
-      .eq('user_id', demoOwnerId)
+      .eq('id', envCompanyId)
+      .eq('user_id', envOwnerId)
       .maybeSingle();
     if (data) {
       const row = data as Record<string, unknown>;
@@ -38,6 +31,36 @@ export async function resolveClientPortalSession(
         companyName: String(row.trade_name ?? row.legal_name ?? row.name ?? 'Société'),
       };
     }
+  }
+
+  const { data: fallback } = await db
+    .from('atlas_companies')
+    .select('id, name, legal_name, trade_name, user_id')
+    .order('created_at', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (!fallback) return null;
+  const row = fallback as Record<string, unknown>;
+  return {
+    companyId: String(row.id),
+    ownerUserId: String(row.user_id),
+    companyName: String(row.trade_name ?? row.legal_name ?? row.name ?? 'Société'),
+  };
+}
+
+/** Resolve portal access code to company (demo: env, auto-fallback, or company_json.clientPortalCode). */
+export async function resolveClientPortalSession(
+  db: SupabaseClient,
+  accessCode: string,
+): Promise<ClientPortalSession | null> {
+  const code = accessCode.trim();
+  if (!code) return null;
+
+  const demoCode = clientPortalDemoCode();
+
+  if (code === demoCode) {
+    return resolveDemoCompanyFromDb(db);
   }
 
   const { data: companies } = await db

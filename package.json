@@ -7,7 +7,9 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "generate:icons": "node scripts/generate-zafirix-icons.mjs"
+    "generate:icons": "node scripts/generate-zafirix-icons.mjs",
+    "apply:routing-migration": "node scripts/apply-routing-migration.mjs",
+    "verify:production": "node scripts/verify-production-readiness.mjs"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.90.0",
@@ -41,6 +43,7 @@
     "@types/react-dom": "^19",
     "eslint": "^9",
     "eslint-config-next": "16.2.3",
+    "pg": "^8.22.0",
     "png-to-ico": "^3.0.1",
     "tailwindcss": "^4",
     "typescript": "^5"

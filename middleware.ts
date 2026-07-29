@@ -69,7 +69,25 @@ function isPublicPath(pathname: string): boolean {
   if (pathname === '/manifest.json') return true;
   if (pathname.startsWith('/robots.txt')) return true;
   if (pathname.startsWith('/sitemap')) return true;
+  if (isClientPortalPublicPath(pathname)) return true;
   return false;
+}
+
+/** Client portal — public when bridge/demo flags are active (no accountant login required). */
+function isClientPortalPublicPath(pathname: string): boolean {
+  const isPortal =
+    pathname === '/client' ||
+    pathname === '/portal' ||
+    pathname.startsWith('/portal/') ||
+    pathname.startsWith('/api/client-portal/');
+  if (!isPortal) return false;
+  const truthy = (v: string | undefined) => v === 'true' || v === '1';
+  return (
+    truthy(process.env.NEXT_PUBLIC_ENABLE_CLIENT_PORTAL) ||
+    truthy(process.env.NEXT_PUBLIC_ENABLE_CLIENT_PORTAL_DEMO) ||
+    (process.env.NODE_ENV === 'development' &&
+      process.env.NEXT_PUBLIC_ATLAS_DATA_BACKEND === 'supabase')
+  );
 }
 
 function isProfileGateExemptPath(pathname: string): boolean {

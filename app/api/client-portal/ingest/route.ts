@@ -12,6 +12,7 @@ import {
   clientPortalDocumentMetadata,
   resolveClientPortalSession,
 } from '@/app/lib/atlas-client-portal';
+import { enqueueClientPortalForValidation } from '@/app/lib/atlas-client-portal-queue';
 import { registerStoredDocument } from '@/app/lib/atlas-document-upload-register';
 import { getSupabaseServiceRoleClient } from '@/app/lib/supabase-admin';
 
@@ -92,34 +93,29 @@ export async function POST(request: NextRequest) {
     await admin
       .from('atlas_documents')
       .update({
-        metadata,
+        metadata: {
+          ...metadata,
+          validationQueuePending: true,
+          validationStatus: 'draft',
+        },
         title: `Upload client — ${filename}`,
+        source: 'client_portal',
         updated_at: new Date().toISOString(),
       })
       .eq('id', documentId)
       .eq('user_id', session.ownerUserId);
 
-    await admin.from('zafirix_routing_records').insert({
-      user_id: session.ownerUserId,
-      company_id: session.companyId,
-      source_document_id: documentId,
-      source_document_type: 'receipt',
-      target_module: 'comptabilite',
-      target_entity_type: 'client_upload',
-      routing_status: 'completed',
-      generated_by: 'client_portal',
-      validation_status: 'draft',
-      payload: {
-        source: 'client_portal',
-        clientNote: clientNote || null,
-        originalFilename: filename,
-      },
+    const queueResult = await enqueueClientPortalForValidation(admin, session, documentId, {
+      source: 'client_portal',
+      clientNote: clientNote || null,
+      originalFilename: filename,
     });
 
     return NextResponse.json({
       ok: true,
       documentId,
       companyName: session.companyName,
+      queueMethod: queueResult.method,
       message: 'Document transmis à votre comptable pour validation OCR.',
     });
   } catch (err) {

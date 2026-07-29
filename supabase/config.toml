@@ -1,0 +1,7 @@
+# Minimal Supabase CLI config for atlas-os (Zafirix Pro)
+# Project ref matches NEXT_PUBLIC_SUPABASE_URL in .env.local
+
+project_id = "kwylivmhlcuflubyubdv"
+
+[db]
+major_version = 15

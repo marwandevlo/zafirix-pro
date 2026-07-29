@@ -12,6 +12,10 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { documentUploadSessionUserId } from '@/app/lib/atlas-document-upload-auth';
+import {
+  countClientPortalPendingDocuments,
+  isMissingRoutingTableError,
+} from '@/app/lib/atlas-client-portal-queue';
 import { getSupabaseServiceRoleClient } from '@/app/lib/supabase-admin';
 
 export const runtime = 'nodejs';
@@ -74,6 +78,11 @@ export async function GET(request: NextRequest) {
       .gte('validated_at', todayStart.toISOString()),
   ]);
 
+  const routingTableAvailable = !isMissingRoutingTableError(draftRes.error);
+  const clientPortalPending = routingTableAvailable
+    ? 0
+    : await countClientPortalPendingDocuments(admin, userId);
+
   // Compute amount totals by status from payload
   const amountByStatus: Record<string, number> = { draft: 0, reviewed: 0, validated: 0, rejected: 0 };
   if (totalByStatusRes.data) {
@@ -85,10 +94,14 @@ export async function GET(request: NextRequest) {
     }
   }
 
+  const pendingDraft = routingTableAvailable
+    ? (draftRes.count ?? 0)
+    : clientPortalPending;
+
   return NextResponse.json({
     ok: true,
     kpis: {
-      pending_draft: draftRes.count ?? 0,
+      pending_draft: pendingDraft,
       reviewed: reviewedRes.count ?? 0,
       validated_today: (validatedTodayRes.count ?? 0) + (docsValidatedTodayRes.count ?? 0),
       rejected: rejectedRes.count ?? 0,

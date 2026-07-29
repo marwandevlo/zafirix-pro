@@ -1,6 +1,6 @@
 'use client';
 
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Building2, Camera, CheckCircle, Loader2, Upload, AlertCircle } from 'lucide-react';
 
 type Session = {
@@ -8,23 +8,58 @@ type Session = {
   companyName: string;
 };
 
+type Props = {
+  /** Pre-filled from /portal/[companyCode] — auto-connects when valid. */
+  initialAccessCode?: string;
+};
+
 /**
  * Mobile-friendly client portal — snap/upload invoices → accountant validation queue.
  */
-export default function ClientPortalDemo() {
+export default function ClientPortalDemo({ initialAccessCode }: Props) {
   const [session, setSession] = useState<Session | null>(null);
-  const [code, setCode] = useState('');
+  const [code, setCode] = useState(initialAccessCode ?? '');
   const [error, setError] = useState('');
   const [uploading, setUploading] = useState(false);
   const [success, setSuccess] = useState('');
   const [note, setNote] = useState('');
   const fileRef = useRef<HTMLInputElement>(null);
   const cameraRef = useRef<HTMLInputElement>(null);
+  const autoLoginAttempted = useRef(false);
 
-  const handleLogin = () => {
-    if (!code.trim()) return;
-    setSession({ accessCode: code.trim(), companyName: 'Votre société' });
+  const connectWithCode = async (accessCode: string) => {
+    const trimmed = accessCode.trim();
+    if (!trimmed) return;
     setError('');
+    try {
+      const res = await fetch('/api/client-portal/session', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ accessCode: trimmed }),
+      });
+      const data = (await res.json()) as {
+        ok?: boolean;
+        session?: { companyName: string };
+        message?: string;
+        error?: string;
+      };
+      if (!res.ok || !data.session) {
+        throw new Error(data.message ?? data.error ?? 'Code invalide');
+      }
+      setSession({ accessCode: trimmed, companyName: data.session.companyName });
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Connexion impossible');
+    }
+  };
+
+  useEffect(() => {
+    if (!initialAccessCode?.trim() || autoLoginAttempted.current || session) return;
+    autoLoginAttempted.current = true;
+    void connectWithCode(initialAccessCode);
+  }, [initialAccessCode, session]);
+
+  const handleLogin = async () => {
+    await connectWithCode(code);
   };
 
   const uploadFile = async (file: File) => {
@@ -83,7 +118,7 @@ export default function ClientPortalDemo() {
             <input
               value={code}
               onChange={(e) => setCode(e.target.value)}
-              onKeyDown={(e) => e.key === 'Enter' && handleLogin()}
+              onKeyDown={(e) => e.key === 'Enter' && void handleLogin()}
               type="password"
               placeholder="••••"
               className="w-full px-4 py-3 text-center text-2xl tracking-widest border rounded-lg focus:outline-none focus:border-amber-400 font-mono mb-4"
@@ -91,14 +126,16 @@ export default function ClientPortalDemo() {
             />
             <button
               type="button"
-              onClick={handleLogin}
+              onClick={() => void handleLogin()}
               className="w-full py-3 bg-[#0F1F3D] text-white rounded-lg font-medium"
             >
               Accéder · دخول
             </button>
-            <p className="text-xs text-amber-800 text-center mt-4 rounded-lg bg-amber-50 border border-amber-100 px-2 py-2">
-              Démo : code 1234 si CLIENT_PORTAL_DEMO_* configuré côté serveur.
-            </p>
+            {process.env.NODE_ENV === 'development' && (
+              <p className="text-xs text-amber-800 text-center mt-4 rounded-lg bg-amber-50 border border-amber-100 px-2 py-2">
+                Code démo : <strong>1234</strong> — lié automatiquement à votre société de test.
+              </p>
+            )}
           </div>
         </div>
       </div>
