@@ -55,7 +55,7 @@ export async function resolveClientPortalSession(
   db: SupabaseClient,
   accessCode: string,
 ): Promise<ClientPortalSession | null> {
-  const code = accessCode.trim();
+  const code = accessCode.trim().toLowerCase();
   if (!code) return null;
 
   const demoCode = clientPortalDemoCode();
@@ -80,7 +80,7 @@ export async function resolveClientPortalSession(
       id: String(r.id),
       dbRowId: String(r.id),
     });
-    if (computed === code) {
+    if (computed.toLowerCase() === code) {
       return {
         companyId: String(r.id),
         ownerUserId: String(r.user_id),

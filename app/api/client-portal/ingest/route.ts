@@ -13,6 +13,7 @@ import {
   resolveClientPortalSession,
 } from '@/app/lib/atlas-client-portal';
 import { enqueueClientPortalForValidation } from '@/app/lib/atlas-client-portal-queue';
+import { isClientPortalBridgeEnabled } from '@/app/lib/atlas-sprint0-flags';
 import { registerStoredDocument } from '@/app/lib/atlas-document-upload-register';
 import { getSupabaseServiceRoleClient } from '@/app/lib/supabase-admin';
 
@@ -21,6 +22,9 @@ export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
 
 export async function POST(request: NextRequest) {
+  if (!isClientPortalBridgeEnabled()) {
+    return NextResponse.json({ error: 'portal_disabled' }, { status: 403 });
+  }
   if (atlasDataBackend() !== 'supabase') {
     return NextResponse.json({ error: 'not_enabled' }, { status: 400 });
   }

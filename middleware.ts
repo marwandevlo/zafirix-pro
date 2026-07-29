@@ -9,6 +9,7 @@ import {
   readAuthoritativeProfileStatus,
   warnIfMissingServiceRoleKey,
 } from '@/app/lib/atlas-profile-status-server';
+import { isClientPortalBridgeEnabled } from '@/app/lib/atlas-sprint0-flags';
 import {
   isActiveStatus,
   isBlockedStatus,
@@ -73,7 +74,7 @@ function isPublicPath(pathname: string): boolean {
   return false;
 }
 
-/** Client portal — public when bridge/demo flags are active (no accountant login required). */
+/** Client portal — public when bridge is enabled (no accountant login required). */
 function isClientPortalPublicPath(pathname: string): boolean {
   const isPortal =
     pathname === '/client' ||
@@ -81,13 +82,7 @@ function isClientPortalPublicPath(pathname: string): boolean {
     pathname.startsWith('/portal/') ||
     pathname.startsWith('/api/client-portal/');
   if (!isPortal) return false;
-  const truthy = (v: string | undefined) => v === 'true' || v === '1';
-  return (
-    truthy(process.env.NEXT_PUBLIC_ENABLE_CLIENT_PORTAL) ||
-    truthy(process.env.NEXT_PUBLIC_ENABLE_CLIENT_PORTAL_DEMO) ||
-    (process.env.NODE_ENV === 'development' &&
-      process.env.NEXT_PUBLIC_ATLAS_DATA_BACKEND === 'supabase')
-  );
+  return isClientPortalBridgeEnabled();
 }
 
 function isProfileGateExemptPath(pathname: string): boolean {
