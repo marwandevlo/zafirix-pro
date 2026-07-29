@@ -11,38 +11,11 @@
  */
 import fs from 'node:fs';
 import path from 'node:path';
-import pg from 'pg';
+import { loadProjectEnv, projectRefFromSupabaseUrl } from './load-project-env.mjs';
+import { queryViaPg, resolveSupabasePgConnection } from './supabase-pg-connection.mjs';
 
 const ROOT = path.resolve(import.meta.dirname, '..');
 const MIGRATION_FILE = path.join(ROOT, 'supabase/migrations/20260602030000_routing_registry.sql');
-const MIGRATION_NAME = '20260602030000_routing_registry';
-
-const POOLER_REGIONS = [
-  'eu-west-1',
-  'eu-west-2',
-  'eu-central-1',
-  'us-east-1',
-  'us-west-1',
-  'ap-southeast-1',
-];
-
-function loadEnvLocal() {
-  const envPath = path.join(ROOT, '.env.local');
-  if (!fs.existsSync(envPath)) return {};
-  const env = {};
-  for (const line of fs.readFileSync(envPath, 'utf8').split('\n')) {
-    const t = line.trim();
-    if (!t || t.startsWith('#')) continue;
-    const eq = t.indexOf('=');
-    if (eq === -1) continue;
-    env[t.slice(0, eq)] = t.slice(eq + 1);
-  }
-  return env;
-}
-
-function projectRef(supabaseUrl) {
-  return supabaseUrl.replace('https://', '').split('.')[0];
-}
 
 async function tableExists(url, key) {
   const res = await fetch(`${url}/rest/v1/zafirix_routing_records?select=id&limit=1`, {
@@ -67,64 +40,17 @@ async function applyViaManagementApi({ accessToken, ref, sql }) {
   return body;
 }
 
-async function applyViaPg(connectionString, sql) {
-  const client = new pg.Client({
-    connectionString,
-    ssl: { rejectUnauthorized: false },
-    connectionTimeoutMillis: 15000,
-  });
-  try {
-    await client.connect();
-    await client.query(sql);
-  } finally {
-    await client.end().catch(() => {});
-  }
-}
-
-function buildPoolerUrls(ref, password) {
-  const encoded = encodeURIComponent(password);
-  return POOLER_REGIONS.map(
-    (region) =>
-      `postgresql://postgres.${ref}:${encoded}@aws-0-${region}.pooler.supabase.com:6543/postgres?sslmode=require`,
-  );
-}
-
-async function resolvePgConnectionString(env, ref) {
-  const direct = env.DATABASE_URL ?? env.DIRECT_URL ?? process.env.DATABASE_URL ?? process.env.DIRECT_URL;
-  if (direct) return { connectionString: direct, source: 'DATABASE_URL' };
-
-  const password = env.SUPABASE_DB_PASSWORD ?? process.env.SUPABASE_DB_PASSWORD;
-  if (!password) return null;
-
-  for (const connectionString of buildPoolerUrls(ref, password)) {
-    const client = new pg.Client({
-      connectionString,
-      ssl: { rejectUnauthorized: false },
-      connectionTimeoutMillis: 8000,
-    });
-    try {
-      await client.connect();
-      await client.query('select 1');
-      await client.end();
-      return { connectionString, source: 'SUPABASE_DB_PASSWORD pooler' };
-    } catch {
-      await client.end().catch(() => {});
-    }
-  }
-  throw new Error('SUPABASE_DB_PASSWORD set but pooler connection failed in all regions');
-}
-
 async function main() {
-  const env = loadEnvLocal();
-  const url = env.NEXT_PUBLIC_SUPABASE_URL ?? process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const key = env.SUPABASE_SERVICE_ROLE_KEY ?? process.env.SUPABASE_SERVICE_ROLE_KEY;
+  const env = loadProjectEnv();
+  const url = env.NEXT_PUBLIC_SUPABASE_URL;
+  const key = env.SUPABASE_SERVICE_ROLE_KEY;
 
   if (!url || !key) {
     console.error('Missing NEXT_PUBLIC_SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY in .env.local');
     process.exit(1);
   }
 
-  const ref = projectRef(url);
+  const ref = projectRefFromSupabaseUrl(url);
   console.log(`\n=== Apply routing migration (${ref}) ===\n`);
 
   if (await tableExists(url, key)) {
@@ -138,24 +64,23 @@ async function main() {
   }
 
   const sql = fs.readFileSync(MIGRATION_FILE, 'utf8');
-  const accessToken = env.SUPABASE_ACCESS_TOKEN ?? process.env.SUPABASE_ACCESS_TOKEN;
+  const accessToken = env.SUPABASE_ACCESS_TOKEN;
 
   if (accessToken) {
     console.log('→ Applying via Supabase Management API…');
     await applyViaManagementApi({ accessToken, ref, sql });
     console.log('✓ Migration applied via Management API');
   } else {
-    const pgConn = await resolvePgConnectionString(env, ref);
+    const pgConn = await resolveSupabasePgConnection(env, ref);
     if (!pgConn) {
       console.error('Cannot apply migration: no database credentials found.\n');
-      console.error('Add ONE of these to .env.local, then re-run:');
-      console.error('  SUPABASE_ACCESS_TOKEN=<personal token from https://supabase.com/dashboard/account/tokens>');
-      console.error('  DATABASE_URL=<postgres connection string from Supabase → Settings → Database>');
-      console.error('  SUPABASE_DB_PASSWORD=<database password>  (auto-detects pooler region)\n');
+      console.error('Add to .env.local:');
+      console.error('  SUPABASE_POOLER_REGION=eu-west-1');
+      console.error('  SUPABASE_DB_PASSWORD=<database password from Supabase → Settings → Database>\n');
       process.exit(1);
     }
     console.log(`→ Applying via Postgres (${pgConn.source})…`);
-    await applyViaPg(pgConn.connectionString, sql);
+    await queryViaPg(pgConn.connectionString, sql);
     console.log('✓ Migration applied via Postgres');
   }
 
