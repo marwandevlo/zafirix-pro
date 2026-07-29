@@ -6,6 +6,7 @@ import { AppSidebar } from '@/app/components/shell/AppSidebar';
 import { ModuleEmptyState } from '@/app/components/onboarding/ModuleEmptyState';
 import { ExportMenu } from '@/app/components/ExportMenu';
 import type { ExportColumn } from '@/app/components/ExportMenu';
+import { FiscalCompliancePanel } from '@/app/components/compliance/FiscalCompliancePanel';
 import { getActiveCompanyDbRowId } from '@/app/lib/atlas-active-company';
 import { isAtlasSupabaseDataEnabled } from '@/app/lib/atlas-data-source';
 
@@ -132,6 +133,7 @@ export default function AuditPage() {
         </header>
 
         <div className="p-6 space-y-4 max-w-5xl">
+          <FiscalCompliancePanel fiscalYear={fiscalYear} />
           {loading ? (
             <Loader2 className="animate-spin text-violet-500 mx-auto" size={28} />
           ) : data ? (

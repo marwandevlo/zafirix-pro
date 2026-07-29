@@ -7,6 +7,7 @@ import { BetaSurfaceBadge } from '@/app/components/safety/BetaSurfaceBadge';
 import { getActiveCompanyDbRowId } from '@/app/lib/atlas-active-company';
 import { isAtlasSupabaseDataEnabled } from '@/app/lib/atlas-data-source';
 import { EXPERT_DISCLAIMER, computeIsLiquidation } from '@/app/lib/atlas-payroll-calculations';
+import { FiscalCompliancePanel } from '@/app/components/compliance/FiscalCompliancePanel';
 import type { AtlasIsDraft } from '@/app/types/atlas-payroll';
 
 async function apiFetch<T>(path: string, init?: RequestInit): Promise<{ ok: boolean; data: T }> {
@@ -226,6 +227,8 @@ export default function ISPage() {
         <div className="flex-1 overflow-y-auto px-8 py-6 space-y-6">
           {!companyId && <div className="text-sm text-amber-800 bg-amber-50 border rounded-xl px-4 py-3">Sélectionnez une société active.</div>}
           {error && <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">{error}</div>}
+
+          <FiscalCompliancePanel fiscalYear={fiscalYear} compact />
 
           <div className="bg-white rounded-xl p-6 shadow-sm border">
             <h2 className="font-semibold text-gray-700 mb-4">Calcul IS depuis données réelles</h2>

@@ -1,39 +1,61 @@
 'use client';
 
-import { useState } from 'react';
-import { Building2, FileText, Receipt, CheckCircle, AlertCircle, Download, Clock } from 'lucide-react';
+import { useRef, useState } from 'react';
+import { Building2, Camera, CheckCircle, Loader2, Upload, AlertCircle } from 'lucide-react';
+
+type Session = {
+  accessCode: string;
+  companyName: string;
+};
 
 /**
- * Mock client portal for **development / explicit staging only**.
- * Disabled in production unless `NEXT_PUBLIC_ENABLE_CLIENT_PORTAL_DEMO=true` (see `app/client/page.tsx`).
+ * Mobile-friendly client portal — snap/upload invoices → accountant validation queue.
  */
 export default function ClientPortalDemo() {
-  const [authenticated, setAuthenticated] = useState(false);
+  const [session, setSession] = useState<Session | null>(null);
   const [code, setCode] = useState('');
   const [error, setError] = useState('');
+  const [uploading, setUploading] = useState(false);
+  const [success, setSuccess] = useState('');
+  const [note, setNote] = useState('');
+  const fileRef = useRef<HTMLInputElement>(null);
+  const cameraRef = useRef<HTMLInputElement>(null);
 
   const handleLogin = () => {
-    if (code === '1234') {
-      setAuthenticated(true);
-      setError('');
-    } else {
-      setError('Code incorrect. Contactez votre comptable.');
+    if (!code.trim()) return;
+    setSession({ accessCode: code.trim(), companyName: 'Votre société' });
+    setError('');
+  };
+
+  const uploadFile = async (file: File) => {
+    if (!session) return;
+    setUploading(true);
+    setError('');
+    setSuccess('');
+    try {
+      const form = new FormData();
+      form.append('accessCode', session.accessCode);
+      form.append('file', file);
+      if (note.trim()) form.append('note', note.trim());
+
+      const res = await fetch('/api/client-portal/ingest', { method: 'POST', body: form });
+      const data = (await res.json()) as { ok?: boolean; message?: string; companyName?: string; error?: string };
+      if (!res.ok) throw new Error(data.message ?? data.error ?? 'Envoi impossible');
+      setSuccess(data.message ?? 'Document envoyé à votre comptable.');
+      if (data.companyName) {
+        setSession((s) => (s ? { ...s, companyName: data.companyName! } : s));
+      }
+      setNote('');
+      if (fileRef.current) fileRef.current.value = '';
+      if (cameraRef.current) cameraRef.current.value = '';
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Erreur réseau');
+    } finally {
+      setUploading(false);
     }
   };
 
-  const factures = [
-    { id: 'F-001', date: '2026-04-01', montant: 18000, statut: 'payée' },
-    { id: 'F-002', date: '2026-04-05', montant: 10200, statut: 'en attente' },
-    { id: 'F-003', date: '2026-03-20', montant: 6000, statut: 'en retard' },
-  ];
-
-  const declarations = [
-    { type: 'TVA Avril 2026', montant: 2400, statut: 'en attente', echeance: '20 Mai 2026' },
-    { type: 'CNSS Avril 2026', montant: 7590, statut: 'payée', echeance: '25 Avril 2026' },
-    { type: 'IS Acompte 2', montant: 20000, statut: 'en attente', echeance: '31 Mai 2026' },
-  ];
-
-  if (!authenticated) {
+  if (!session) {
     return (
       <div className="min-h-screen bg-[#0F1F3D] flex items-center justify-center p-4">
         <div className="w-full max-w-md">
@@ -43,13 +65,13 @@ export default function ClientPortalDemo() {
             </div>
             <div>
               <p className="text-white font-bold text-2xl">ZAFIRIX PRO</p>
-              <p className="text-white/40 text-sm">Espace Client (démo)</p>
+              <p className="text-white/40 text-sm">Espace Client · فضاء الزبون</p>
             </div>
           </div>
 
           <div className="bg-white rounded-2xl p-8 shadow-2xl">
-            <h1 className="text-xl font-bold text-gray-800 mb-1">Connexion Espace Client</h1>
-            <p className="text-sm text-gray-400 mb-6">Entrez le code fourni par votre comptable</p>
+            <h1 className="text-xl font-bold text-gray-800 mb-1">Connexion rapide</h1>
+            <p className="text-sm text-gray-400 mb-6">Code fourni par votre cabinet comptable</p>
 
             {error && (
               <div className="bg-red-50 border border-red-200 text-red-700 text-sm px-4 py-3 rounded-lg mb-4 flex items-center gap-2">
@@ -58,29 +80,24 @@ export default function ClientPortalDemo() {
               </div>
             )}
 
-            <div className="space-y-4">
-              <div>
-                <label className="text-xs font-medium text-gray-500 mb-1 block">Code d'accès</label>
-                <input
-                  value={code}
-                  onChange={(e) => setCode(e.target.value)}
-                  onKeyDown={(e) => e.key === 'Enter' && handleLogin()}
-                  type="password"
-                  placeholder="••••"
-                  className="w-full px-4 py-3 text-center text-2xl tracking-widest border border-gray-200 rounded-lg focus:outline-none focus:border-blue-400 font-mono"
-                  maxLength={4}
-                />
-              </div>
-              <button
-                type="button"
-                onClick={handleLogin}
-                className="w-full py-3 bg-[#0F1F3D] text-white rounded-lg font-medium hover:bg-[#1a3060] transition-colors"
-              >
-                Acceder a mon espace
-              </button>
-            </div>
+            <input
+              value={code}
+              onChange={(e) => setCode(e.target.value)}
+              onKeyDown={(e) => e.key === 'Enter' && handleLogin()}
+              type="password"
+              placeholder="••••"
+              className="w-full px-4 py-3 text-center text-2xl tracking-widest border rounded-lg focus:outline-none focus:border-amber-400 font-mono mb-4"
+              maxLength={16}
+            />
+            <button
+              type="button"
+              onClick={handleLogin}
+              className="w-full py-3 bg-[#0F1F3D] text-white rounded-lg font-medium"
+            >
+              Accéder · دخول
+            </button>
             <p className="text-xs text-amber-800 text-center mt-4 rounded-lg bg-amber-50 border border-amber-100 px-2 py-2">
-              Démo technique uniquement — données fictives, ne pas utiliser en production.
+              Démo : code 1234 si CLIENT_PORTAL_DEMO_* configuré côté serveur.
             </p>
           </div>
         </div>
@@ -89,133 +106,94 @@ export default function ClientPortalDemo() {
   }
 
   return (
-    <div className="min-h-screen bg-gray-50">
-      <header className="bg-[#0F1F3D] text-white px-6 py-4">
-        <div className="max-w-4xl mx-auto flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <div className="w-9 h-9 bg-amber-400 rounded-xl flex items-center justify-center">
-              <Building2 size={18} className="text-[#0F1F3D]" />
-            </div>
-            <div>
-              <p className="font-bold">ZAFIRIX PRO — Espace Client (démo)</p>
-              <p className="text-white/40 text-xs">Données d&apos;exemple · IF fictif</p>
-            </div>
+    <div className="min-h-screen bg-gray-50 pb-8">
+      <header className="bg-[#0F1F3D] text-white px-4 py-4 sticky top-0 z-10">
+        <div className="max-w-lg mx-auto flex items-center justify-between">
+          <div>
+            <p className="font-bold text-sm">{session.companyName}</p>
+            <p className="text-white/40 text-xs">Envoi factures & reçus · إرسال الوثائق</p>
           </div>
-          <button
-            type="button"
-            onClick={() => setAuthenticated(false)}
-            className="text-white/50 hover:text-white text-sm transition-colors"
-          >
-            Deconnexion
+          <button type="button" onClick={() => setSession(null)} className="text-xs text-white/50">
+            Quitter
           </button>
         </div>
       </header>
 
-      <div className="max-w-4xl mx-auto px-6 py-8 space-y-6">
-        <div className="grid grid-cols-3 gap-4">
-          <div className="bg-white rounded-xl p-5 shadow-sm border border-gray-100">
-            <p className="text-xs text-gray-400">Total facture</p>
-            <p className="text-2xl font-bold text-gray-800 mt-1">34 200 MAD</p>
+      <div className="max-w-lg mx-auto px-4 py-6 space-y-4">
+        {error && (
+          <div className="bg-red-50 border border-red-200 text-red-700 text-sm px-4 py-3 rounded-xl flex gap-2">
+            <AlertCircle size={16} className="shrink-0" />
+            {error}
           </div>
-          <div className="bg-amber-50 rounded-xl p-5 shadow-sm border border-amber-200">
-            <p className="text-xs text-gray-400">En attente paiement</p>
-            <p className="text-2xl font-bold text-amber-600 mt-1">10 200 MAD</p>
+        )}
+        {success && (
+          <div className="bg-green-50 border border-green-200 text-green-800 text-sm px-4 py-3 rounded-xl flex gap-2">
+            <CheckCircle size={16} className="shrink-0" />
+            {success}
           </div>
-          <div className="bg-red-50 rounded-xl p-5 shadow-sm border border-red-200">
-            <p className="text-xs text-gray-400">Declarations a payer</p>
-            <p className="text-2xl font-bold text-red-600 mt-1">22 400 MAD</p>
+        )}
+
+        <div className="bg-white rounded-2xl border shadow-sm p-5 space-y-4">
+          <h2 className="font-semibold text-gray-800">Photographier ou importer</h2>
+          <p className="text-xs text-gray-500">
+            Vos documents arrivent directement dans la file de validation OCR de votre comptable (/validation).
+          </p>
+
+          <textarea
+            value={note}
+            onChange={(e) => setNote(e.target.value)}
+            placeholder="Note optionnelle (ex. facture restaurant mars)"
+            rows={2}
+            className="w-full text-sm border rounded-xl px-3 py-2 resize-none"
+          />
+
+          <div className="grid grid-cols-2 gap-3">
+            <button
+              type="button"
+              disabled={uploading}
+              onClick={() => cameraRef.current?.click()}
+              className="flex flex-col items-center gap-2 p-5 rounded-xl border-2 border-dashed border-[#0F1F3D]/20 hover:border-amber-400 hover:bg-amber-50/50 disabled:opacity-50"
+            >
+              {uploading ? <Loader2 className="animate-spin text-[#0F1F3D]" /> : <Camera size={28} className="text-[#0F1F3D]" />}
+              <span className="text-xs font-medium text-gray-700">Appareil photo</span>
+            </button>
+            <button
+              type="button"
+              disabled={uploading}
+              onClick={() => fileRef.current?.click()}
+              className="flex flex-col items-center gap-2 p-5 rounded-xl border-2 border-dashed border-[#0F1F3D]/20 hover:border-amber-400 hover:bg-amber-50/50 disabled:opacity-50"
+            >
+              {uploading ? <Loader2 className="animate-spin text-[#0F1F3D]" /> : <Upload size={28} className="text-[#0F1F3D]" />}
+              <span className="text-xs font-medium text-gray-700">Fichier / PDF</span>
+            </button>
           </div>
+
+          <input
+            ref={cameraRef}
+            type="file"
+            accept="image/*"
+            capture="environment"
+            className="hidden"
+            onChange={(e) => {
+              const f = e.target.files?.[0];
+              if (f) void uploadFile(f);
+            }}
+          />
+          <input
+            ref={fileRef}
+            type="file"
+            accept="image/*,application/pdf"
+            className="hidden"
+            onChange={(e) => {
+              const f = e.target.files?.[0];
+              if (f) void uploadFile(f);
+            }}
+          />
         </div>
 
-        <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
-          <div className="px-6 py-4 border-b border-gray-100 flex items-center gap-2">
-            <FileText size={16} className="text-amber-500" />
-            <h2 className="font-semibold text-gray-700">Mes factures</h2>
-          </div>
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="text-left text-xs text-gray-400 border-b border-gray-100 bg-gray-50">
-                <th className="px-6 py-3">Numero</th>
-                <th className="px-6 py-3">Date</th>
-                <th className="px-6 py-3 text-right">Montant TTC</th>
-                <th className="px-6 py-3">Statut</th>
-                <th className="px-6 py-3"></th>
-              </tr>
-            </thead>
-            <tbody>
-              {factures.map((f) => (
-                <tr key={f.id} className="border-b border-gray-50 hover:bg-gray-50">
-                  <td className="px-6 py-3 font-medium text-gray-700">{f.id}</td>
-                  <td className="px-6 py-3 text-gray-500">{f.date}</td>
-                  <td className="px-6 py-3 text-right font-medium">{f.montant.toLocaleString()} MAD</td>
-                  <td className="px-6 py-3">
-                    <span
-                      className={`px-2 py-1 rounded-full text-xs font-medium ${
-                        f.statut === 'payée'
-                          ? 'bg-green-100 text-green-700'
-                          : f.statut === 'en attente'
-                            ? 'bg-amber-100 text-amber-700'
-                            : 'bg-red-100 text-red-700'
-                      }`}
-                    >
-                      {f.statut}
-                    </span>
-                  </td>
-                  <td className="px-6 py-3">
-                    <button type="button" className="text-gray-300 hover:text-blue-500 transition-colors">
-                      <Download size={14} />
-                    </button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-
-        <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
-          <div className="px-6 py-4 border-b border-gray-100 flex items-center gap-2">
-            <Receipt size={16} className="text-blue-500" />
-            <h2 className="font-semibold text-gray-700">Mes declarations fiscales</h2>
-          </div>
-          <div className="p-4 space-y-3">
-            {declarations.map((d, i) => (
-              <div
-                key={i}
-                className={`flex items-center gap-4 p-4 rounded-xl border ${
-                  d.statut === 'payée' ? 'bg-green-50 border-green-200' : 'bg-amber-50 border-amber-200'
-                }`}
-              >
-                <div
-                  className={`w-10 h-10 rounded-xl flex items-center justify-center ${
-                    d.statut === 'payée' ? 'bg-green-500' : 'bg-amber-400'
-                  }`}
-                >
-                  {d.statut === 'payée' ? (
-                    <CheckCircle size={20} className="text-white" />
-                  ) : (
-                    <Clock size={20} className="text-white" />
-                  )}
-                </div>
-                <div className="flex-1">
-                  <p className="font-semibold text-gray-800 text-sm">{d.type}</p>
-                  <p className="text-xs text-gray-400 mt-0.5">Echeance: {d.echeance}</p>
-                </div>
-                <div className="text-right">
-                  <p className="font-bold text-gray-800">{d.montant.toLocaleString()} MAD</p>
-                  <span
-                    className={`text-xs px-2 py-0.5 rounded-full font-medium ${
-                      d.statut === 'payée' ? 'bg-green-100 text-green-700' : 'bg-amber-100 text-amber-700'
-                    }`}
-                  >
-                    {d.statut}
-                  </span>
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-
-        <p className="text-center text-xs text-gray-400">Données de démonstration — ZAFIRIX PRO</p>
+        <p className="text-center text-xs text-gray-400">
+          Interface simplifiée — aucun accès aux livres comptables · Zafirix Pro
+        </p>
       </div>
     </div>
   );

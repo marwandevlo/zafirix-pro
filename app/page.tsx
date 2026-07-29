@@ -5,9 +5,9 @@ import { useRouter } from 'next/navigation';
 import {
   LayoutDashboard, FileText, Receipt, Calculator,
   TrendingUp, Upload, Bell, ChevronRight,
-  AlertCircle, CheckCircle, Brain,
+  AlertCircle, Brain,
   ArrowUpRight, ArrowDownRight, Calendar, Globe,
-  Users, Zap, Shield, Clock, Menu,
+  Users, Zap, Shield, Menu,
 } from 'lucide-react';
 import { listAtlasInvoices } from '@/app/lib/atlas-invoices-repository';
 import type { AtlasInvoice } from '@/app/types/atlas-invoice';
@@ -43,6 +43,7 @@ import { CompanySwitcher } from '@/app/components/shell/CompanySwitcher';
 import { CompanyMasterExportMenu } from '@/app/components/company/CompanyMasterExportMenu';
 import { ConsolidatedDashboardWidget } from '@/app/components/cabinet/ConsolidatedDashboardWidget';
 import { SubscriptionWidget } from '@/app/components/billing/SubscriptionWidget';
+import { DeadlineRadarWidget } from '@/app/components/dashboard/DeadlineRadarWidget';
 
 const ReferralPostOnboardingModal = dynamic(
   () =>
@@ -63,20 +64,31 @@ const modules = [
   { id: 'consultant', label: 'Consultant IA', labelAr: 'المستشار الذكي', icon: Brain, color: 'bg-indigo-500', href: '/consultant', deadline: null, urgent: false },
 ];
 
-const deadlines = [
-  { label: 'Déclaration TVA mensuelle', labelAr: 'التصريح الشهري بالـ TVA', date: '20 mai 2026', jours: 3, type: 'danger', lien: 'https://www.tax.gov.ma' },
-  { label: 'Virement CNSS', labelAr: 'تحويل CNSS', date: '25 Mai 2026', jours: 8, type: 'warning', lien: 'https://www.cnss.ma' },
-  { label: 'Acompte IS (2eme)', labelAr: 'الدفعة الثانية IS', date: '31 Mai 2026', jours: 14, type: 'info', lien: 'https://www.tax.gov.ma' },
-  { label: 'Déclaration IR salaires', labelAr: 'تصريح IR الرواتب', date: '30 juin 2026', jours: 44, type: 'ok', lien: 'https://www.tax.gov.ma' },
-];
-
 export default function Home() {
   const router = useRouter();
   const [lang, setLang] = useState<'fr' | 'ar'>('fr');
   const [menuOpen, setMenuOpen] = useState(false);
   const [connected, setConnected] = useState(true);
   const [invoices, setInvoices] = useState<AtlasInvoice[]>([]);
+  const [fiscalUrgentCount, setFiscalUrgentCount] = useState(0);
   const t = (fr: string, ar: string) => lang === 'fr' ? fr : ar;
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch('/api/dashboard/deadlines', { credentials: 'include' });
+        if (!res.ok || cancelled) return;
+        const data = (await res.json()) as { counts?: { red: number; orange: number } };
+        if (!cancelled && data.counts) {
+          setFiscalUrgentCount((data.counts.red ?? 0) + (data.counts.orange ?? 0));
+        }
+      } catch {
+        /* keep 0 */
+      }
+    })();
+    return () => { cancelled = true; };
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -92,10 +104,7 @@ export default function Home() {
     };
   }, []);
 
-  const pendingFiscalCount = useMemo(
-    () => deadlines.filter((d) => d.type === 'danger' || d.type === 'warning').length,
-    [],
-  );
+  const pendingFiscalCount = fiscalUrgentCount;
 
   const invoiceSummary = useMemo(() => {
     const now = todayYmd();
@@ -114,20 +123,8 @@ export default function Home() {
     { label: "Chiffre d'affaires", labelAr: 'رقم الأعمال', value: formatMadAmountLabel(invoiceSummary.totalFacture), change: t('Factures enregistrées', 'فواتير مسجلة'), up: true, icon: TrendingUp, color: 'text-blue-600' },
     { label: 'TVA', labelAr: 'TVA', value: '—', change: t('En cours de stabilisation', 'قيد الاستقرار'), up: true, icon: Receipt, color: 'text-slate-500' },
     { label: 'Factures en attente', labelAr: 'فواتير معلقة', value: String(invoiceSummary.unpaidCount), change: `${invoiceSummary.overdueCount} ${t('en retard', 'متأخرة')}`, up: invoiceSummary.overdueCount === 0, icon: FileText, color: 'text-amber-600' },
-    { label: 'Rappels fiscaux (indicatif)', labelAr: 'تذكير ضريبي (إشاري)', value: String(pendingFiscalCount), change: t('Calendrier indicatif', 'جدول إشاري'), up: true, icon: Calendar, color: 'text-purple-600' },
+    { label: 'Rappels fiscaux', labelAr: 'تذكير ضريبي', value: String(pendingFiscalCount), change: t('Radar échéances', 'رادار المواعيد'), up: pendingFiscalCount === 0, icon: Calendar, color: 'text-purple-600' },
   ]), [invoiceSummary, pendingFiscalCount, lang]);
-
-  const deadlineColor = (type: string) => {
-    if (type === 'danger') return 'bg-red-50 border-red-200 text-red-700';
-    if (type === 'warning') return 'bg-amber-50 border-amber-200 text-amber-700';
-    if (type === 'info') return 'bg-blue-50 border-blue-200 text-blue-700';
-    return 'bg-green-50 border-green-200 text-green-700';
-  };
-
-  const deadlineIcon = (type: string) => {
-    if (type === 'danger' || type === 'warning') return <AlertCircle size={14} />;
-    return <CheckCircle size={14} />;
-  };
 
   const navigate = (href: string) => {
     setMenuOpen(false);
@@ -222,34 +219,7 @@ export default function Home() {
           </div>
 
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 lg:gap-6">
-            <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
-              <div className="px-4 py-3 border-b border-gray-100 flex items-center justify-between">
-                <h2 className="font-semibold text-gray-700 text-sm flex items-center gap-2">
-                  <Clock size={14} className="text-red-500" />
-                  {t('Échéances fiscales', 'المواعيد الضريبية')}
-                </h2>
-                <span className="text-xs text-red-500 font-medium bg-red-50 px-2 py-0.5 rounded-full">
-                  {t('Indicatif', 'إشاري')}
-                </span>
-              </div>
-              <div className="p-3 space-y-2">
-                {deadlines.map((d, i) => (
-                  <div key={i} className={`flex items-start gap-2 p-2.5 rounded-lg border text-xs ${deadlineColor(d.type)}`}>
-                    <div className="mt-0.5 shrink-0">{deadlineIcon(d.type)}</div>
-                    <div className="flex-1 min-w-0">
-                      <p className="font-medium truncate">{t(d.label, d.labelAr)}</p>
-                      <p className="opacity-70 mt-0.5">{d.date}</p>
-                    </div>
-                    <div className="flex flex-col items-end gap-1 shrink-0">
-                      <span className="font-bold">{d.jours}j</span>
-                      <button onClick={() => window.open(d.lien, '_blank')} className="opacity-60 hover:opacity-100">
-                        <Globe size={10} />
-                      </button>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
+            <DeadlineRadarWidget lang={lang} />
 
             <div className="lg:col-span-2">
               <div className="flex items-center justify-between mb-3">
