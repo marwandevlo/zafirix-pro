@@ -193,7 +193,11 @@ export async function exportToPDF(
   meta?: ExportMeta,
 ): Promise<void> {
   const { default: jsPDF } = await import('jspdf');
-  const { default: autoTable } = await import('jspdf-autotable');
+  const autoTableMod = await import('jspdf-autotable');
+  const autoTable = autoTableMod.autoTable ?? autoTableMod.default;
+  if (typeof autoTable !== 'function') {
+    throw new Error('jspdf-autotable indisponible');
+  }
 
   const activeCols = columns.filter(c => !c.skipExport);
   const doc = new jsPDF({ orientation: activeCols.length > 6 ? 'landscape' : 'portrait', unit: 'mm', format: 'a4' });

@@ -97,6 +97,21 @@ export default function ComptabilitePage() {
   const totalDebit = ecritures.reduce((s, e) => s + e.debit, 0);
   const totalCredit = ecritures.reduce((s, e) => s + e.credit, 0);
 
+  const journalExportRows = useMemo(
+    () =>
+      ecritures.map((e) => ({
+        id: e.rowId ?? String(e.id),
+        date: e.date,
+        libelle: e.libelle,
+        compte: e.compte,
+        debit: e.debit,
+        credit: e.credit,
+        sourceDocumentId: e.sourceDocumentId ?? '',
+        validationStatus: e.validationStatus ?? '',
+      })),
+    [ecritures],
+  );
+
   const accountingKpis = useMemo(() => {
     const totalFacture = invoices.reduce((sum, inv) => sum + (inv.totalTTC || 0), 0);
 
@@ -270,18 +285,24 @@ export default function ComptabilitePage() {
         ))}
       </AppSidebar>
 
-      <main className="flex-1 flex flex-col overflow-hidden">
-        <header className="bg-white border-b border-gray-200 px-8 py-4 flex items-center justify-between">
+      <main className="flex-1 flex flex-col min-h-0">
+        <header className="relative z-20 overflow-visible bg-white border-b border-gray-200 px-8 py-4 flex items-center justify-between">
           <div>
             <h1 className="text-xl font-bold text-gray-800">Comptabilite</h1>
             <p className="text-xs text-gray-400 mt-0.5">KPIs factures · journal enregistré</p>
           </div>
           <div className="flex items-center gap-2">
             <ExportMenu
-              data={ecritures as unknown as Record<string, unknown>[]}
+              data={journalExportRows}
               columns={ECRITURE_EXPORT_COLUMNS}
               filename="journal_comptable"
               title="Journal Comptable"
+              idKey="id"
+              context={{
+                Société: activeCompanyId ?? '—',
+                'Total débit': formatMadAmountLabel(totalDebit),
+                'Total crédit': formatMadAmountLabel(totalCredit),
+              }}
               size="sm"
             />
             <button onClick={() => setShowForm(!showForm)} className="flex items-center gap-2 px-4 py-2 bg-[#1B2A4A] text-white rounded-lg text-sm hover:bg-[#243660] transition-colors">

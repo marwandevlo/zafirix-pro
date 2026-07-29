@@ -116,6 +116,10 @@ export function ExportMenu({
     try {
       const rows = exportData();
       await exportTable(format, rows, columns, filename, buildMeta(format));
+    } catch (err) {
+      console.error('[ExportMenu]', format, err);
+      const message = err instanceof Error ? err.message : 'Export impossible';
+      window.alert(`Export ${format.toUpperCase()} échoué : ${message}`);
     } finally {
       setExporting(null);
     }
@@ -145,9 +149,13 @@ export function ExportMenu({
       <button
         type="button"
         onClick={() => setOpen(v => !v)}
-        disabled={exporting !== null || data.length === 0}
+        disabled={exporting !== null}
         className={`flex items-center font-medium border border-gray-200 bg-white text-gray-700 rounded-lg hover:bg-gray-50 hover:border-gray-300 disabled:opacity-50 transition-colors ${btnSize}`}
-        title={`Exporter ${count} ligne${count !== 1 ? 's' : ''}${hasSelection ? ' sélectionnée(s)' : ''}`}
+        title={
+          count > 0
+            ? `Exporter ${count} ligne${count !== 1 ? 's' : ''}${hasSelection ? ' sélectionnée(s)' : ''}`
+            : 'Exporter — fichier vide avec en-têtes de colonnes'
+        }
       >
         {exporting ? (
           <Loader2 size={size === 'xs' ? 12 : 14} className="animate-spin shrink-0" />
@@ -165,7 +173,7 @@ export function ExportMenu({
 
       {open && (
         <div
-          className={`absolute z-50 mt-1 w-60 bg-white border border-gray-200 rounded-xl shadow-lg overflow-hidden ${
+          className={`absolute z-[100] mt-1 w-60 bg-white border border-gray-200 rounded-xl shadow-lg overflow-hidden ${
             align === 'left' ? 'left-0' : 'right-0'
           }`}
         >
