@@ -61,7 +61,7 @@ export function writePaymentsToLocalStorage(payments: AtlasPayment[]): void {
   localStorage.setItem(ATLAS_STORAGE_KEYS.payments, JSON.stringify(payments));
 }
 
-export async function listAtlasPayments(params?: { invoiceId?: string }): Promise<AtlasPayment[]> {
+export async function listAtlasPayments(params?: { invoiceId?: string; companyId?: string | null }): Promise<AtlasPayment[]> {
   if (!isAtlasSupabaseDataEnabled()) return readPaymentsFromLocalStorage();
 
   const auth = await requireSupabaseUser();
@@ -69,6 +69,7 @@ export async function listAtlasPayments(params?: { invoiceId?: string }): Promis
 
   let q = supabase.from('atlas_payments').select('*').order('created_at', { ascending: true });
   if (params?.invoiceId) q = q.eq('invoice_id', params.invoiceId);
+  if (params?.companyId) q = q.eq('company_id', params.companyId);
 
   const { data, error } = await q;
   if (error) {

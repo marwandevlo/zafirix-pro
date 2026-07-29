@@ -341,14 +341,13 @@ export async function POST(
     const moduleGroup = resolveModuleGroup(targetModule);
     const admin = getSupabaseServiceRoleClient();
 
-    const [docRes, companyRes] = await Promise.all([
+    const [docRes] = await Promise.all([
       admin
         .from('atlas_documents')
         .select('id, company_id, processing_status, validation_status, metadata, document_type')
         .eq('id', documentId)
         .eq('user_id', userId)
         .maybeSingle(),
-      admin.from('atlas_companies').select('id, raisonSociale, company_json').eq('user_id', userId).maybeSingle(),
     ]);
 
     if (docRes.error) {
@@ -374,12 +373,19 @@ export async function POST(
         ? (meta.extraction as AtlasStructuredExtraction)
         : {};
     const docType = (doc.document_type as AtlasDocumentType | null) ?? 'unknown';
-    const companyId = doc.company_id ?? companyRes.data?.id ?? '';
+    const companyId = doc.company_id ?? '';
     if (!companyId) {
       return routeToErrorResponse(400, 'company_required', 'Société active requise pour le routage.');
     }
 
-    const companyJson = companyRes.data?.company_json;
+    const { data: companyRow } = await admin
+      .from('atlas_companies')
+      .select('id, raisonSociale, company_json')
+      .eq('id', companyId)
+      .eq('user_id', userId)
+      .maybeSingle();
+
+    const companyJson = companyRow?.company_json;
     const regime =
       (companyJson && typeof companyJson === 'object'
         ? ((companyJson as Record<string, unknown>).regimeTVA as string)

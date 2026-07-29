@@ -20,7 +20,10 @@ import { BetaSurfaceBadge } from '@/app/components/safety/BetaSurfaceBadge';
 import { BankExportMenu } from '@/app/components/bank/BankExportMenu';
 import { BankAlertCenter } from '@/app/components/bank/BankAlertCenter';
 import { ValidationStatusBadge } from '@/app/components/validation/ValidationStatusBadge';
+import { RowActions } from '@/app/components/actions';
+import type { ExportColumn } from '@/app/components/ExportMenu';
 import { getActiveCompanyDbRowId } from '@/app/lib/atlas-active-company';
+import { onCompanySwitched } from '@/app/lib/atlas-company-switch-event';
 
 type BankTx = {
   id: string;
@@ -48,6 +51,15 @@ type PendingStatement = {
   syncedTransactionCount: number;
 };
 
+const BANK_ROW_EXPORT_COLUMNS: ExportColumn[] = [
+  { key: 'transactionDate', label: 'Date' },
+  { key: 'description', label: 'Libellé' },
+  { key: 'reference', label: 'Référence' },
+  { key: 'debit', label: 'Débit (MAD)', format: (v) => typeof v === 'number' && v > 0 ? v.toFixed(2) : '' },
+  { key: 'credit', label: 'Crédit (MAD)', format: (v) => typeof v === 'number' && v > 0 ? v.toFixed(2) : '' },
+  { key: 'validationStatus', label: 'Statut' },
+];
+
 
 function formatMad(n: number): string {
   return n.toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -71,6 +83,7 @@ export default function BanquePage() {
   const [syncMessage, setSyncMessage] = useState('');
   const [syncError, setSyncError] = useState('');
   const [search, setSearch] = useState('');
+  const [debouncedSearch, setDebouncedSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState<'all' | 'draft' | 'validated'>('all');
   const [reconFilter, setReconFilter] = useState<'all' | 'matched' | 'suggested' | 'unmatched'>('all');
 
@@ -97,7 +110,7 @@ export default function BanquePage() {
 
       const params = new URLSearchParams({ limit: '200', companyId: cid });
       if (statusFilter !== 'all') params.set('status', statusFilter);
-      if (search) params.set('search', search);
+      if (debouncedSearch) params.set('search', debouncedSearch);
 
       const [txRes, reconRes, pending] = await Promise.all([
         fetch(`/api/bank/transactions?${params}`, { credentials: 'include' }),
@@ -119,9 +132,20 @@ export default function BanquePage() {
     } finally {
       setLoading(false);
     }
-  }, [companyId, search, statusFilter, loadPending]);
+  }, [companyId, debouncedSearch, statusFilter, loadPending]);
+
+  useEffect(() => {
+    const t = window.setTimeout(() => setDebouncedSearch(search.trim()), 350);
+    return () => window.clearTimeout(t);
+  }, [search]);
 
   useEffect(() => { void load(); }, [load]);
+
+  useEffect(() => {
+    return onCompanySwitched((cid) => {
+      setCompanyId(cid);
+    });
+  }, []);
 
   const unsyncedCount = useMemo(
     () => pendingStatements.filter(s => !s.synced && s.transactionCount > 0).length,
@@ -147,6 +171,39 @@ export default function BanquePage() {
       body: JSON.stringify({ id: reconId, action }),
     });
     void load();
+  };
+
+  const deleteTransaction = async (id: string) => {
+    const res = await fetch(`/api/bank/transactions/${encodeURIComponent(id)}`, {
+      method: 'DELETE',
+      credentials: 'include',
+    });
+    if (!res.ok) return false;
+    setTransactions((prev) => prev.filter((t) => t.id !== id));
+    return true;
+  };
+
+  const updateTransaction = async (id: string, values: Record<string, string>) => {
+    const res = await fetch(`/api/bank/transactions/${encodeURIComponent(id)}`, {
+      method: 'PATCH',
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        description: values.description,
+        reference: values.reference,
+        transactionDate: values.transactionDate,
+        debit: parseFloat(values.debit) || 0,
+        credit: parseFloat(values.credit) || 0,
+      }),
+    });
+    if (!res.ok) return false;
+    const data = await res.json() as { transaction?: BankTx };
+    if (data.transaction) {
+      setTransactions((prev) => prev.map((t) => (t.id === id ? { ...t, ...data.transaction! } : t)));
+    } else {
+      void load();
+    }
+    return true;
   };
 
   const syncStatements = async (documentIds?: string[]) => {
@@ -315,6 +372,7 @@ export default function BanquePage() {
                     <th className="px-4 py-3 text-right">Crédit</th>
                     <th className="px-4 py-3">Statut Rapprochement</th>
                     <th className="px-4 py-3">Statut</th>
+                    <th className="px-4 py-3 text-right">Actions</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -348,6 +406,36 @@ export default function BanquePage() {
                         </td>
                         <td className="px-4 py-3">
                           <ValidationStatusBadge status={tx.validationStatus as 'draft' | 'validated' | 'reviewed' | 'rejected'} />
+                        </td>
+                        <td className="px-4 py-3 text-right">
+                          <div className="relative inline-flex justify-end">
+                            <RowActions
+                              entityId={tx.id}
+                              entityLabel={tx.description ?? tx.reference ?? 'Opération'}
+                              entityType="opération bancaire"
+                              exportData={{
+                                id: tx.id,
+                                transactionDate: tx.transactionDate,
+                                description: tx.description,
+                                reference: tx.reference,
+                                debit: tx.debit,
+                                credit: tx.credit,
+                                validationStatus: tx.validationStatus,
+                              }}
+                              exportColumns={BANK_ROW_EXPORT_COLUMNS}
+                              exportFilename="operation_bancaire"
+                              exportTitle="Opération bancaire"
+                              editFields={[
+                                { key: 'transactionDate', label: 'Date', type: 'date', value: tx.transactionDate ?? '' },
+                                { key: 'description', label: 'Libellé', value: tx.description ?? '', required: true },
+                                { key: 'reference', label: 'Référence', value: tx.reference ?? '' },
+                                { key: 'debit', label: 'Débit (MAD)', type: 'number', value: String(tx.debit || '') },
+                                { key: 'credit', label: 'Crédit (MAD)', type: 'number', value: String(tx.credit || '') },
+                              ]}
+                              onEditSave={(values) => updateTransaction(tx.id, values)}
+                              onDelete={() => deleteTransaction(tx.id)}
+                            />
+                          </div>
                         </td>
                       </tr>
                     );

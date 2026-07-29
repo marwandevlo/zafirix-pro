@@ -502,10 +502,16 @@ export default function DocumentsPage() {
         companyId: companyId ?? undefined,
       });
       setLibrary(docs);
-      if (selectedId && !docs.some((d) => String(d.id) === selectedId)) setSelectedId(docs[0]?.id ?? '');
     }, 150);
     return () => window.clearTimeout(t);
-  }, [libraryQuery, libraryType, selectedId, tab, supabaseMode]);
+  }, [libraryQuery, libraryType, tab, supabaseMode]);
+
+  useEffect(() => {
+    if (tab !== 'library') return;
+    if (selectedId && !library.some((d) => String(d.id) === selectedId)) {
+      setSelectedId(library[0]?.id ?? '');
+    }
+  }, [library, selectedId, tab]);
 
   const selectedDoc = useMemo(() => library.find((d) => String(d.id) === String(selectedId)) ?? null, [library, selectedId]);
   const distinctTypes = useMemo(() => {
@@ -650,25 +656,32 @@ export default function DocumentsPage() {
     setCreatingSupplierInvoiceId(documentId);
     setOcrError('');
     try {
-      const result = await createSupplierInvoicesFromOcr(documentId);
-      if (!result.ok) {
-        setOcrError(atlasSupplierInvoiceErrorMessage(result.error));
+      const res = await fetch(`/api/documents/${documentId}/validate`, {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'validated' }),
+      });
+      const body = await res.json().catch(() => ({})) as {
+        ok?: boolean;
+        error?: string;
+        message?: string;
+        invoicesCreated?: number;
+        journalLineCount?: number;
+      };
+      if (!res.ok) {
+        setOcrError(body.message ?? body.error ?? 'Validation impossible.');
         return;
       }
       await refreshOcr();
-      if (result.created >= 1) {
+      await refreshLibrary();
+      const created = body.invoicesCreated ?? 0;
+      if (created >= 1) {
+        setOcrPageInfo(`Validé — ${created} facture(s), ${body.journalLineCount ?? 0} écriture(s) journal.`);
         router.push('/comptabilite');
         return;
       }
-      if (result.created === 0 && result.alreadyExists > 0) {
-        setOcrPageInfo(`${result.alreadyExists} facture(s) fournisseur déjà créée(s).`);
-      } else if (result.created > 1) {
-        setOcrPageInfo(`${result.created} factures fournisseur créées.`);
-      } else if (result.created === 1) {
-        setOcrPageInfo('Facture fournisseur créée.');
-      } else if (result.skipped > 0) {
-        setOcrPageInfo(`${result.skipped} facture(s) n’ont pas pu être créées.`);
-      }
+      setOcrPageInfo('Document validé et enregistré.');
     } finally {
       setCreatingSupplierInvoiceId(null);
     }

@@ -47,40 +47,48 @@ export async function GET(request: NextRequest) {
 
   const companyId = request.nextUrl.searchParams.get('companyId')?.trim() || null;
 
+  let rejectedQuery = admin
+    .from('zafirix_routing_records')
+    .select('id, source_document_id, target_module, target_entity_type, updated_at')
+    .eq('user_id', userId)
+    .eq('validation_status', 'rejected')
+    .order('updated_at', { ascending: false })
+    .limit(10);
+  if (companyId) rejectedQuery = rejectedQuery.eq('company_id', companyId);
+
+  let expiringQuery = admin
+    .from('zafirix_legal_documents')
+    .select('id, title, expiry_date')
+    .eq('user_id', userId)
+    .gte('expiry_date', today)
+    .lte('expiry_date', alertDateStr)
+    .order('expiry_date', { ascending: true })
+    .limit(10);
+  if (companyId) expiringQuery = expiringQuery.eq('company_id', companyId);
+
+  let expiredQuery = admin
+    .from('zafirix_legal_documents')
+    .select('id, title, expiry_date')
+    .eq('user_id', userId)
+    .lt('expiry_date', today)
+    .order('expiry_date', { ascending: false })
+    .limit(5);
+  if (companyId) expiredQuery = expiredQuery.eq('company_id', companyId);
+
+  let stuckQuery = admin
+    .from('atlas_documents')
+    .select('id, filename, title, processing_status, created_at')
+    .eq('user_id', userId)
+    .eq('processing_status', 'processing')
+    .lt('created_at', oneHourAgo.toISOString())
+    .limit(5);
+  if (companyId) stuckQuery = stuckQuery.eq('company_id', companyId);
+
   const [rejected, expiring, expired, stuck, liasseAlerts] = await Promise.all([
-    // Rejected routing records
-    admin.from('zafirix_routing_records')
-      .select('id, source_document_id, target_module, target_entity_type, updated_at')
-      .eq('user_id', userId)
-      .eq('validation_status', 'rejected')
-      .order('updated_at', { ascending: false })
-      .limit(10),
-
-    // Contracts expiring soon (≤ 30 days)
-    admin.from('zafirix_legal_documents')
-      .select('id, title, expiry_date')
-      .eq('user_id', userId)
-      .gte('expiry_date', today)
-      .lte('expiry_date', alertDateStr)
-      .order('expiry_date', { ascending: true })
-      .limit(10),
-
-    // Expired contracts
-    admin.from('zafirix_legal_documents')
-      .select('id, title, expiry_date')
-      .eq('user_id', userId)
-      .lt('expiry_date', today)
-      .order('expiry_date', { ascending: false })
-      .limit(5),
-
-    // Documents stuck in processing
-    admin.from('zafirix_ocr_documents')
-      .select('id, filename, processing_status, created_at')
-      .eq('user_id', userId)
-      .eq('processing_status', 'processing')
-      .lt('created_at', oneHourAgo.toISOString())
-      .limit(5),
-
+    rejectedQuery,
+    expiringQuery,
+    expiredQuery,
+    stuckQuery,
     collectLiasseAlerts(admin, userId, companyId),
   ]);
 
@@ -139,7 +147,7 @@ export async function GET(request: NextRequest) {
       id: `stuck-${d.id}`,
       severity: 'yellow',
       category: 'OCR bloqué',
-      title: `Analyse bloquée : ${d.filename ?? String(d.id).slice(0, 8)}`,
+      title: `Analyse bloquée : ${d.filename ?? d.title ?? String(d.id).slice(0, 8)}`,
       description: 'OCR en cours depuis plus d\'1 heure',
       href: '/documents',
       entity_id: String(d.id),

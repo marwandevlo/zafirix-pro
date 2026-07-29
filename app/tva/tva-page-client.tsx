@@ -19,6 +19,8 @@ import { BetaSurfaceBadge } from '@/app/components/safety/BetaSurfaceBadge';
 import { ExportMenu } from '@/app/components/ExportMenu';
 import type { ExportColumn } from '@/app/components/ExportMenu';
 import { EntityAuditTable } from '@/app/components/history/EntityAuditTable';
+import { RowActions } from '@/app/components/actions';
+import { isValidIce } from '@/app/lib/atlas-morocco-compliance';
 
 const TVA_LINE_EXPORT_COLUMNS: ExportColumn[] = [
   { key: 'reference', label: 'Référence' },
@@ -95,6 +97,61 @@ function statusBadge(status: string) {
       <Clock size={12} /> En attente
     </span>
   );
+}
+
+const TVA_HISTORY_EXPORT_COLUMNS: ExportColumn[] = [
+  { key: 'periodLabel', label: 'Période' },
+  { key: 'tvaCollectee', label: 'TVA collectée', format: v => typeof v === 'number' ? v.toFixed(2) : '' },
+  { key: 'tvaDeductible', label: 'TVA déductible', format: v => typeof v === 'number' ? v.toFixed(2) : '' },
+  { key: 'tvaNette', label: 'TVA nette', format: v => typeof v === 'number' ? v.toFixed(2) : '' },
+  { key: 'declarationDueDate', label: 'Échéance' },
+  { key: 'status', label: 'Statut' },
+];
+
+async function deleteTvaSourceLine(line: AtlasTvaPeriodRecord['lines'][number]): Promise<boolean> {
+  if (line.source === 'tva_suggestion') return false;
+  const path =
+    line.source === 'supplier_invoice' ? `/api/supplier-invoices/${line.id}` :
+    line.source === 'invoice' ? `/api/invoices/${line.id}` :
+    line.source === 'accounting_entry' ? `/api/accounting/entries/${line.id}` :
+    null;
+  if (!path) return false;
+  const res = await fetch(path, { method: 'DELETE', credentials: 'include' });
+  return res.ok;
+}
+
+async function updateTvaSourceLine(line: AtlasTvaPeriodRecord['lines'][number], values: Record<string, string>): Promise<boolean> {
+  if (line.source === 'supplier_invoice') {
+    const res = await fetch(`/api/supplier-invoices/${line.id}`, {
+      method: 'PATCH',
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        invoiceNumber: values.reference,
+        supplierName: values.counterparty,
+        issueDate: values.issueDate,
+        amountHT: parseFloat(values.amountHT) || 0,
+        vatAmount: parseFloat(values.vatAmount) || 0,
+        totalTTC: parseFloat(values.totalTTC) || 0,
+        supplierIce: values.supplierIce,
+      }),
+    });
+    return res.ok;
+  }
+  if (line.source === 'accounting_entry') {
+    const res = await fetch(`/api/accounting/entries/${line.id}`, {
+      method: 'PATCH',
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        libelle: `${values.counterparty} — ${values.reference}`,
+        date: values.issueDate,
+        debit: parseFloat(values.vatAmount) || 0,
+      }),
+    });
+    return res.ok;
+  }
+  return false;
 }
 
 export default function TvaPageClient() {
@@ -493,11 +550,11 @@ export default function TvaPageClient() {
           )}
 
           {!loading && current && tab === 'ventes' && (
-            <InvoiceTable title="Factures ventes (TVA collectée)" lines={salesLines} counterpartyLabel="Client" />
+            <InvoiceTable title="Factures ventes (TVA collectée)" lines={salesLines} counterpartyLabel="Client" onRefresh={() => void reload()} />
           )}
 
           {!loading && current && tab === 'achats' && (
-            <InvoiceTable title="Factures achats (TVA déductible)" lines={purchaseLines} counterpartyLabel="Fournisseur" />
+            <InvoiceTable title="Factures achats (TVA déductible)" lines={purchaseLines} counterpartyLabel="Fournisseur" onRefresh={() => void reload()} />
           )}
 
           {!loading && tab === 'audit' && (
@@ -521,12 +578,13 @@ export default function TvaPageClient() {
                     <th className="px-4 py-3 text-right">Nette</th>
                     <th className="px-4 py-3">Échéance</th>
                     <th className="px-4 py-3">Statut</th>
+                    <th className="px-4 py-3 text-right">Actions</th>
                   </tr>
                 </thead>
                 <tbody>
                   {history.length === 0 && (
                     <tr>
-                      <td colSpan={6} className="px-4 py-8 text-center text-gray-400">
+                      <td colSpan={7} className="px-4 py-8 text-center text-gray-400">
                         Aucune période enregistrée.
                       </td>
                     </tr>
@@ -539,6 +597,28 @@ export default function TvaPageClient() {
                       <td className="px-4 py-3 text-right font-medium">{formatMad(p.tvaNette)}</td>
                       <td className="px-4 py-3 text-gray-600">{p.declarationDueDate}</td>
                       <td className="px-4 py-3">{statusBadge(p.status)}</td>
+                      <td className="px-4 py-3 text-right">
+                        <div className="relative inline-flex justify-end">
+                          <RowActions
+                            entityId={p.id}
+                            entityLabel={p.periodLabel}
+                            entityType="période TVA"
+                            exportData={{
+                              id: p.id,
+                              periodLabel: p.periodLabel,
+                              tvaCollectee: p.tvaCollectee,
+                              tvaDeductible: p.tvaDeductible,
+                              tvaNette: p.tvaNette,
+                              declarationDueDate: p.declarationDueDate,
+                              status: p.status,
+                            }}
+                            exportColumns={TVA_HISTORY_EXPORT_COLUMNS}
+                            exportFilename="periode_tva"
+                            hideEdit
+                            hideDelete
+                          />
+                        </div>
+                      </td>
                     </tr>
                   ))}
                 </tbody>
@@ -555,10 +635,12 @@ function InvoiceTable({
   title,
   lines,
   counterpartyLabel,
+  onRefresh,
 }: {
   title: string;
   lines: AtlasTvaPeriodRecord['lines'];
   counterpartyLabel: string;
+  onRefresh?: () => void;
 }) {
   return (
     <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
@@ -586,12 +668,13 @@ function InvoiceTable({
             <th className="px-4 py-3 text-right">TVA</th>
             <th className="px-4 py-3 text-right">TTC</th>
             <th className="px-4 py-3">Source</th>
+            <th className="px-4 py-3 text-right">Actions</th>
           </tr>
         </thead>
         <tbody>
           {lines.length === 0 && (
             <tr>
-              <td colSpan={7}>
+              <td colSpan={8}>
                 <ModuleEmptyState module="tva" />
               </td>
             </tr>
@@ -605,6 +688,56 @@ function InvoiceTable({
               <td className="px-4 py-3 text-right text-blue-600">{formatMad(f.vatAmount)}</td>
               <td className="px-4 py-3 text-right font-medium">{formatMad(f.totalTTC)}</td>
               <td className="px-4 py-3 text-xs text-gray-400">{f.source}</td>
+              <td className="px-4 py-3 text-right">
+                <div className="relative inline-flex justify-end">
+                  <RowActions
+                    entityId={f.id}
+                    entityLabel={f.reference || f.counterparty}
+                    entityType="ligne TVA"
+                    exportData={{
+                      id: f.id,
+                      reference: f.reference,
+                      counterparty: f.counterparty,
+                      issueDate: f.issueDate,
+                      amountHT: f.amountHT,
+                      vatAmount: f.vatAmount,
+                      totalTTC: f.totalTTC,
+                      source: f.source,
+                    }}
+                    exportColumns={TVA_LINE_EXPORT_COLUMNS}
+                    exportFilename="ligne_tva"
+                    exportTitle={title}
+                    hideEdit={f.source === 'tva_suggestion' || f.source === 'invoice'}
+                    hideDelete={f.source === 'tva_suggestion'}
+                    editFields={[
+                      { key: 'reference', label: 'Référence', value: f.reference ?? '' },
+                      { key: 'counterparty', label: counterpartyLabel, value: f.counterparty ?? '', required: true },
+                      { key: 'issueDate', label: 'Date', type: 'date', value: f.issueDate ?? '' },
+                      { key: 'amountHT', label: 'HT (MAD)', type: 'number', value: String(f.amountHT) },
+                      { key: 'vatAmount', label: 'TVA (MAD)', type: 'number', value: String(f.vatAmount) },
+                      { key: 'totalTTC', label: 'TTC (MAD)', type: 'number', value: String(f.totalTTC) },
+                      ...(counterpartyLabel === 'Fournisseur'
+                        ? [{
+                            key: 'supplierIce',
+                            label: 'ICE',
+                            value: f.supplierIce ?? '',
+                            validate: (v: string) => (!v.trim() || isValidIce(v) ? null : 'ICE invalide (15 chiffres)'),
+                          }]
+                        : []),
+                    ]}
+                    onEditSave={async (values) => {
+                      const ok = await updateTvaSourceLine(f, values);
+                      if (ok) onRefresh?.();
+                      return ok;
+                    }}
+                    onDelete={async () => {
+                      const ok = await deleteTvaSourceLine(f);
+                      if (ok) onRefresh?.();
+                      return ok;
+                    }}
+                  />
+                </div>
+              </td>
             </tr>
           ))}
         </tbody>

@@ -42,8 +42,8 @@ export async function GET(request: NextRequest) {
     payslipExtractions,
     employeeCount,
   ] = await Promise.all([
-    // Documents uploaded today
-    admin.from('zafirix_ocr_documents')
+    // Documents uploaded today (atlas_documents)
+    admin.from('atlas_documents')
       .select('id', { count: 'exact', head: true })
       .eq('user_id', userId)
       .gte('created_at', todayStart.toISOString()),

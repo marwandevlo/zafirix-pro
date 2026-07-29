@@ -16,6 +16,7 @@ import {
 import { logDocumentEvent } from '@/app/lib/atlas-document-events';
 import { revalidateDocumentSurfaces } from '@/app/lib/revalidate-document-surfaces';
 import { getSupabaseServiceRoleClient } from '@/app/lib/supabase-admin';
+import { parseNestedClassification } from '@/app/lib/atlas-ai-json-parse';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -54,7 +55,7 @@ export async function POST(
 
   const { data: doc, error: fetchErr } = await admin
     .from('atlas_documents')
-    .select('id, company_id, processing_status, validation_status')
+    .select('id, company_id, processing_status, validation_status, document_type, metadata')
     .eq('id', documentId)
     .eq('user_id', userId)
     .maybeSingle();
@@ -90,6 +91,15 @@ export async function POST(
       );
     }
 
+    const meta =
+      doc.metadata && typeof doc.metadata === 'object'
+        ? (doc.metadata as Record<string, unknown>)
+        : {};
+    const detected = parseNestedClassification(meta.classification)?.detected_type;
+    const docType =
+      (doc.document_type as string | null) ??
+      (typeof detected === 'string' ? detected : null);
+
     await markDocumentValidated(
       admin,
       userId,
@@ -97,6 +107,7 @@ export async function POST(
       doc.company_id ? String(doc.company_id) : null,
       doc.validation_status,
       registration,
+      docType,
     );
 
     revalidateDocumentSurfaces();

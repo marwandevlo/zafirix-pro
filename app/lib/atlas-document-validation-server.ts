@@ -27,6 +27,7 @@ import {
 } from '@/app/lib/atlas-ocr-invoices-detect';
 import { syncBankStatementFromDocument } from '@/app/lib/atlas-bank-server';
 import { parseBankTransactionsFromDocument, statementHeaderFromExtraction } from '@/app/lib/atlas-bank-extraction';
+import { registerRoutingAfterValidation } from '@/app/lib/atlas-routing-registry';
 import { parseNestedClassification } from '@/app/lib/atlas-ai-json-parse';
 import { isBankStatementType } from '@/app/lib/atlas-document-type-utils';
 
@@ -702,6 +703,7 @@ export async function markDocumentValidated(
   companyId: string | null,
   previousStatus: string | null,
   registration: DocumentValidationResult & { ok: true },
+  documentType?: string | null,
 ): Promise<void> {
   const now = new Date().toISOString();
   const { data: row } = await admin
@@ -712,6 +714,26 @@ export async function markDocumentValidated(
     .maybeSingle();
 
   const meta = asRecord(row?.metadata);
+  let routedModules: string[] = Array.isArray(meta?.routed_to)
+    ? (meta!.routed_to as string[])
+    : [];
+
+  if (companyId) {
+    try {
+      const newlyRouted = await registerRoutingAfterValidation(
+        admin,
+        userId,
+        companyId,
+        documentId,
+        documentType ?? registration.documentKind,
+        registration,
+      );
+      routedModules = [...new Set([...routedModules, ...newlyRouted])];
+    } catch (err) {
+      console.error('[markDocumentValidated] routing registry failed', err);
+    }
+  }
+
   await admin
     .from('atlas_documents')
     .update({
@@ -720,6 +742,7 @@ export async function markDocumentValidated(
       validated_by: userId,
       metadata: {
         ...meta,
+        routed_to: routedModules,
         validation_summary: {
           document_kind: registration.documentKind,
           invoices_created: registration.invoicesCreated,

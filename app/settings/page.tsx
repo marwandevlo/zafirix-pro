@@ -10,6 +10,7 @@ import {
   profileGuardErrorMessage,
 } from '@/app/lib/atlas-profiles-repository';
 import { atlasCompanyErrorMessage } from '@/app/lib/atlas-companies-repository';
+import { validateMoroccoCompanyProfile } from '@/app/lib/atlas-morocco-compliance';
 import { ATLAS_STORAGE_KEYS } from '@/app/lib/atlas-storage-keys';
 import type { AtlasCompany } from '@/app/types/atlas-company';
 
@@ -86,6 +87,15 @@ export default function SettingsPage() {
 
   const handleSave = async () => {
     setSaveError('');
+    const moroccoCheck = validateMoroccoCompanyProfile({
+      ice: company.ice,
+      if_fiscal: company.if_fiscal,
+      rc: company.rc,
+    });
+    if (!moroccoCheck.ok) {
+      setSaveError(moroccoCheck.message);
+      return;
+    }
     if (isAtlasSupabaseDataEnabled()) {
       const profileRes = await patchAtlasProfile({ full_name: fullName, company_name: company.raisonSociale });
       if (!profileRes.ok) {

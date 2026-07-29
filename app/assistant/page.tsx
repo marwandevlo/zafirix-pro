@@ -13,6 +13,7 @@ import { AiActionBar } from '@/app/components/assistant/AiActionBar';
 import { AssistantConversationList } from '@/app/components/assistant/AssistantConversationList';
 import { AssistantSourcesPanel } from '@/app/components/assistant/AssistantSourcesPanel';
 import { AssistantSuggestedQuestions } from '@/app/components/assistant/AssistantSuggestedQuestions';
+import { AssistantFileUpload, AssistantFileUploadSpinner } from '@/app/components/assistant/AssistantFileUpload';
 import { getActiveCompanyDbRowId } from '@/app/lib/atlas-active-company';
 import { isAtlasSupabaseDataEnabled } from '@/app/lib/atlas-data-source';
 import type { AiSourceRef, AtlasAiAnomaly } from '@/app/types/atlas-ai-copilot';
@@ -50,6 +51,8 @@ export default function AssistantPage() {
   const [lastSources, setLastSources] = useState<AiSourceRef[]>([]);
   const [lastConfidence, setLastConfidence] = useState<number | null>(null);
   const [convRefreshKey, setConvRefreshKey] = useState(0);
+  const [attachedFile, setAttachedFile] = useState<File | null>(null);
+  const [fileUploading, setFileUploading] = useState(false);
   const endRef = useRef<HTMLDivElement>(null);
 
   const loadAnomalies = useCallback(async (cid: string | null) => {
@@ -107,17 +110,37 @@ export default function AssistantPage() {
     const trimmed = text.trim();
     if (!trimmed || loading) return;
 
-    setMessages((m) => [...m, { role: 'user', content: trimmed }]);
+    const displayContent = attachedFile
+      ? `${trimmed}\n\n📎 ${attachedFile.name}`
+      : trimmed;
+
+    setMessages((m) => [...m, { role: 'user', content: displayContent }]);
     setInput('');
     setLoading(true);
+    setFileUploading(!!attachedFile);
 
     try {
-      const res = await fetch('/api/assistant/chat', {
-        method: 'POST',
-        credentials: 'include',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ message: trimmed, companyId, conversationId }),
-      });
+      let res: Response;
+      if (attachedFile) {
+        const fd = new FormData();
+        fd.append('message', trimmed);
+        fd.append('file', attachedFile);
+        if (companyId) fd.append('companyId', companyId);
+        if (conversationId) fd.append('conversationId', conversationId);
+        res = await fetch('/api/assistant/chat-with-file', {
+          method: 'POST',
+          credentials: 'include',
+          body: fd,
+        });
+        setAttachedFile(null);
+      } else {
+        res = await fetch('/api/assistant/chat', {
+          method: 'POST',
+          credentials: 'include',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ message: trimmed, companyId, conversationId }),
+        });
+      }
       const data = await res.json() as {
         answer?: string;
         error?: string;
@@ -144,6 +167,7 @@ export default function AssistantPage() {
       setMessages((m) => [...m, { role: 'assistant', content: 'Erreur réseau.' }]);
     } finally {
       setLoading(false);
+      setFileUploading(false);
     }
   };
 
@@ -246,14 +270,20 @@ export default function AssistantPage() {
               <div ref={endRef} />
             </div>
 
-            <div className="p-4 border-t bg-white">
+            <div className="p-4 border-t bg-white space-y-2">
               <AssistantSuggestedQuestions onSelect={(q) => void send(q)} disabled={loading} />
+              <AssistantFileUpload
+                disabled={loading}
+                selectedFile={attachedFile}
+                onFileSelect={setAttachedFile}
+              />
+              <AssistantFileUploadSpinner loading={fileUploading} />
               <div className="flex gap-2">
                 <input
                   value={input}
                   onChange={(e) => setInput(e.target.value)}
                   onKeyDown={(e) => e.key === 'Enter' && !e.shiftKey && void send(input)}
-                  placeholder="Question comptable, fiscale ou audit…"
+                  placeholder="Question comptable, fiscale ou audit… (joindre un fichier pour analyse)"
                   className="flex-1 border rounded-xl px-4 py-2.5 text-sm"
                 />
                 <button

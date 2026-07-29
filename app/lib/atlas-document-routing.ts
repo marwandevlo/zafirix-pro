@@ -139,7 +139,7 @@ const ROUTING_MAP: Record<AtlasDocumentType, DocumentRouteSuggestion[]> = {
       icon: '🏦',
       description: 'Enregistrer le relevé bancaire et créer des brouillons de transactions',
       action: 'send_to_bank',
-      href: '/rapports',
+      href: '/banque',
       priority: 1,
     },
     {

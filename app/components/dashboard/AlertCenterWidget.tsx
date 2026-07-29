@@ -11,6 +11,8 @@
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { AlertCircle, AlertTriangle, Bell, ChevronRight, Loader2, X } from 'lucide-react';
+import { getActiveCompanyDbRowId } from '@/app/lib/atlas-active-company';
+import { onCompanySwitched } from '@/app/lib/atlas-company-switch-event';
 
 type AlertSeverity = 'red' | 'orange' | 'yellow';
 
@@ -43,9 +45,11 @@ export function AlertCenterWidget() {
 
   useEffect(() => {
     let cancelled = false;
-    (async () => {
+    const fetchAlerts = async (companyId?: string | null) => {
       try {
-        const res = await fetch('/api/dashboard/alerts', { credentials: 'include' });
+        setLoading(true);
+        const qs = companyId ? `?companyId=${encodeURIComponent(companyId)}` : '';
+        const res = await fetch(`/api/dashboard/alerts${qs}`, { credentials: 'include' });
         if (!res.ok || cancelled) return;
         const data = await res.json() as { ok: boolean; alerts: Alert[]; counts: AlertCounts };
         if (!cancelled) {
@@ -55,8 +59,13 @@ export function AlertCenterWidget() {
       } finally {
         if (!cancelled) setLoading(false);
       }
+    };
+    void (async () => {
+      const cid = await getActiveCompanyDbRowId();
+      await fetchAlerts(cid);
     })();
-    return () => { cancelled = true; };
+    const off = onCompanySwitched((cid) => { void fetchAlerts(cid); });
+    return () => { cancelled = true; off(); };
   }, []);
 
   const visible = alerts.filter(a => !dismissed.has(a.id));

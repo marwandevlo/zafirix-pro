@@ -24,8 +24,8 @@ export function writeAccountingToLocalStorage(entries: AtlasAccountingEntry[]): 
   localStorage.setItem(ATLAS_STORAGE_KEYS.accountingEntries, JSON.stringify(entries));
 }
 
-/** Reserved for when comptabilité persists lines; same pattern as companies. */
-export async function listAtlasAccountingEntries(): Promise<AtlasAccountingEntry[]> {
+/** List journal entries, optionally scoped to active company. */
+export async function listAtlasAccountingEntries(opts?: { companyId?: string | null }): Promise<AtlasAccountingEntry[]> {
   if (!isAtlasSupabaseDataEnabled()) {
     return readAccountingFromLocalStorage();
   }
@@ -33,10 +33,16 @@ export async function listAtlasAccountingEntries(): Promise<AtlasAccountingEntry
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return [];
 
-  const { data, error } = await supabase
+  let q = supabase
     .from('atlas_accounting_entries')
-    .select('id, entry_json, source_document_id, validation_status')
+    .select('id, entry_json, source_document_id, validation_status, company_id')
     .order('entry_date', { ascending: true });
+
+  if (opts?.companyId) {
+    q = q.eq('company_id', opts.companyId);
+  }
+
+  const { data, error } = await q;
 
   if (error) {
     console.error('atlas_accounting_entries list error', error.message);
@@ -82,6 +88,55 @@ export async function upsertAtlasAccountingEntry(
   };
 
   const { error } = await supabase.from('atlas_accounting_entries').insert(row);
+  if (error) return { ok: false, error: error.message };
+  return { ok: true };
+}
+
+export async function updateAtlasAccountingEntryByRowId(
+  rowId: string,
+  entry: AtlasAccountingEntry,
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  if (!isAtlasSupabaseDataEnabled()) {
+    const existing = readAccountingFromLocalStorage();
+    const next = existing.map((e) => (e.rowId === rowId || String(e.id) === rowId ? { ...entry, rowId } : e));
+    writeAccountingToLocalStorage(next);
+    return { ok: true };
+  }
+
+  const auth = await requireSupabaseUser();
+  if (!auth.ok) return { ok: false, error: 'auth_required' };
+
+  const { error } = await supabase
+    .from('atlas_accounting_entries')
+    .update({
+      entry_json: entry,
+      entry_date: entry.date || null,
+      updated_at: new Date().toISOString(),
+    })
+    .eq('id', rowId)
+    .eq('user_id', auth.userId);
+
+  if (error) return { ok: false, error: error.message };
+  return { ok: true };
+}
+
+export async function deleteAtlasAccountingEntryByRowId(
+  rowId: string,
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  if (!isAtlasSupabaseDataEnabled()) {
+    writeAccountingToLocalStorage(readAccountingFromLocalStorage().filter((e) => e.rowId !== rowId));
+    return { ok: true };
+  }
+
+  const auth = await requireSupabaseUser();
+  if (!auth.ok) return { ok: false, error: 'auth_required' };
+
+  const { error } = await supabase
+    .from('atlas_accounting_entries')
+    .delete()
+    .eq('id', rowId)
+    .eq('user_id', auth.userId);
+
   if (error) return { ok: false, error: error.message };
   return { ok: true };
 }

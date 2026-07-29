@@ -18,6 +18,16 @@ import { ValidationStatusBadge } from '@/app/components/validation/ValidationSta
 import { ExportMenu } from '@/app/components/ExportMenu';
 import type { ExportColumn } from '@/app/components/ExportMenu';
 import { EntityAuditTable } from '@/app/components/history/EntityAuditTable';
+import { RowActions } from '@/app/components/actions';
+import { isValidPcgeAccount } from '@/app/lib/atlas-morocco-compliance';
+
+const SUPPLIER_INVOICE_EXPORT_COLUMNS: ExportColumn[] = [
+  { key: 'invoiceNumber', label: 'N° Facture' },
+  { key: 'supplierName', label: 'Fournisseur' },
+  { key: 'issueDate', label: 'Date' },
+  { key: 'status', label: 'Statut' },
+  { key: 'totalTTC', label: 'TTC (MAD)', format: v => typeof v === 'number' ? v.toFixed(2) : String(v ?? '') },
+];
 
 const ECRITURE_EXPORT_COLUMNS: ExportColumn[] = [
   { key: 'date', label: 'Date' },
@@ -35,6 +45,7 @@ import {
 import { refreshAtlasUsageState } from '@/app/lib/atlas-usage-limits';
 import { isAtlasSupabaseDataEnabled } from '@/app/lib/atlas-data-source';
 import type { AtlasAccountingEntry } from '@/app/types/atlas-accounting';
+import { onCompanySwitched } from '@/app/lib/atlas-company-switch-event';
 
 type Ecriture = AtlasAccountingEntry;
 
@@ -54,11 +65,11 @@ export default function ComptabilitePage() {
     if (isAtlasSupabaseDataEnabled()) {
       await refreshAtlasUsageState();
     }
-    setInvoices(await listAtlasInvoices());
-    setPayments(await listAtlasPayments());
-    setEcritures(await listAtlasAccountingEntries());
     const companyId = await getActiveCompanyDbRowId();
     setActiveCompanyId(companyId);
+    setInvoices(await listAtlasInvoices());
+    setPayments(await listAtlasPayments(companyId ? { companyId } : undefined));
+    setEcritures(await listAtlasAccountingEntries(companyId ? { companyId } : undefined));
     if (companyId) {
       setSupplierInvoices(await listSupplierInvoices(companyId));
     } else {
@@ -68,6 +79,11 @@ export default function ComptabilitePage() {
 
   useEffect(() => {
     void reloadAccountingData();
+  }, [reloadAccountingData]);
+
+  useEffect(() => {
+    const off = onCompanySwitched(() => { void reloadAccountingData(); });
+    return off;
   }, [reloadAccountingData]);
 
   useEffect(() => {
@@ -183,6 +199,61 @@ export default function ComptabilitePage() {
     setShowForm(false);
   };
 
+  const deleteEcriture = async (rowId: string) => {
+    const res = await fetch(`/api/accounting/entries/${encodeURIComponent(rowId)}`, {
+      method: 'DELETE',
+      credentials: 'include',
+    });
+    if (!res.ok) return false;
+    setEcritures((prev) => prev.filter((e) => e.rowId !== rowId));
+    return true;
+  };
+
+  const updateEcriture = async (rowId: string, values: Record<string, string>) => {
+    const res = await fetch(`/api/accounting/entries/${encodeURIComponent(rowId)}`, {
+      method: 'PATCH',
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        date: values.date,
+        libelle: values.libelle,
+        compte: values.compte,
+        debit: parseFloat(values.debit) || 0,
+        credit: parseFloat(values.credit) || 0,
+      }),
+    });
+    if (!res.ok) return false;
+    void reloadAccountingData();
+    return true;
+  };
+
+  const deleteSupplierInvoiceRow = async (id: string) => {
+    const res = await fetch(`/api/supplier-invoices/${encodeURIComponent(id)}`, {
+      method: 'DELETE',
+      credentials: 'include',
+    });
+    if (!res.ok) return false;
+    setSupplierInvoices((prev) => prev.filter((inv) => String(inv.id) !== id));
+    return true;
+  };
+
+  const updateSupplierInvoiceRow = async (id: string, values: Record<string, string>) => {
+    const res = await fetch(`/api/supplier-invoices/${encodeURIComponent(id)}`, {
+      method: 'PATCH',
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        invoiceNumber: values.invoiceNumber,
+        supplierName: values.supplierName,
+        issueDate: values.issueDate,
+        totalTTC: parseFloat(values.totalTTC) || 0,
+      }),
+    });
+    if (!res.ok) return false;
+    void reloadAccountingData();
+    return true;
+  };
+
   return (
     <div className="flex h-screen bg-gray-50">
       <AppSidebar variant="module">
@@ -263,6 +334,7 @@ export default function ComptabilitePage() {
                     <th className="px-6 py-3">Date</th>
                     <th className="px-6 py-3">Statut</th>
                     <th className="px-6 py-3 text-right">TTC</th>
+                    <th className="px-6 py-3 text-right">Actions</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -284,6 +356,33 @@ export default function ComptabilitePage() {
                       </td>
                       <td className="px-6 py-3 text-right font-medium text-gray-800">
                         {inv.totalTTC != null ? formatMadAmountLabel(inv.totalTTC) : '—'}
+                      </td>
+                      <td className="px-6 py-3 text-right">
+                        <div className="relative inline-flex justify-end">
+                          <RowActions
+                            entityId={String(inv.id)}
+                            entityLabel={inv.invoiceNumber || inv.supplierName}
+                            entityType="facture fournisseur"
+                            exportData={{
+                              id: inv.id,
+                              invoiceNumber: inv.invoiceNumber,
+                              supplierName: inv.supplierName,
+                              issueDate: inv.issueDate,
+                              status: inv.status,
+                              totalTTC: inv.totalTTC,
+                            }}
+                            exportColumns={SUPPLIER_INVOICE_EXPORT_COLUMNS}
+                            exportFilename="facture_fournisseur"
+                            editFields={[
+                              { key: 'invoiceNumber', label: 'N° Facture', value: inv.invoiceNumber ?? '' },
+                              { key: 'supplierName', label: 'Fournisseur', value: inv.supplierName ?? '', required: true },
+                              { key: 'issueDate', label: 'Date', type: 'date', value: inv.issueDate ?? '' },
+                              { key: 'totalTTC', label: 'TTC (MAD)', type: 'number', value: String(inv.totalTTC ?? '') },
+                            ]}
+                            onEditSave={(values) => updateSupplierInvoiceRow(String(inv.id), values)}
+                            onDelete={() => deleteSupplierInvoiceRow(String(inv.id))}
+                          />
+                        </div>
                       </td>
                     </tr>
                   ))}
@@ -393,18 +492,19 @@ export default function ComptabilitePage() {
                   <th className="px-4 py-3">Compte</th>
                   <th className="px-4 py-3 text-right">Debit</th>
                   <th className="px-4 py-3 text-right">Credit</th>
+                  <th className="px-4 py-3 text-right">Actions</th>
                 </tr>
               </thead>
               <tbody>
                 {ecritures.length === 0 ? (
                   <tr>
-                    <td colSpan={5}>
+                    <td colSpan={6}>
                       <ModuleEmptyState module="accounting" />
                     </td>
                   </tr>
                 ) : (
                   ecritures.map(e => (
-                    <tr key={e.id} className={`border-b border-gray-50 hover:bg-gray-50 ${e.sourceDocumentId ? 'border-l-2 border-l-blue-200' : ''}`}>
+                    <tr key={e.rowId ?? e.id} className={`border-b border-gray-50 hover:bg-gray-50 ${e.sourceDocumentId ? 'border-l-2 border-l-blue-200' : ''}`}>
                       <td className="px-4 py-3 text-gray-500">{e.date}</td>
                       <td className="px-4 py-3 text-gray-700">
                         <div className="flex items-center gap-2 flex-wrap">
@@ -420,6 +520,45 @@ export default function ComptabilitePage() {
                       <td className="px-4 py-3 font-mono text-gray-600">{e.compte}</td>
                       <td className="px-4 py-3 text-right text-blue-600">{e.debit > 0 ? formatMadAmountLabel(e.debit) : '-'}</td>
                       <td className="px-4 py-3 text-right text-green-600">{e.credit > 0 ? formatMadAmountLabel(e.credit) : '-'}</td>
+                      <td className="px-4 py-3 text-right">
+                        {e.rowId ? (
+                          <div className="relative inline-flex justify-end">
+                            <RowActions
+                              entityId={e.rowId}
+                              entityLabel={e.libelle}
+                              entityType="écriture comptable"
+                              exportData={{
+                                id: e.rowId,
+                                date: e.date,
+                                libelle: e.libelle,
+                                compte: e.compte,
+                                debit: e.debit,
+                                credit: e.credit,
+                                sourceDocumentId: e.sourceDocumentId,
+                                validationStatus: e.validationStatus,
+                              }}
+                              exportColumns={ECRITURE_EXPORT_COLUMNS}
+                              exportFilename="ecriture_comptable"
+                              editFields={[
+                                { key: 'date', label: 'Date', type: 'date', value: e.date },
+                                { key: 'libelle', label: 'Libellé', value: e.libelle, required: true },
+                                {
+                                  key: 'compte',
+                                  label: 'Compte PCGE',
+                                  value: e.compte,
+                                  required: true,
+                                  validate: (v) => (isValidPcgeAccount(v) ? null : 'Compte PCGE invalide (3–8 chiffres)'),
+                                },
+                                { key: 'debit', label: 'Débit (MAD)', type: 'number', value: String(e.debit || '') },
+                                { key: 'credit', label: 'Crédit (MAD)', type: 'number', value: String(e.credit || '') },
+                              ]}
+                              onEditSave={(values) => updateEcriture(e.rowId!, values)}
+                              onDelete={() => deleteEcriture(e.rowId!)}
+                              hideDelete={!!e.sourceDocumentId && e.validationStatus === 'validated'}
+                            />
+                          </div>
+                        ) : null}
+                      </td>
                     </tr>
                   ))
                 )}

@@ -1,6 +1,10 @@
 export { EntityActionMenu } from './EntityActionMenu';
 export type { ActionItem } from './EntityActionMenu';
 export { ConfirmDeleteDialog } from './ConfirmDeleteDialog';
+export { EditRecordModal } from './EditRecordModal';
+export type { EditField } from './EditRecordModal';
+export { RowActions } from './RowActions';
+export type { RowActionsProps } from './RowActions';
 export { ShareExportMenu } from './ShareExportMenu';
 export { EntityHistoryDrawer } from './EntityHistoryDrawer';
 export type { EntityEvent } from './EntityHistoryDrawer';
