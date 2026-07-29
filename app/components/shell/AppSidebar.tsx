@@ -20,6 +20,7 @@ import {
 import type { User } from '@supabase/supabase-js';
 import { supabase } from '@/app/lib/supabase';
 import { isOwnerEmail } from '@/app/lib/owner';
+import { SoundEffectsSidebarControl } from '@/app/components/sound/SoundEffectsSidebarControl';
 
 export type AppSidebarProps = {
   variant: 'home' | 'module';
@@ -230,6 +231,8 @@ export function AppSidebar({
       </nav>
 
       {footer}
+
+      <SoundEffectsSidebarControl t={t} />
 
       {isHome && setLang && t && (
         <div className="px-3 py-4 border-t border-white/10 space-y-2">

@@ -4,6 +4,7 @@ import { useCallback, useState } from 'react';
 import { Check, Link2, Loader2, AlertCircle } from 'lucide-react';
 import type { AtlasCompany } from '@/app/types/atlas-company';
 import { buildClientPortalUrlForCompany } from '@/app/lib/atlas-client-portal-links';
+import { useSoundEffects } from '@/app/components/sound/SoundEffectsProvider';
 
 type Props = {
   company: AtlasCompany;
@@ -16,6 +17,7 @@ type CopyState = 'idle' | 'loading' | 'copied' | 'error';
 export function CopyClientPortalLinkButton({ company, className = '' }: Props) {
   const [state, setState] = useState<CopyState>('idle');
   const [hint, setHint] = useState('');
+  const { play } = useSoundEffects();
 
   const copyLink = useCallback(async () => {
     setState('loading');
@@ -32,6 +34,7 @@ export function CopyClientPortalLinkButton({ company, className = '' }: Props) {
         if (!res.ok) {
           setHint(data.message ?? 'Code portail client manquant pour cette société.');
           setState('error');
+          play('error');
           window.setTimeout(() => {
             setState('idle');
             setHint('');
@@ -44,6 +47,7 @@ export function CopyClientPortalLinkButton({ company, className = '' }: Props) {
         if (!url) {
           setHint('Code portail client non configuré.');
           setState('error');
+          play('error');
           window.setTimeout(() => {
             setState('idle');
             setHint('');
@@ -55,6 +59,7 @@ export function CopyClientPortalLinkButton({ company, className = '' }: Props) {
       if (!url) {
         setHint('Lien portail indisponible.');
         setState('error');
+        play('error');
         window.setTimeout(() => {
           setState('idle');
           setHint('');
@@ -64,16 +69,18 @@ export function CopyClientPortalLinkButton({ company, className = '' }: Props) {
 
       await navigator.clipboard.writeText(url);
       setState('copied');
+      play('success');
       window.setTimeout(() => setState('idle'), 2200);
     } catch {
       setHint('Copie impossible — vérifiez les permissions du navigateur.');
       setState('error');
+      play('error');
       window.setTimeout(() => {
         setState('idle');
         setHint('');
       }, 2800);
     }
-  }, [company]);
+  }, [company, play]);
 
   const label =
     hint ||

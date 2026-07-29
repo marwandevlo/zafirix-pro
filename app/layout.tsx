@@ -7,6 +7,7 @@ import { EmailLifecycleBootstrap } from "@/app/components/lifecycle/EmailLifecyc
 import { RecoveryHashRedirectScript } from "@/app/components/auth/RecoveryHashRedirectScript";
 import { AppSubscriptionProviders } from "@/app/components/subscription/AppSubscriptionProviders";
 import { FirstRunManager } from "@/app/components/onboarding/FirstRunManager";
+import { SoundEffectsGlobalChrome } from "@/app/components/sound/SoundEffectsGlobalChrome";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -57,7 +58,9 @@ export default function RootLayout({
       <body className="min-h-full flex flex-col">
         <RecoveryHashRedirectScript />
         <EmailLifecycleBootstrap />
-        <AppSubscriptionProviders>{children}</AppSubscriptionProviders>
+        <AppSubscriptionProviders>
+          <SoundEffectsGlobalChrome>{children}</SoundEffectsGlobalChrome>
+        </AppSubscriptionProviders>
         <FirstRunManager />
         {enableGlobalSearchOverlay ? <GlobalSearchOverlay /> : null}
         {enableAssistantOverlay ? <AssistantOverlay /> : null}
