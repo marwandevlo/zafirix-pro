@@ -13,12 +13,17 @@ import {
   generateSmartGeneratorPdfBuffer,
   smartGeneratorExportBasename,
 } from '@/app/lib/atlas-smart-generator-export';
-import type { SmartGeneratorDocType, SmartGeneratorParams } from '@/app/types/atlas-smart-generator';
+import type {
+  SmartGeneratorDocType,
+  SmartGeneratorHeader,
+  SmartGeneratorItemSpec,
+  SmartGeneratorParams,
+} from '@/app/types/atlas-smart-generator';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
-const VALID_DOC_TYPES = new Set<SmartGeneratorDocType>(['facture', 'devis', 'bon_commande']);
+const VALID_DOC_TYPES = new Set<SmartGeneratorDocType>(['facture', 'devis', 'bon_commande', 'autre']);
 
 function parseParams(body: Record<string, unknown>): SmartGeneratorParams | null {
   const dateDebut = String(body.date_debut ?? body.dateDebut ?? '').slice(0, 10);
@@ -26,6 +31,11 @@ function parseParams(body: Record<string, unknown>): SmartGeneratorParams | null
   const numeroDebut = Number(body.numero_debut ?? body.numeroDebut ?? 1);
   const numeroFin = Number(body.numero_fin ?? body.numeroFin ?? 10);
   const montantMaxParDocument = Number(body.montant_max_par_document ?? body.montantMaxParDocument ?? 0);
+  const documentCountRaw = body.document_count ?? body.documentCount ?? body.nombre_documents;
+  const documentCount = documentCountRaw != null && documentCountRaw !== ''
+    ? Math.max(1, Math.floor(Number(documentCountRaw)))
+    : undefined;
+  const defaultClientName = String(body.default_client_name ?? body.defaultClientName ?? '').trim() || undefined;
 
   if (!dateDebut || !dateFin) return null;
   if (!Number.isFinite(numeroDebut) || !Number.isFinite(numeroFin) || numeroFin < numeroDebut) return null;
@@ -36,7 +46,48 @@ function parseParams(body: Record<string, unknown>): SmartGeneratorParams | null
     numeroDebut: Math.max(1, Math.floor(numeroDebut)),
     numeroFin: Math.max(Math.floor(numeroDebut), Math.floor(numeroFin)),
     montantMaxParDocument: Math.max(0, montantMaxParDocument),
+    documentCount,
+    defaultClientName,
   };
+}
+
+function parseCustomHeader(body: Record<string, unknown>): SmartGeneratorHeader | null {
+  const h = (body.customHeader ?? body.custom_header) as Record<string, unknown> | undefined;
+  if (!h || typeof h !== 'object') return null;
+  return {
+    raisonSociale: String(h.raisonSociale ?? h.raison_sociale ?? h.companyName ?? '').trim() || undefined,
+    ice: String(h.ice ?? '').trim() || undefined,
+    if_fiscal: String(h.if_fiscal ?? h.ifFiscal ?? '').trim() || undefined,
+    rc: String(h.rc ?? '').trim() || undefined,
+    adresse: String(h.adresse ?? h.address ?? '').trim() || undefined,
+    ville: String(h.ville ?? h.city ?? '').trim() || undefined,
+    patent: String(h.patent ?? h.patente ?? h.taxeProfessionnelle ?? '').trim() || undefined,
+    logoUrl: String(h.logoUrl ?? h.logo_url ?? '').trim() || undefined,
+  };
+}
+
+function parseItemSpecs(body: Record<string, unknown>): SmartGeneratorItemSpec[] {
+  const raw = body.itemSpecs ?? body.item_specs ?? body.items;
+  if (!Array.isArray(raw)) return [];
+  const out: SmartGeneratorItemSpec[] = [];
+  for (const row of raw) {
+    if (!row || typeof row !== 'object') continue;
+    const r = row as Record<string, unknown>;
+    const designation = String(r.designation ?? r.description ?? '').trim();
+    if (!designation) continue;
+    out.push({
+      category: String(r.category ?? r.type ?? r.type_marchandise ?? '').trim() || undefined,
+      designation,
+      quantity: Math.max(0.001, Number(r.quantity ?? r.quantite ?? 1)),
+      unit: String(r.unit ?? r.unite ?? 'Pcs').trim() || 'Pcs',
+      unitPriceHT: r.unitPriceHT != null ? Number(r.unitPriceHT) : r.prix_unitaire != null ? Number(r.prix_unitaire) : undefined,
+      unitPriceMin: r.unitPriceMin != null ? Number(r.unitPriceMin) : r.prix_min != null ? Number(r.prix_min) : undefined,
+      unitPriceMax: r.unitPriceMax != null ? Number(r.unitPriceMax) : r.prix_max != null ? Number(r.prix_max) : undefined,
+      vatRatePercent: r.vatRatePercent != null ? Number(r.vatRatePercent) : r.taux_tva != null ? Number(r.taux_tva) : undefined,
+      pcgeAccount: String(r.pcgeAccount ?? r.compte ?? '').trim() || undefined,
+    });
+  }
+  return out;
 }
 
 export async function POST(request: NextRequest) {
@@ -64,26 +115,47 @@ export async function POST(request: NextRequest) {
 
   const body = (await request.json().catch(() => ({}))) as Record<string, unknown>;
   const prompt = String(body.prompt ?? '').trim();
-  const companyId = String(body.companyId ?? '').trim();
+  const companyId = String(body.companyId ?? body.company_id ?? '').trim() || null;
   const docType = String(body.docType ?? body.documentType ?? 'facture') as SmartGeneratorDocType;
+  const customDocTitle = String(body.customDocTitle ?? body.custom_doc_title ?? '').trim() || undefined;
   const language = String(body.language ?? 'fr') as 'fr' | 'ar' | 'darija';
+  const persistToDb = body.persistToDb !== false && body.persist_to_db !== false;
+  const itemSpecs = parseItemSpecs(body);
+  const customHeader = parseCustomHeader(body);
 
-  if (!prompt) return NextResponse.json({ error: 'prompt_required' }, { status: 400 });
-  if (!companyId) return NextResponse.json({ error: 'company_required' }, { status: 400 });
-  if (!VALID_DOC_TYPES.has(docType)) return NextResponse.json({ error: 'invalid_doc_type' }, { status: 400 });
+  if (!VALID_DOC_TYPES.has(docType)) {
+    return NextResponse.json({ error: 'invalid_doc_type' }, { status: 400 });
+  }
+  if (docType === 'autre' && !customDocTitle) {
+    return NextResponse.json(
+      { error: 'custom_title_required', message: 'Indiquez un titre pour le type Autre.' },
+      { status: 400 },
+    );
+  }
 
   const params = parseParams(body);
   if (!params) {
     return NextResponse.json({ error: 'invalid_params', message: 'Paramètres de génération invalides.' }, { status: 400 });
   }
 
+  if (!prompt && !itemSpecs.length) {
+    return NextResponse.json(
+      { error: 'prompt_or_items_required', message: 'Saisissez une consigne ou au moins une ligne d\'article.' },
+      { status: 400 },
+    );
+  }
+
   try {
     const result = await runSmartGenerator(db, userId, {
       companyId,
+      customHeader,
       prompt,
       docType,
+      customDocTitle,
       params,
+      itemSpecs,
       language,
+      persistToDb: persistToDb && Boolean(companyId),
     });
 
     if (!result.documents.length) {
@@ -91,18 +163,21 @@ export async function POST(request: NextRequest) {
     }
 
     const company = result.company ?? {};
+    const docTitle = result.documents[0]?.docTitle ?? 'DOCUMENT';
     const [pdfBuffer, excelBuffer] = await Promise.all([
-      generateSmartGeneratorPdfBuffer(result.documents, company, docType),
-      generateSmartGeneratorExcelBuffer(result.documents, company, params, docType),
+      generateSmartGeneratorPdfBuffer(result.documents, company),
+      generateSmartGeneratorExcelBuffer(result.documents, company, params),
     ]);
 
-    const baseName = smartGeneratorExportBasename(company, docType);
+    const baseName = smartGeneratorExportBasename(company, docTitle);
 
     return NextResponse.json({
       ok: true,
+      persisted: result.persisted,
       documents: result.documents.map((d) => ({
         id: d.id,
         number: d.number,
+        docTitle: d.docTitle,
         clientName: d.clientName,
         issueDate: d.issueDate,
         amountHT: d.amountHT,
@@ -121,7 +196,9 @@ export async function POST(request: NextRequest) {
     });
   } catch (err) {
     const message = err instanceof Error ? err.message : 'generation_failed';
-    const status = message === 'company_not_found' ? 404 : 500;
+    const status =
+      message === 'company_not_found' ? 404 :
+      message === 'prompt_or_items_required' ? 400 : 500;
     return NextResponse.json({ error: message }, { status });
   }
 }

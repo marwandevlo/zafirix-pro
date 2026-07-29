@@ -1,5 +1,5 @@
 /**
- * Smart Generator — LLM parsing, DGI calculations, document splitting, DB persistence.
+ * Smart Generator — LLM parsing, explicit items, DGI calculations, optional DB persistence.
  */
 
 import type { SupabaseClient } from '@supabase/supabase-js';
@@ -15,10 +15,24 @@ import type {
   SmartGeneratorDocType,
   SmartGeneratorDocument,
   SmartGeneratorGenerateRequest,
+  SmartGeneratorHeader,
+  SmartGeneratorItemSpec,
   SmartGeneratorLineItem,
   SmartGeneratorParams,
   SmartGeneratorResult,
 } from '@/app/types/atlas-smart-generator';
+
+const DOC_TYPE_LABELS: Record<Exclude<SmartGeneratorDocType, 'autre'>, string> = {
+  facture: 'FACTURE',
+  devis: 'DEVIS',
+  bon_commande: 'BON DE COMMANDE',
+};
+
+const DOC_TYPE_CODES: Record<Exclude<SmartGeneratorDocType, 'autre'>, string> = {
+  facture: 'FAC',
+  devis: 'DEV',
+  bon_commande: 'BC',
+};
 
 const GENERATOR_SYSTEM = `Tu es le moteur Smart Generator de Zafirix Atlas (Maroc).
 Tu convertis une consigne en langage naturel (français, arabe ou darija) en données structurées pour documents commerciaux.
@@ -38,6 +52,7 @@ Réponds UNIQUEMENT avec un JSON valide (sans markdown):
         {
           "description": "Libellé article ou prestation",
           "quantity": 1,
+          "unit": "Pcs",
           "unitPriceHT": 1000,
           "vatRatePercent": 20,
           "pcgeAccount": "7111"
@@ -50,9 +65,11 @@ Réponds UNIQUEMENT avec un JSON valide (sans markdown):
 type RawLlmLine = {
   description?: string;
   quantity?: number;
+  unit?: string;
   unitPriceHT?: number;
   vatRatePercent?: number;
   pcgeAccount?: string;
+  category?: string;
 };
 
 type RawLlmDoc = {
@@ -64,6 +81,21 @@ type RawLlmDoc = {
 type RawLlmPayload = {
   documents?: RawLlmDoc[];
 };
+
+export function resolveDocTitle(docType: SmartGeneratorDocType, customDocTitle?: string): string {
+  if (docType === 'autre') {
+    return (customDocTitle?.trim() || 'DOCUMENT').toUpperCase();
+  }
+  return DOC_TYPE_LABELS[docType];
+}
+
+function customDocCode(customTitle: string): string {
+  const words = customTitle.trim().split(/\s+/).filter(Boolean);
+  if (!words.length) return 'DOC';
+  const acronym = words.map((w) => w[0]?.toUpperCase() ?? '').join('').slice(0, 6);
+  if (acronym.length >= 2) return acronym;
+  return customTitle.replace(/[^\w]/g, '').slice(0, 4).toUpperCase() || 'DOC';
+}
 
 function nearestMoroccoVatRate(pct: number): number {
   const normalized = formatDgiVatRate(pct);
@@ -80,21 +112,36 @@ function nearestMoroccoVatRate(pct: number): number {
   return best;
 }
 
-export function computeLineItem(raw: RawLlmLine): SmartGeneratorLineItem {
+function resolveUnitPrice(spec: SmartGeneratorItemSpec): number {
+  if (spec.unitPriceHT != null && Number.isFinite(spec.unitPriceHT)) {
+    return roundDgiAmount(spec.unitPriceHT);
+  }
+  const min = spec.unitPriceMin ?? 0;
+  const max = spec.unitPriceMax ?? min;
+  if (max <= min) return roundDgiAmount(min);
+  return roundDgiAmount(min + Math.random() * (max - min));
+}
+
+export function computeLineItem(raw: RawLlmLine & Partial<SmartGeneratorItemSpec>): SmartGeneratorLineItem {
   const quantity = Math.max(0.001, Number(raw.quantity ?? 1));
-  const unitPriceHT = roundDgiAmount(Number(raw.unitPriceHT ?? 0));
+  const unitPriceHT = roundDgiAmount(Number(raw.unitPriceHT ?? resolveUnitPrice(raw as SmartGeneratorItemSpec)));
   const vatRatePercent = nearestMoroccoVatRate(Number(raw.vatRatePercent ?? 20));
   const amountHT = roundDgiAmount(quantity * unitPriceHT);
   const vatAmount = roundDgiAmount(amountHT * (vatRatePercent / 100));
   const totalTTC = roundDgiAmount(amountHT + vatAmount);
   const pcge = raw.pcgeAccount ? String(raw.pcgeAccount).replace(/\D/g, '').slice(0, 8) : undefined;
+  const category = raw.category ? String(raw.category).trim() : undefined;
+  const designation = String(raw.designation ?? raw.description ?? 'Prestation').trim() || 'Prestation';
+  const description = category ? `[${category}] ${designation}` : designation;
 
   return {
-    description: String(raw.description ?? 'Prestation').trim() || 'Prestation',
+    description,
     quantity,
+    unit: String(raw.unit ?? 'Pcs').trim() || 'Pcs',
     unitPriceHT,
     vatRatePercent,
     pcgeAccount: pcge && isValidPcgeAccount(pcge) ? pcge : '7111',
+    category,
     amountHT,
     vatAmount,
     totalTTC,
@@ -103,6 +150,8 @@ export function computeLineItem(raw: RawLlmLine): SmartGeneratorLineItem {
 
 function aggregateDocument(
   docType: SmartGeneratorDocType,
+  docTitle: string,
+  customDocTitle: string | undefined,
   number: string,
   clientName: string,
   issueDate: string,
@@ -120,6 +169,8 @@ function aggregateDocument(
 
   return {
     docType,
+    docTitle,
+    customDocTitle,
     number,
     clientName,
     issueDate,
@@ -133,16 +184,36 @@ function aggregateDocument(
     metadata: {
       smart_generator: true,
       doc_type: docType,
+      doc_title: docTitle,
       params,
       generated_at: new Date().toISOString(),
     },
   };
 }
 
+export function buildNumbering(
+  docType: SmartGeneratorDocType,
+  start: number,
+  end: number,
+  customDocTitle?: string,
+): string[] {
+  const prefix =
+    docType === 'autre'
+      ? customDocCode(customDocTitle ?? 'DOC')
+      : DOC_TYPE_CODES[docType];
+  const nums: string[] = [];
+  for (let n = start; n <= end; n++) {
+    nums.push(`${prefix}-${String(n).padStart(5, '0')}`);
+  }
+  return nums;
+}
+
 /** Split lines into multiple documents respecting montant_max_par_document. */
 export function splitDocumentsByMaxAmount(
   rawDocs: Array<{ clientName: string; issueDate: string; lines: SmartGeneratorLineItem[] }>,
   docType: SmartGeneratorDocType,
+  docTitle: string,
+  customDocTitle: string | undefined,
   params: SmartGeneratorParams,
   numbering: string[],
 ): SmartGeneratorDocument[] {
@@ -156,7 +227,16 @@ export function splitDocumentsByMaxAmount(
     const flush = () => {
       if (!batch.length || numIdx >= numbering.length) return;
       out.push(
-        aggregateDocument(docType, numbering[numIdx]!, raw.clientName, raw.issueDate, batch, params),
+        aggregateDocument(
+          docType,
+          docTitle,
+          customDocTitle,
+          numbering[numIdx]!,
+          raw.clientName,
+          raw.issueDate,
+          batch,
+          params,
+        ),
       );
       numIdx += 1;
       batch = [];
@@ -176,10 +256,13 @@ export function splitDocumentsByMaxAmount(
           const take = Math.min(remaining, maxQty);
           const partial = computeLineItem({
             description: line.description,
+            designation: line.description,
             quantity: take,
+            unit: line.unit,
             unitPriceHT: line.unitPriceHT,
             vatRatePercent: line.vatRatePercent,
             pcgeAccount: line.pcgeAccount,
+            category: line.category,
           });
           batch.push(partial);
           batchTTC += partial.totalTTC;
@@ -208,7 +291,29 @@ function parseLlmJson(text: string): RawLlmPayload | null {
   }
 }
 
-function ruleBasedFallback(prompt: string, params: SmartGeneratorParams): RawLlmPayload {
+function ruleBasedFallback(
+  prompt: string,
+  params: SmartGeneratorParams,
+  itemSpecs?: SmartGeneratorItemSpec[],
+): RawLlmPayload {
+  if (itemSpecs?.length) {
+    return {
+      documents: [{
+        clientName: params.defaultClientName ?? 'Client divers',
+        issueDate: params.dateDebut || new Date().toISOString().slice(0, 10),
+        lines: itemSpecs.map((s) => ({
+          description: s.designation,
+          category: s.category,
+          quantity: s.quantity,
+          unit: s.unit,
+          unitPriceHT: resolveUnitPrice(s),
+          vatRatePercent: s.vatRatePercent ?? 20,
+          pcgeAccount: s.pcgeAccount,
+        })),
+      }],
+    };
+  }
+
   const amountMatch = prompt.match(/(\d[\d\s.,]*)\s*(?:mad|dh|dirham)?/i);
   const amount = amountMatch
     ? parseFloat(amountMatch[1]!.replace(/\s/g, '').replace(',', '.')) || 5000
@@ -216,31 +321,18 @@ function ruleBasedFallback(prompt: string, params: SmartGeneratorParams): RawLlm
 
   return {
     documents: [{
-      clientName: 'Client divers',
+      clientName: params.defaultClientName ?? 'Client divers',
       issueDate: params.dateDebut || new Date().toISOString().slice(0, 10),
       lines: [{
         description: prompt.slice(0, 120) || 'Prestation / fourniture',
         quantity: 1,
+        unit: 'Forfait',
         unitPriceHT: amount,
         vatRatePercent: 20,
         pcgeAccount: '7111',
       }],
     }],
   };
-}
-
-function buildNumbering(prefix: SmartGeneratorDocType, start: number, end: number): string[] {
-  const codes: Record<SmartGeneratorDocType, string> = {
-    facture: 'FAC',
-    devis: 'DEV',
-    bon_commande: 'BC',
-  };
-  const p = codes[prefix];
-  const nums: string[] = [];
-  for (let n = start; n <= end; n++) {
-    nums.push(`${p}-${String(n).padStart(5, '0')}`);
-  }
-  return nums;
 }
 
 function clampDate(dateStr: string, params: SmartGeneratorParams): string {
@@ -250,18 +342,66 @@ function clampDate(dateStr: string, params: SmartGeneratorParams): string {
   return d;
 }
 
+/** Build raw docs directly from explicit item specs (priority path). */
+export function buildFromExplicitItemSpecs(
+  itemSpecs: SmartGeneratorItemSpec[],
+  params: SmartGeneratorParams,
+): RawLlmPayload {
+  const lines = itemSpecs
+    .filter((s) => s.designation?.trim())
+    .map((s) => ({
+      description: s.designation,
+      category: s.category,
+      quantity: s.quantity,
+      unit: s.unit,
+      unitPriceHT: resolveUnitPrice(s),
+      vatRatePercent: s.vatRatePercent ?? 20,
+      pcgeAccount: s.pcgeAccount,
+    }));
+
+  const count = Math.max(1, params.documentCount ?? 1);
+  const documents: RawLlmDoc[] = [];
+
+  for (let i = 0; i < count; i++) {
+    documents.push({
+      clientName: params.defaultClientName ?? 'Client divers',
+      issueDate: params.dateDebut,
+      lines,
+    });
+  }
+
+  return { documents };
+}
+
 export async function parsePromptToRawDocuments(
   prompt: string,
   params: SmartGeneratorParams,
+  itemSpecs?: SmartGeneratorItemSpec[],
   language?: string,
-): Promise<{ raw: RawLlmPayload; provider: string }> {
+): Promise<{ raw: RawLlmPayload; provider: string; usedExplicitItems: boolean }> {
+  if (itemSpecs?.some((s) => s.designation?.trim())) {
+    return {
+      raw: buildFromExplicitItemSpecs(itemSpecs, params),
+      provider: 'explicit-items',
+      usedExplicitItems: true,
+    };
+  }
+
   const langHint = language === 'ar'
     ? 'La consigne peut être en arabe.'
     : language === 'darija'
       ? 'La consigne peut être en darija marocaine.'
       : 'La consigne est en français.';
 
-  const userMessage = `${langHint}\n\nConsigne:\n${prompt}\n\nParamètres:\n- Période: ${params.dateDebut} à ${params.dateFin}\n- Numérotation: ${params.numeroDebut} à ${params.numeroFin}\n- Plafond TTC/document: ${params.montantMaxParDocument} MAD`;
+  const userMessage = [
+    langHint,
+    prompt ? `\nConsigne:\n${prompt}` : '',
+    `\nParamètres:\n- Période: ${params.dateDebut} à ${params.dateFin}`,
+    `- Numérotation: ${params.numeroDebut} à ${params.numeroFin}`,
+    `- Plafond TTC/document: ${params.montantMaxParDocument} MAD`,
+    params.documentCount ? `- Nombre de documents: ${params.documentCount}` : '',
+    params.defaultClientName ? `- Client: ${params.defaultClientName}` : '',
+  ].join('\n');
 
   const result = await runAtlasAiWithFallback({
     system: GENERATOR_SYSTEM,
@@ -269,31 +409,75 @@ export async function parsePromptToRawDocuments(
     sourcesLine: '',
     history: [],
     userMessage,
-    ruleBasedFallback: () => JSON.stringify(ruleBasedFallback(prompt, params)),
+    ruleBasedFallback: () => JSON.stringify(ruleBasedFallback(prompt, params, itemSpecs)),
   });
 
-  const parsed = parseLlmJson(result.answer) ?? ruleBasedFallback(prompt, params);
-  return { raw: parsed, provider: result.provider };
+  const parsed = parseLlmJson(result.answer) ?? ruleBasedFallback(prompt, params, itemSpecs);
+  return { raw: parsed, provider: result.provider, usedExplicitItems: false };
+}
+
+/** Expand or trim document list to exact documentCount. */
+export function applyDocumentCount(
+  documents: SmartGeneratorDocument[],
+  params: SmartGeneratorParams,
+  docType: SmartGeneratorDocType,
+  docTitle: string,
+  customDocTitle: string | undefined,
+): SmartGeneratorDocument[] {
+  const target = params.documentCount;
+  if (!target || target <= 0) return documents;
+  if (documents.length === target) return documents;
+
+  if (documents.length > target) return documents.slice(0, target);
+
+  const numbering = buildNumbering(docType, params.numeroDebut, params.numeroFin, customDocTitle);
+  const template = documents[0] ?? aggregateDocument(
+    docType,
+    docTitle,
+    customDocTitle,
+    numbering[0] ?? 'DOC-00001',
+    params.defaultClientName ?? 'Client divers',
+    params.dateDebut,
+    [computeLineItem({ description: 'Prestation', quantity: 1, unit: 'Forfait', unitPriceHT: 1000 })],
+    params,
+  );
+
+  const out = [...documents];
+  while (out.length < target && out.length < numbering.length) {
+    const num = numbering[out.length] ?? `${customDocCode(customDocTitle ?? 'DOC')}-${String(out.length + 1).padStart(5, '0')}`;
+    out.push({
+      ...template,
+      number: num,
+      metadata: { ...template.metadata, generated_at: new Date().toISOString() },
+    });
+  }
+  return out.slice(0, target);
 }
 
 export function buildSmartGeneratorDocuments(
   raw: RawLlmPayload,
   docType: SmartGeneratorDocType,
   params: SmartGeneratorParams,
+  customDocTitle?: string,
 ): SmartGeneratorDocument[] {
-  const numbering = buildNumbering(docType, params.numeroDebut, params.numeroFin);
+  const docTitle = resolveDocTitle(docType, customDocTitle);
+  const numbering = buildNumbering(docType, params.numeroDebut, params.numeroFin, customDocTitle);
   const rawDocs = (raw.documents ?? []).map((d) => ({
-    clientName: String(d.clientName ?? 'Client divers').trim() || 'Client divers',
+    clientName: String(d.clientName ?? params.defaultClientName ?? 'Client divers').trim() || 'Client divers',
     issueDate: clampDate(String(d.issueDate ?? params.dateDebut), params),
-    lines: (d.lines ?? []).map(computeLineItem),
+    lines: (d.lines ?? []).map((l) => computeLineItem(l)),
   })).filter((d) => d.lines.length > 0);
 
   if (!rawDocs.length) {
     const fb = ruleBasedFallback('', params);
-    return buildSmartGeneratorDocuments(fb, docType, params);
+    return buildSmartGeneratorDocuments(fb, docType, params, customDocTitle);
   }
 
-  return splitDocumentsByMaxAmount(rawDocs, docType, params, numbering);
+  let docs = splitDocumentsByMaxAmount(rawDocs, docType, docTitle, customDocTitle, params, numbering);
+  const maxDocs = params.numeroFin - params.numeroDebut + 1;
+  if (docs.length > maxDocs) docs = docs.slice(0, maxDocs);
+  docs = applyDocumentCount(docs, params, docType, docTitle, customDocTitle);
+  return docs;
 }
 
 export async function persistSmartGeneratorDocuments(
@@ -325,6 +509,7 @@ export async function persistSmartGeneratorDocuments(
         metadata: {
           ...doc.metadata,
           doc_type: doc.docType,
+          doc_title: doc.docTitle,
           line_items: doc.lines,
         },
         updated_at: new Date().toISOString(),
@@ -371,39 +556,75 @@ export async function loadCompanyForSmartGenerator(
   } as Partial<AtlasCompany> & { taxeProfessionnelle?: string };
 }
 
+export function mergeCompanyHeader(
+  dbCompany: Partial<AtlasCompany> | null,
+  customHeader?: SmartGeneratorHeader | null,
+): Partial<AtlasCompany> & { taxeProfessionnelle?: string } {
+  const base = dbCompany ?? {};
+  const custom = customHeader ?? {};
+  return {
+    ...base,
+    raisonSociale: custom.raisonSociale?.trim() || base.raisonSociale || '',
+    ice: custom.ice?.trim() || base.ice || '',
+    if_fiscal: custom.if_fiscal?.trim() || base.if_fiscal || '',
+    rc: custom.rc?.trim() || base.rc || '',
+    adresse: custom.adresse?.trim() || base.adresse || '',
+    ville: custom.ville?.trim() || base.ville || '',
+    logoUrl: custom.logoUrl?.trim() || base.logoUrl,
+    taxeProfessionnelle: custom.patent?.trim() || (base as { taxeProfessionnelle?: string }).taxeProfessionnelle || '',
+  };
+}
+
 export async function runSmartGenerator(
   db: SupabaseClient,
   userId: string,
   request: SmartGeneratorGenerateRequest,
-): Promise<SmartGeneratorResult & { company: Partial<AtlasCompany> | null }> {
-  const company = await loadCompanyForSmartGenerator(db, request.companyId, userId);
-  if (!company) throw new Error('company_not_found');
+): Promise<SmartGeneratorResult & { company: Partial<AtlasCompany> }> {
+  let dbCompany: Partial<AtlasCompany> | null = null;
+  if (request.companyId) {
+    dbCompany = await loadCompanyForSmartGenerator(db, request.companyId, userId);
+  }
+
+  const company = mergeCompanyHeader(dbCompany, request.customHeader);
+
+  const hasPrompt = Boolean(request.prompt?.trim());
+  const hasItems = Boolean(request.itemSpecs?.some((s) => s.designation?.trim()));
+  if (!hasPrompt && !hasItems) {
+    throw new Error('prompt_or_items_required');
+  }
 
   const { raw, provider } = await parsePromptToRawDocuments(
     request.prompt,
     request.params,
+    request.itemSpecs,
     request.language,
   );
 
-  let documents = buildSmartGeneratorDocuments(raw, request.docType, request.params);
-  const maxDocs = request.params.numeroFin - request.params.numeroDebut + 1;
-  if (documents.length > maxDocs) {
-    documents = documents.slice(0, maxDocs);
-  }
-
-  const persisted = await persistSmartGeneratorDocuments(
-    db,
-    userId,
-    request.companyId,
-    documents,
+  let documents = buildSmartGeneratorDocuments(
+    raw,
+    request.docType,
+    request.params,
+    request.customDocTitle,
   );
 
+  let persisted = false;
+  let outputDocs: Array<SmartGeneratorDocument & { id?: string }> = documents;
+
+  const shouldPersist = request.persistToDb !== false && Boolean(request.companyId) && dbCompany;
+  if (shouldPersist && request.companyId) {
+    const saved = await persistSmartGeneratorDocuments(db, userId, request.companyId, documents);
+    if (saved.length) {
+      outputDocs = saved;
+      persisted = true;
+    }
+  }
+
   const summary = {
-    count: persisted.length,
-    totalHT: roundDgiAmount(persisted.reduce((s, d) => s + d.amountHT, 0)),
-    totalTVA: roundDgiAmount(persisted.reduce((s, d) => s + d.vatAmount, 0)),
-    totalTTC: roundDgiAmount(persisted.reduce((s, d) => s + d.totalTTC, 0)),
+    count: outputDocs.length,
+    totalHT: roundDgiAmount(outputDocs.reduce((s, d) => s + d.amountHT, 0)),
+    totalTVA: roundDgiAmount(outputDocs.reduce((s, d) => s + d.vatAmount, 0)),
+    totalTTC: roundDgiAmount(outputDocs.reduce((s, d) => s + d.totalTTC, 0)),
   };
 
-  return { documents: persisted, summary, provider, company };
+  return { documents: outputDocs, summary, provider, persisted, company };
 }

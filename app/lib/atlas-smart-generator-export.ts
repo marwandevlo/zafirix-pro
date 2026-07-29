@@ -5,7 +5,7 @@
 import ExcelJS from 'exceljs';
 import { jsPDF } from 'jspdf';
 import type { AtlasCompany } from '@/app/types/atlas-company';
-import type { SmartGeneratorDocument, SmartGeneratorDocType, SmartGeneratorParams } from '@/app/types/atlas-smart-generator';
+import type { SmartGeneratorDocument, SmartGeneratorParams } from '@/app/types/atlas-smart-generator';
 import { formatDgiIce, formatDgiIdentifiantFiscal } from '@/app/lib/atlas-tva-dgi';
 
 const COLOR_HEADER = 'FF1B365D';
@@ -13,12 +13,6 @@ const COLOR_BORDER = 'FFD9D9D9';
 const COLOR_WHITE = 'FFFFFFFF';
 const FONT = 'Calibri';
 const CURRENCY_FMT = '#,##0.00';
-
-const DOC_TYPE_LABELS: Record<SmartGeneratorDocType, string> = {
-  facture: 'FACTURE',
-  devis: 'DEVIS',
-  bon_commande: 'BON DE COMMANDE',
-};
 
 function thinBorder(): Partial<ExcelJS.Borders> {
   return {
@@ -38,23 +32,27 @@ function companyPatent(company: Partial<AtlasCompany> & { taxeProfessionnelle?: 
   return String(json.taxeProfessionnelle ?? json.patent ?? '');
 }
 
-export function smartGeneratorExportBasename(company: Partial<AtlasCompany>, docType: SmartGeneratorDocType): string {
-  const slug = companyDisplayName(company).replace(/[^\w.-]+/g, '_').slice(0, 30);
-  return `SmartGen_${docType}_${slug}`;
+export function smartGeneratorExportBasename(
+  company: Partial<AtlasCompany>,
+  docTitle: string,
+): string {
+  const slug = companyDisplayName(company).replace(/[^\w.-]+/g, '_').slice(0, 30) || 'Custom';
+  const typeSlug = docTitle.replace(/[^\w.-]+/g, '_').slice(0, 20);
+  return `SmartGen_${typeSlug}_${slug}`;
 }
 
 export async function generateSmartGeneratorExcelBuffer(
   documents: SmartGeneratorDocument[],
   company: Partial<AtlasCompany>,
   params: SmartGeneratorParams,
-  docType: SmartGeneratorDocType,
 ): Promise<Buffer> {
+  const docTitle = documents[0]?.docTitle ?? 'DOCUMENT';
   const wb = new ExcelJS.Workbook();
   const ws = wb.addWorksheet('Synthèse Smart Generator');
 
   ws.mergeCells('A1:H1');
   const title = ws.getCell('A1');
-  title.value = `${DOC_TYPE_LABELS[docType]} — Génération intelligente (Maroc / DGI)`;
+  title.value = `${docTitle} — Génération intelligente (Maroc / DGI)`;
   title.font = { name: FONT, size: 14, bold: true, color: { argb: COLOR_WHITE } };
   title.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: COLOR_HEADER } };
   title.alignment = { horizontal: 'center', vertical: 'middle' };
@@ -125,7 +123,7 @@ export async function generateSmartGeneratorExcelBuffer(
   ];
 
   const detailWs = wb.addWorksheet('Détail lignes');
-  const lineHeaders = ['N° Doc', 'Désignation', 'Qté', 'PU HT', 'Taux TVA', 'HT', 'TVA', 'TTC', 'Compte PCGE'];
+  const lineHeaders = ['N° Doc', 'Désignation', 'Qté', 'Unité', 'PU HT', 'Taux TVA', 'HT', 'TVA', 'TTC', 'Compte PCGE'];
   lineHeaders.forEach((h, i) => {
     const cell = detailWs.getCell(1, i + 1);
     cell.value = h;
@@ -139,16 +137,17 @@ export async function generateSmartGeneratorExcelBuffer(
       detailWs.getCell(lr, 1).value = doc.number;
       detailWs.getCell(lr, 2).value = line.description;
       detailWs.getCell(lr, 3).value = line.quantity;
-      detailWs.getCell(lr, 4).value = line.unitPriceHT;
-      detailWs.getCell(lr, 4).numFmt = CURRENCY_FMT;
-      detailWs.getCell(lr, 5).value = line.vatRatePercent;
-      detailWs.getCell(lr, 6).value = line.amountHT;
-      detailWs.getCell(lr, 6).numFmt = CURRENCY_FMT;
-      detailWs.getCell(lr, 7).value = line.vatAmount;
+      detailWs.getCell(lr, 4).value = line.unit;
+      detailWs.getCell(lr, 5).value = line.unitPriceHT;
+      detailWs.getCell(lr, 5).numFmt = CURRENCY_FMT;
+      detailWs.getCell(lr, 6).value = line.vatRatePercent;
+      detailWs.getCell(lr, 7).value = line.amountHT;
       detailWs.getCell(lr, 7).numFmt = CURRENCY_FMT;
-      detailWs.getCell(lr, 8).value = line.totalTTC;
+      detailWs.getCell(lr, 8).value = line.vatAmount;
       detailWs.getCell(lr, 8).numFmt = CURRENCY_FMT;
-      detailWs.getCell(lr, 9).value = line.pcgeAccount ?? '';
+      detailWs.getCell(lr, 9).value = line.totalTTC;
+      detailWs.getCell(lr, 9).numFmt = CURRENCY_FMT;
+      detailWs.getCell(lr, 10).value = line.pcgeAccount ?? '';
       lr += 1;
     }
   }
@@ -162,7 +161,6 @@ type DocWithAutoTable = jsPDF & { lastAutoTable?: { finalY: number } };
 export async function generateSmartGeneratorPdfBuffer(
   documents: SmartGeneratorDocument[],
   company: Partial<AtlasCompany>,
-  docType: SmartGeneratorDocType,
 ): Promise<Buffer> {
   const { default: autoTable } = await import('jspdf-autotable');
   const doc = new jsPDF({ unit: 'mm', format: 'a4' });
@@ -171,6 +169,7 @@ export async function generateSmartGeneratorPdfBuffer(
     if (idx > 0) doc.addPage();
 
     const item = documents[idx]!;
+    const docLabel = item.docTitle;
     doc.setFillColor(27, 54, 93);
     doc.rect(0, 0, 210, 32, 'F');
     doc.setTextColor(255, 255, 255);
@@ -193,12 +192,12 @@ export async function generateSmartGeneratorPdfBuffer(
 
     doc.setFont('helvetica', 'bold');
     doc.setFontSize(14);
-    doc.text(DOC_TYPE_LABELS[docType], 196, 12, { align: 'right' });
+    doc.text(docLabel, 196, 12, { align: 'right' });
     doc.setFontSize(9);
     doc.setFont('helvetica', 'normal');
     doc.text(`N° ${item.number}`, 196, 18, { align: 'right' });
     doc.text(`Date: ${item.issueDate}`, 196, 23, { align: 'right' });
-    if (item.dueDate && docType === 'facture') {
+    if (item.dueDate && item.docType === 'facture') {
       doc.text(`Échéance: ${item.dueDate}`, 196, 28, { align: 'right' });
     }
 
@@ -211,10 +210,11 @@ export async function generateSmartGeneratorPdfBuffer(
 
     autoTable(doc, {
       startY: 54,
-      head: [['Désignation', 'Qté', 'PU HT', 'TVA %', 'HT', 'TVA', 'TTC', 'PCGE']],
+      head: [['Désignation', 'Qté', 'Unité', 'PU HT', 'TVA %', 'HT', 'TVA', 'TTC', 'PCGE']],
       body: item.lines.map((l) => [
         l.description,
         String(l.quantity),
+        l.unit,
         l.unitPriceHT.toFixed(2),
         String(l.vatRatePercent),
         l.amountHT.toFixed(2),
