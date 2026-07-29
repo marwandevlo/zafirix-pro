@@ -80,24 +80,72 @@ export async function listAtlasInvoicesResult(
   if (companyId === undefined) {
     companyId = await getActiveCompanyDbRowId();
   }
-  if (!companyId) return { ok: false, error: 'company_required' };
+  // No active company — empty list, not a blocking error.
+  if (!companyId) return { ok: true, invoices: [] };
 
   const owned = await requireOwnedCompany(companyId);
-  if (!owned.ok) return { ok: false, error: owned.error };
+  if (!owned.ok) return { ok: true, invoices: [] };
 
-  const { data, error } = await supabase
-    .from('atlas_invoices')
-    .select('*')
-    .eq('user_id', auth.userId)
-    .or(`company_id.eq.${companyId},company_id.is.null`)
-    .order('issue_date', { ascending: false });
+  try {
+    const { data, error } = await supabase
+      .from('atlas_invoices')
+      .select('*')
+      .eq('user_id', auth.userId)
+      .or(`company_id.eq.${companyId},company_id.is.null`)
+      .order('issue_date', { ascending: false });
 
-  if (error) {
-    logAtlasServerEvent('atlas_invoices', 'error', 'list_failed', { message: error.message });
-    return { ok: false, error: 'list_failed' };
+    if (error) {
+      logAtlasServerEvent('atlas_invoices', 'error', 'list_failed', { message: error.message });
+      return { ok: true, invoices: [] };
+    }
+
+    return { ok: true, invoices: (data ?? []).map((row) => rowToInvoice(row as Record<string, unknown>)) };
+  } catch (err) {
+    logAtlasServerEvent('atlas_invoices', 'error', 'list_exception', {
+      message: err instanceof Error ? err.message : String(err),
+    });
+    return { ok: true, invoices: [] };
+  }
+}
+
+/** Fetch a single invoice — returns null when missing, forbidden, or on DB/RLS errors. */
+export async function getAtlasInvoiceById(
+  invoiceId: string,
+  opts?: { companyId?: string | null },
+): Promise<AtlasInvoice | null> {
+  const id = invoiceId.trim();
+  if (!id) return null;
+
+  if (!isAtlasSupabaseDataEnabled()) {
+    return readInvoicesFromLocalStorage().find((i) => String(i.id) === id) ?? null;
   }
 
-  return { ok: true, invoices: (data ?? []).map((row) => rowToInvoice(row as Record<string, unknown>)) };
+  const auth = await requireSupabaseUser();
+  if (!auth.ok) return null;
+
+  let companyId = opts?.companyId;
+  if (companyId === undefined) {
+    companyId = await getActiveCompanyDbRowId();
+  }
+
+  try {
+    const { data, error } = await supabase
+      .from('atlas_invoices')
+      .select('*')
+      .eq('id', id)
+      .eq('user_id', auth.userId)
+      .maybeSingle();
+
+    if (error || !data?.id) return null;
+
+    if (companyId && data.company_id && data.company_id !== companyId) {
+      return null;
+    }
+
+    return rowToInvoice(data as Record<string, unknown>);
+  } catch {
+    return null;
+  }
 }
 
 export async function listAtlasInvoices(opts?: ListAtlasInvoicesOptions): Promise<AtlasInvoice[]> {

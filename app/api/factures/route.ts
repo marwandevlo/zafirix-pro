@@ -1,6 +1,7 @@
 /**
- * GET /api/factures?companyId=...
+ * GET /api/factures?companyId=...[&id=...]
  * List client invoices for the active company with robust error handling.
+ * Optional `id` returns a single invoice or empty payload when not found (never 404).
  */
 import { NextRequest, NextResponse } from 'next/server';
 import { requireAtlasSupabaseSession } from '@/app/lib/atlas-api-session';
@@ -8,7 +9,6 @@ import { requireApiCompanyAccess } from '@/app/lib/atlas-api-company-guard';
 import {
   apiBadRequest,
   apiErrorMessageFr,
-  apiForbidden,
   apiUnauthorized,
   mapDbError,
 } from '@/app/lib/atlas-api-response';
@@ -33,35 +33,74 @@ function rowToInvoice(row: Record<string, unknown>) {
 }
 
 export async function GET(request: NextRequest) {
-  const session = await requireAtlasSupabaseSession(request);
-  if (!session.ok) return apiUnauthorized();
+  try {
+    const session = await requireAtlasSupabaseSession(request);
+    if (!session.ok) return apiUnauthorized();
 
-  const companyId = new URL(request.url).searchParams.get('companyId');
-  if (!companyId) {
-    return apiBadRequest('company_id_required', apiErrorMessageFr('company_id_required'));
+    const { searchParams } = new URL(request.url);
+    const companyId = searchParams.get('companyId');
+    const invoiceId = searchParams.get('id') ?? searchParams.get('invoiceId');
+
+    if (!companyId) {
+      return apiBadRequest('company_id_required', apiErrorMessageFr('company_id_required'));
+    }
+
+    const admin = getSupabaseServiceRoleClient();
+    const access = await requireApiCompanyAccess(admin, session.userId, companyId);
+    if (!access.ok) {
+      return NextResponse.json({ ok: true, invoices: [], total: 0, invoice: null });
+    }
+
+    if (invoiceId?.trim()) {
+      const { data, error } = await admin
+        .from('atlas_invoices')
+        .select('*')
+        .eq('id', invoiceId.trim())
+        .eq('user_id', session.userId)
+        .or(`company_id.eq.${access.companyId},company_id.is.null`)
+        .maybeSingle();
+
+      if (error) {
+        return mapDbError(error, { ok: true, invoices: [], total: 0, invoice: null });
+      }
+
+      if (!data) {
+        return NextResponse.json({ ok: true, invoices: [], total: 0, invoice: null });
+      }
+
+      const invoice = rowToInvoice(data as Record<string, unknown>);
+      return NextResponse.json({
+        ok: true,
+        invoices: [invoice],
+        total: 1,
+        invoice,
+      });
+    }
+
+    const { data, error } = await admin
+      .from('atlas_invoices')
+      .select('*')
+      .eq('user_id', session.userId)
+      .or(`company_id.eq.${access.companyId},company_id.is.null`)
+      .order('issue_date', { ascending: false })
+      .limit(500);
+
+    if (error) {
+      return mapDbError(error, { ok: true, invoices: [], total: 0, invoice: null });
+    }
+
+    const invoices = (data ?? []).map((r) => rowToInvoice(r as Record<string, unknown>));
+    return NextResponse.json({
+      ok: true,
+      invoices,
+      total: invoices.length,
+      invoice: null,
+    });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : 'Erreur serveur';
+    return NextResponse.json(
+      { ok: true, invoices: [], total: 0, invoice: null, warning: message },
+      { status: 200 },
+    );
   }
-
-  const admin = getSupabaseServiceRoleClient();
-  const access = await requireApiCompanyAccess(admin, session.userId, companyId);
-  if (!access.ok) {
-    return apiForbidden(apiErrorMessageFr(access.error));
-  }
-
-  const { data, error } = await admin
-    .from('atlas_invoices')
-    .select('*')
-    .eq('user_id', session.userId)
-    .or(`company_id.eq.${access.companyId},company_id.is.null`)
-    .order('issue_date', { ascending: false })
-    .limit(500);
-
-  if (error) {
-    return mapDbError(error, { invoices: [], total: 0 });
-  }
-
-  return NextResponse.json({
-    ok: true,
-    invoices: (data ?? []).map((r) => rowToInvoice(r as Record<string, unknown>)),
-    total: data?.length ?? 0,
-  });
 }

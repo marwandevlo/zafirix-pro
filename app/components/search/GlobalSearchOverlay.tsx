@@ -91,7 +91,7 @@ export function GlobalSearchOverlay() {
       for (const inv of invoices) {
         const hay = `${inv.number} ${inv.clientName}`.toLowerCase();
         if (!hay.includes(needle)) continue;
-        localHits.push({ type: 'invoice', id: String(inv.id), title: inv.number, subtitle: inv.clientName, href: '/factures' });
+        localHits.push({ type: 'invoice', id: String(inv.id), title: inv.number, subtitle: inv.clientName, href: `/factures?id=${encodeURIComponent(String(inv.id))}` });
       }
       for (const c of companies) {
         const hay = `${c.raisonSociale} ${c.if_fiscal} ${c.ville}`.toLowerCase();

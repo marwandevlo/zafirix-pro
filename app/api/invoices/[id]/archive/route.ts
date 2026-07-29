@@ -29,7 +29,7 @@ export async function PATCH(
     .maybeSingle();
 
   if (fetchErr || !inv) {
-    return NextResponse.json({ error: 'invoice_not_found' }, { status: 404 });
+    return NextResponse.json({ ok: true, not_found: true });
   }
 
   if ((inv as { archived_at?: string | null }).archived_at) {

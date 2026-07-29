@@ -1,5 +1,5 @@
 'use client';
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Plus, Trash2, Download, Send, ReceiptText, CheckCircle2, Wallet, AlertTriangle, Archive, History, Eye, Share2, Edit3 } from 'lucide-react';
 import { EntityActionMenu, ConfirmDeleteDialog, EntityHistoryDrawer } from '@/app/components/actions';
 import type { ActionItem } from '@/app/components/actions';
@@ -8,9 +8,9 @@ import { invoiceShareMessage, createDocumentShareLink } from '@/app/lib/atlas-qu
 import { copyTextToClipboard } from '@/app/lib/copy-to-clipboard';
 import { exportInvoiceFormat, INVOICE_EXPORT_FORMATS } from '@/app/lib/atlas-invoice-export';
 import type { ExportFormat } from '@/app/lib/atlas-export-engine';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { addDaysYmd, isOverdue, todayYmd } from '@/app/lib/atlas-dates';
-import { deleteAtlasInvoice, atlasInvoiceErrorMessage, listAtlasInvoices, listAtlasInvoicesResult, upsertAtlasInvoice } from '@/app/lib/atlas-invoices-repository';
+import { deleteAtlasInvoice, atlasInvoiceErrorMessage, listAtlasInvoices, listAtlasInvoicesResult, getAtlasInvoiceById, upsertAtlasInvoice } from '@/app/lib/atlas-invoices-repository';
 import type { AtlasInvoice } from '@/app/types/atlas-invoice';
 import type { AtlasPaymentTerms, AtlasPaymentTermsPreset } from '@/app/types/atlas-payment-terms';
 import { normalizePaymentTerms, paymentTermsLabel } from '@/app/types/atlas-payment-terms';
@@ -70,6 +70,7 @@ type FactureRow = {
 
 export default function FacturesPage() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const [invoices, setInvoices] = useState<AtlasInvoice[]>([]);
   const [payments, setPayments] = useState<AtlasPayment[]>([]);
   const [filter, setFilter] = useState<'all' | 'paid' | 'pending' | 'overdue'>('all');
@@ -88,33 +89,68 @@ export default function FacturesPage() {
   const [termsKind, setTermsKind] = useState<'30' | '60' | '90' | 'custom'>('30');
   const [termsCustomDays, setTermsCustomDays] = useState('45');
   const [form, setForm] = useState({ numero: '', client: '', date: '', montantHT: '', taux: '20' });
+  const [confirmDeleteId, setConfirmDeleteId] = useState<AtlasInvoice['id'] | null>(null);
+  const [historyInvoiceId, setHistoryInvoiceId] = useState<string | null>(null);
   const [paymentForm, setPaymentForm] = useState<{ openFor: AtlasInvoice['id'] | null; amount: string; paidAt: string }>({
     openFor: null,
     amount: '',
     paidAt: todayYmd(),
   });
 
-  useEffect(() => {
-    const load = async () => {
-      if (isAtlasSupabaseDataEnabled()) {
-        await refreshAtlasUsageState();
-      }
-      const invResult = await listAtlasInvoicesResult();
-      if (!invResult.ok) {
-        setLoadError(atlasInvoiceErrorMessage(invResult.error));
-        setInvoices([]);
-        syncInvoiceUsageCount(0);
-      } else {
-        setLoadError(null);
-        setInvoices(invResult.invoices);
-        syncInvoiceUsageCount(invResult.invoices.length);
-      }
-
-      const pay = await listAtlasPayments();
-      setPayments(pay);
-    };
-    void load();
+  const resetInvoiceUiState = useCallback(() => {
+    setShowForm(false);
+    setForm({ numero: '', client: '', date: '', montantHT: '', taux: '20' });
+    setTermsKind('30');
+    setTermsCustomDays('45');
+    setPaymentForm({ openFor: null, amount: '', paidAt: todayYmd() });
+    setHistoryInvoiceId(null);
+    setConfirmDeleteId(null);
   }, []);
+
+  const clearUrlInvoiceId = useCallback(() => {
+    if (searchParams.get('id') || searchParams.get('invoiceId')) {
+      router.replace('/factures', { scroll: false });
+    }
+  }, [router, searchParams]);
+
+  const loadPageData = useCallback(async () => {
+    if (isAtlasSupabaseDataEnabled()) {
+      await refreshAtlasUsageState();
+    }
+
+    const invResult = await listAtlasInvoicesResult();
+    let list = invResult.ok ? invResult.invoices : [];
+
+    if (!invResult.ok && invResult.error === 'auth_required') {
+      setLoadError(atlasInvoiceErrorMessage(invResult.error));
+    } else {
+      setLoadError(null);
+    }
+
+    const urlId = (searchParams.get('id') ?? searchParams.get('invoiceId'))?.trim();
+    if (urlId) {
+      const inList = list.some((i) => String(i.id) === urlId);
+      if (!inList) {
+        const single = await getAtlasInvoiceById(urlId);
+        if (single) {
+          list = [...list, single];
+        } else {
+          resetInvoiceUiState();
+          clearUrlInvoiceId();
+        }
+      }
+    }
+
+    setInvoices(list);
+    syncInvoiceUsageCount(list.length);
+
+    const pay = await listAtlasPayments();
+    setPayments(pay);
+  }, [searchParams, resetInvoiceUiState, clearUrlInvoiceId]);
+
+  useEffect(() => {
+    void loadPageData();
+  }, [loadPageData]);
 
   const addFacture = async () => {
     if (!form.numero || !form.client || !form.montantHT) return;
@@ -488,9 +524,6 @@ export default function FacturesPage() {
     setPaymentForm({ openFor: null, amount: '', paidAt: todayYmd() });
   };
 
-  const [confirmDeleteId, setConfirmDeleteId] = useState<AtlasInvoice['id'] | null>(null);
-  const [historyInvoiceId, setHistoryInvoiceId] = useState<string | null>(null);
-
   const removeInvoice = (id: AtlasInvoice['id']) => {
     const updated = invoices.filter((inv) => inv.id !== id);
     setInvoices(updated);
@@ -508,8 +541,10 @@ export default function FacturesPage() {
       credentials: 'include',
     });
     if (res.ok) {
-      setInvoices(prev => prev.filter(inv => inv.id !== id));
-      syncInvoiceUsageCount(invoices.length - 1);
+      const body = (await res.json().catch(() => ({}))) as { ok?: boolean; not_found?: boolean };
+      if (body.not_found) return;
+      setInvoices((prev) => prev.filter((inv) => inv.id !== id));
+      syncInvoiceUsageCount(Math.max(0, invoices.length - 1));
     }
   };
 
@@ -762,16 +797,6 @@ export default function FacturesPage() {
             </div>
           )}
 
-          {invoices.length === 0 && !showForm ? (
-            <EmptyStateCta
-              lang="fr"
-              title="Aucune facture"
-              description="Créez votre première facture client pour suivre encaissements et relances."
-              primaryLabelFr="Ajouter maintenant"
-              primaryLabelAr="ابدأ الآن"
-              onPrimary={() => setShowForm(true)}
-            />
-          ) : (
           <>
           {activeTab === 'historique' && (
             <EntityAuditTable entityType="invoice" title="Historique — Factures clients" />
@@ -830,7 +855,21 @@ export default function FacturesPage() {
                 </tr>
               </thead>
               <tbody>
-                {filteredRows.map(f => (
+                {filteredRows.length === 0 ? (
+                  <tr>
+                    <td colSpan={12} className="px-4 py-8">
+                      <EmptyStateCta
+                        lang="fr"
+                        title="Aucune facture"
+                        description="Créez votre première facture client pour suivre encaissements et relances."
+                        primaryLabelFr="Ajouter maintenant"
+                        primaryLabelAr="ابدأ الآن"
+                        onPrimary={() => setShowForm(true)}
+                      />
+                    </td>
+                  </tr>
+                ) : (
+                filteredRows.map(f => (
                   <tr key={f.id} className={`border-b border-gray-50 hover:bg-gray-50 ${f.statut === 'en retard' ? 'bg-red-50/30' : ''}`}>
                     <td className="px-4 py-3 font-medium text-gray-700">
                       <div className="flex items-center gap-2 flex-wrap">
@@ -960,12 +999,12 @@ export default function FacturesPage() {
                       </div>
                     </td>
                   </tr>
-                ))}
+                ))
+                )}
               </tbody>
             </table>
           </div>
           </>
-          )}
 
           {paymentForm.openFor !== null && (
             <div className="bg-white rounded-xl p-5 shadow-sm border border-emerald-200">
