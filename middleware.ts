@@ -70,6 +70,8 @@ function isPublicPath(pathname: string): boolean {
   if (pathname === '/manifest.json') return true;
   if (pathname.startsWith('/robots.txt')) return true;
   if (pathname.startsWith('/sitemap')) return true;
+  if (pathname === '/share' || pathname.startsWith('/share/')) return true;
+  if (pathname.startsWith('/api/share/')) return true;
   if (isClientPortalPublicPath(pathname)) return true;
   return false;
 }

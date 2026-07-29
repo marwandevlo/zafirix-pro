@@ -300,6 +300,58 @@ export async function exportToXlsx(doc: AtlasDocument): Promise<Buffer> {
   return buffer;
 }
 
+// ── Word (.docx) export ─────────────────────────────────────────────────────
+
+export async function exportToDocx(doc: AtlasDocument): Promise<Buffer> {
+  const { Document, Packer, Paragraph, TextRun, HeadingLevel } = await import('docx');
+  const payload = buildDocumentExportPayload(doc);
+  const ext = payload.extraction as Record<string, { value?: unknown; user_corrected_value?: string } | undefined>;
+
+  const lines = [
+    new Paragraph({ text: 'ZAFIRIX PRO — Export Document', heading: HeadingLevel.TITLE }),
+    new Paragraph({ children: [new TextRun({ text: payload.meta.filename, bold: true, size: 28 })] }),
+    new Paragraph({ text: `Type : ${payload.meta.document_type}` }),
+    new Paragraph({ text: `Statut : ${payload.meta.validation_status}` }),
+    new Paragraph({ text: `Exporté le : ${payload.meta.exported_at}` }),
+    new Paragraph({ text: 'Extraction des champs', heading: HeadingLevel.HEADING_2 }),
+  ];
+
+  const FIELDS: Array<[string, string]> = [
+    ['supplier_name', 'Fournisseur'],
+    ['supplier_ice', 'ICE'],
+    ['invoice_number', 'N° Facture'],
+    ['invoice_date', 'Date'],
+    ['subtotal_ht', 'Montant HT'],
+    ['tva_amount', 'TVA'],
+    ['total_ttc', 'Total TTC'],
+    ['currency', 'Devise'],
+  ];
+
+  for (const [key, label] of FIELDS) {
+    const f = ext[key];
+    const value = f ? fieldValue(f as Parameters<typeof fieldValue>[0]) : '';
+    if (!value) continue;
+    lines.push(
+      new Paragraph({
+        children: [
+          new TextRun({ text: `${label} : `, bold: true }),
+          new TextRun({ text: value }),
+        ],
+      }),
+    );
+  }
+
+  lines.push(
+    new Paragraph({ text: '' }),
+    new Paragraph({
+      children: [new TextRun({ text: 'Document généré par Zafirix Pro — Documents IA', italics: true, size: 18 })],
+    }),
+  );
+
+  const wordDoc = new Document({ sections: [{ children: lines }] });
+  return Packer.toBuffer(wordDoc);
+}
+
 // ── ZIP export ────────────────────────────────────────────────────────────────
 
 export async function exportToZip(doc: AtlasDocument): Promise<Buffer> {
@@ -310,17 +362,19 @@ export async function exportToZip(doc: AtlasDocument): Promise<Buffer> {
   const date = new Date().toISOString().slice(0, 10);
 
   // Gather all formats
-  const [jsonStr, csvStr, xmlStr, xlsxBuf] = await Promise.all([
+  const [jsonStr, csvStr, xmlStr, xlsxBuf, docxBuf] = await Promise.all([
     exportToJson(doc),
     exportToCsv(doc),
     exportToXml(doc),
     exportToXlsx(doc),
+    exportToDocx(doc),
   ]);
 
   zip.file(`${base}_${date}.json`, jsonStr);
   zip.file(`${base}_${date}.csv`, csvStr);
   zip.file(`${base}_${date}.xml`, xmlStr);
   zip.file(`${base}_${date}.xlsx`, xlsxBuf);
+  zip.file(`${base}_${date}.docx`, docxBuf);
 
   // README
   const payload = buildDocumentExportPayload(doc);
@@ -338,6 +392,7 @@ export async function exportToZip(doc: AtlasDocument): Promise<Buffer> {
     `  *.csv   — champs extraits tabulaires`,
     `  *.xml   — format structuré XML (ZafirixDocument v1)`,
     `  *.xlsx  — classeur Excel multi-feuilles`,
+    `  *.docx  — document Word éditable`,
     ``,
     `Généré par Zafirix Pro — Documents IA`,
   ].join('\n');
@@ -351,6 +406,21 @@ export async function exportToZip(doc: AtlasDocument): Promise<Buffer> {
 export function exportFilename(doc: AtlasDocument, format: string): string {
   const base = (doc.filename ?? 'document').replace(/\.[^.]+$/, '').replace(/[^\w.-]+/g, '_').slice(0, 40);
   const dateStr = new Date().toISOString().slice(0, 10);
-  const ext = format === 'xlsx' ? 'xlsx' : format === 'json' ? 'json' : format === 'csv' ? 'csv' : format === 'xml' ? 'xml' : format === 'zip' ? 'zip' : format === 'pdf' ? 'pdf' : format;
+  const ext =
+    format === 'xlsx'
+      ? 'xlsx'
+      : format === 'docx'
+        ? 'docx'
+        : format === 'json'
+          ? 'json'
+          : format === 'csv'
+            ? 'csv'
+            : format === 'xml'
+              ? 'xml'
+              : format === 'zip'
+                ? 'zip'
+                : format === 'pdf'
+                  ? 'pdf'
+                  : format;
   return `zafirix_${base}_${dateStr}.${ext}`;
 }

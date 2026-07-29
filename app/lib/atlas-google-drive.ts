@@ -273,10 +273,42 @@ export function mimeTypeForFormat(format: string): string {
   const map: Record<string, string> = {
     pdf: 'application/pdf',
     xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
     json: 'application/json',
     csv: 'text/csv',
     xml: 'application/xml',
     zip: 'application/zip',
   };
   return map[format] ?? 'application/octet-stream';
+}
+
+function sanitizeDriveFolderName(name: string): string {
+  return name.replace(/[\\/:*?"<>|]/g, '-').trim().slice(0, 80) || 'Dossier';
+}
+
+/** Vault path: Zafirix Pro / {Company} / {Year} / {Category} */
+export async function ensureVaultBackupFolder(
+  accessToken: string,
+  companyName: string,
+  year: string,
+  category: string,
+): Promise<{ folderId: string; path: string }> {
+  const root = await findOrCreateFolder(accessToken, 'root', 'Zafirix Pro');
+  const company = await findOrCreateFolder(accessToken, root, sanitizeDriveFolderName(companyName || 'Mon entreprise'));
+  const yearFolder = await findOrCreateFolder(accessToken, company, sanitizeDriveFolderName(year));
+  const categoryFolder = await findOrCreateFolder(accessToken, yearFolder, sanitizeDriveFolderName(category));
+  const path = `Zafirix Pro/${sanitizeDriveFolderName(companyName)}/${year}/${category}`;
+  return { folderId: categoryFolder, path };
+}
+
+/** Map document type to vault category folder name. */
+export function vaultCategoryForDocumentType(documentType?: string | null): string {
+  const t = String(documentType ?? '').toLowerCase();
+  if (t.includes('invoice') || t.includes('facture')) return 'Factures';
+  if (t.includes('receipt') || t.includes('recu')) return 'Reçus';
+  if (t.includes('tax') || t.includes('fiscal') || t.includes('tva')) return 'Fiscal';
+  if (t.includes('payroll') || t.includes('paie')) return 'Paie';
+  if (t.includes('legal') || t.includes('juridique')) return 'Juridique';
+  if (t.includes('report') || t.includes('rapport')) return 'Rapports';
+  return 'Documents IA';
 }

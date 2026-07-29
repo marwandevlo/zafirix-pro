@@ -3,6 +3,8 @@ import { useEffect, useMemo, useState } from 'react';
 import { Plus, Trash2, Download, Send, ReceiptText, CheckCircle2, Wallet, AlertTriangle, Archive, History, Eye, Share2, Edit3 } from 'lucide-react';
 import { EntityActionMenu, ConfirmDeleteDialog, EntityHistoryDrawer } from '@/app/components/actions';
 import type { ActionItem } from '@/app/components/actions';
+import { QuickShareHub } from '@/app/components/share';
+import { invoiceShareMessage } from '@/app/lib/atlas-quick-share';
 import { useRouter } from 'next/navigation';
 import { addDaysYmd, isOverdue, todayYmd } from '@/app/lib/atlas-dates';
 import { deleteAtlasInvoice, atlasInvoiceErrorMessage, listAtlasInvoices, upsertAtlasInvoice } from '@/app/lib/atlas-invoices-repository';
@@ -806,6 +808,12 @@ export default function FacturesPage() {
                             Relancer
                           </button>
                         )}
+                        <QuickShareHub
+                          entityLabel={`Facture ${f.numero}`}
+                          onDownloadPdf={() => void downloadPdf(f)}
+                          onSendEmail={() => void sendInvoiceEmail(f)}
+                          whatsAppMessage={invoiceShareMessage(f.numero, f.client, f.ttc)}
+                        />
                         <EntityActionMenu
                           entityLabel={`Facture ${f.numero} · ${f.client}`}
                           actions={[

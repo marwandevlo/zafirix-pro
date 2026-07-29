@@ -3,6 +3,7 @@ import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'rea
 import { Upload, FileText, CheckCircle, Clock, Trash2, Sparkles, ShieldCheck, Archive, History, Eye, Download, Share2, Wrench, Mail, Link2, FileJson, FileSpreadsheet, FileCode2, Package, CloudUpload, Loader2 as DriveLoader } from 'lucide-react';
 import { EntityActionMenu, ConfirmDeleteDialog, EntityHistoryDrawer } from '@/app/components/actions';
 import type { ActionItem } from '@/app/components/actions';
+import { QuickShareHub } from '@/app/components/share';
 import { SendEmailModal } from '@/app/documents/components/SendEmailModal';
 import { ValidationCenter } from '@/app/documents/components/ValidationCenter';
 import {
@@ -1474,6 +1475,14 @@ export default function DocumentsPage() {
                                     : 'Créer facture fournisseur'}
                               </button>
                             )
+                          )}
+                          {supabaseMode && d.supabaseId && d.statut === 'analysé' && (
+                            <QuickShareHub
+                              entityLabel={d.nom}
+                              documentId={d.supabaseId}
+                              onSendEmail={() => setEmailModalDocId(d.supabaseId!)}
+                              disabled={driveBackingUpId === d.supabaseId}
+                            />
                           )}
                           {/* Three-dot action menu — all actions real */}
                           <EntityActionMenu

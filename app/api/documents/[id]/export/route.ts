@@ -11,26 +11,19 @@ import {
   exportToCsv,
   exportToXml,
   exportToXlsx,
+  exportToDocx,
   exportToZip,
   exportFilename,
 } from '@/app/lib/atlas-document-export';
 import { generateDocumentPdf, documentPdfFilename } from '@/app/lib/atlas-document-pdf-export';
+import { EXPORT_CONTENT_TYPES, isExportFormat } from '@/app/lib/atlas-export-engine';
 import type { AtlasDocument } from '@/app/types/atlas-document';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
-const SUPPORTED_FORMATS = ['json', 'csv', 'xml', 'xlsx', 'pdf', 'zip'] as const;
+const SUPPORTED_FORMATS = ['json', 'csv', 'xml', 'xlsx', 'docx', 'pdf', 'zip'] as const;
 type ExportFormat = (typeof SUPPORTED_FORMATS)[number];
-
-const CONTENT_TYPES: Record<ExportFormat, string> = {
-  json: 'application/json',
-  csv: 'text/csv; charset=utf-8',
-  xml: 'application/xml; charset=utf-8',
-  xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-  pdf: 'application/pdf',
-  zip: 'application/zip',
-};
 
 function toArrayBuffer(body: string | Buffer | ArrayBuffer): ArrayBuffer {
   if (body instanceof ArrayBuffer) return body;
@@ -48,7 +41,7 @@ export async function GET(
   const { id: documentId } = await params;
   const format = (request.nextUrl.searchParams.get('format') ?? 'json') as ExportFormat;
 
-  if (!SUPPORTED_FORMATS.includes(format)) {
+  if (!SUPPORTED_FORMATS.includes(format as ExportFormat)) {
     return NextResponse.json(
       { error: 'format_not_supported', supported: SUPPORTED_FORMATS },
       { status: 400 },
@@ -96,6 +89,7 @@ export async function GET(
       case 'csv':  body = exportToCsv(doc as AtlasDocument);  break;
       case 'xml':  body = exportToXml(doc as AtlasDocument);  break;
       case 'xlsx': body = await exportToXlsx(doc as AtlasDocument); break;
+      case 'docx': body = await exportToDocx(doc as AtlasDocument); break;
       case 'pdf':  body = generateDocumentPdf(doc as AtlasDocument, company); break;
       case 'zip':  body = await exportToZip(doc as AtlasDocument); break;
     }
@@ -109,7 +103,7 @@ export async function GET(
 
   const arrayBuffer = toArrayBuffer(body);
   const sizeBytes = arrayBuffer.byteLength;
-  const contentType = CONTENT_TYPES[format];
+  const contentType = EXPORT_CONTENT_TYPES[format as ExportFormat];
 
   // Audit log (best-effort)
   // zafirix_exports constraint allows: json|csv|xml|xlsx|pdf|zip|edi

@@ -10,7 +10,8 @@ import { documentUploadSessionUserId } from '@/app/lib/atlas-document-upload-aut
 import { getSupabaseServiceRoleClient } from '@/app/lib/supabase-admin';
 import {
   getValidCredentials,
-  ensureZafirixFolderStructure,
+  ensureVaultBackupFolder,
+  vaultCategoryForDocumentType,
   uploadFileToDrive,
   mimeTypeForFormat,
 } from '@/app/lib/atlas-google-drive';
@@ -19,10 +20,12 @@ import {
   exportToCsv,
   exportToXml,
   exportToXlsx,
+  exportToDocx,
   exportToZip,
   exportFilename,
 } from '@/app/lib/atlas-document-export';
 import { generateDocumentPdf, documentPdfFilename } from '@/app/lib/atlas-document-pdf-export';
+import { documentTypeFromDocument } from '@/app/lib/atlas-documents-repository';
 import type { AtlasDocument } from '@/app/types/atlas-document';
 
 export const runtime = 'nodejs';
@@ -61,7 +64,8 @@ export async function POST(
   if (!credentials) {
     return NextResponse.json({
       error: 'google_drive_not_connected',
-      message: 'Veuillez connecter Google Drive dans le Centre de sauvegarde.',
+      localFallback: true,
+      message: 'Google Drive non connecté — téléchargement local disponible.',
     }, { status: 400 });
   }
 
@@ -109,8 +113,16 @@ export async function POST(
   });
 
   try {
-    // Ensure folder structure
-    const folders = await ensureZafirixFolderStructure(credentials.accessToken, companyName);
+    // Vault folder: Company → Year → Category
+    const docType = documentTypeFromDocument(doc as AtlasDocument);
+    const category = vaultCategoryForDocumentType(docType);
+    const year = new Date(String(docRecord.created_at ?? Date.now())).getFullYear().toString();
+    const vaultFolder = await ensureVaultBackupFolder(
+      credentials.accessToken,
+      companyName,
+      year,
+      category,
+    );
 
     // Generate export content
     let content: string | Buffer | ArrayBuffer;
@@ -120,8 +132,9 @@ export async function POST(
       case 'csv':   content = exportToCsv(doc as AtlasDocument);   break;
       case 'xml':   content = exportToXml(doc as AtlasDocument);   break;
       case 'xlsx':  content = await exportToXlsx(doc as AtlasDocument); break;
+      case 'docx':  content = await exportToDocx(doc as AtlasDocument); break;
       case 'zip':   content = await exportToZip(doc as AtlasDocument);  break;
-      default:      content = generateDocumentPdf(doc as AtlasDocument, company); break; // pdf
+      default:      content = generateDocumentPdf(doc as AtlasDocument, company); break;
     }
     filename = format === 'pdf'
       ? documentPdfFilename(doc as AtlasDocument)
@@ -139,7 +152,7 @@ export async function POST(
     const mimeType = mimeTypeForFormat(format);
     const driveResult = await uploadFileToDrive(
       credentials.accessToken,
-      folders.documentsIa,
+      vaultFolder.folderId,
       filename,
       mimeType,
       buffer,
@@ -151,7 +164,7 @@ export async function POST(
     await admin.from('zafirix_backups').update({
       sync_status: 'completed',
       provider_file_id: driveResult.id,
-      provider_folder_id: folders.documentsIa,
+      provider_folder_id: vaultFolder.folderId,
       provider_url: driveResult.webViewLink,
       filename,
       file_size_bytes: sizeBytes,
@@ -178,7 +191,7 @@ export async function POST(
       entity_type: 'document',
       entity_id: documentId,
       event_type: 'backup_completed',
-      payload: { provider: 'google_drive', format, file_id: driveResult.id, size_bytes: sizeBytes },
+      payload: { provider: 'google_drive', format, file_id: driveResult.id, size_bytes: sizeBytes, vault_path: vaultFolder.path },
     });
 
     return NextResponse.json({
