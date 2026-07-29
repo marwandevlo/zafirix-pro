@@ -105,7 +105,7 @@ export async function listAtlasClients(opts?: ListAtlasClientsOptions): Promise<
   if (opts?.companyId) {
     const owned = await requireOwnedCompany(opts.companyId);
     if (!owned.ok) return [];
-    query = query.eq('company_id', opts.companyId);
+    query = query.or(`company_id.eq.${opts.companyId},company_id.is.null`);
   }
 
   const { data, error } = await query;

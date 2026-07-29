@@ -7,6 +7,11 @@ import { BetaSurfaceBadge } from '@/app/components/safety/BetaSurfaceBadge';
 import { RowShareActionBar } from '@/app/components/share';
 import { getActiveCompanyDbRowId } from '@/app/lib/atlas-active-company';
 import { onCompanySwitched } from '@/app/lib/atlas-company-switch-event';
+import {
+  fetchEnterpriseModule,
+  ModuleLoadErrorBanner,
+  ModuleNoCompanyState,
+} from '@/app/lib/use-enterprise-module-fetch';
 
 type Delivery = {
   id: string;
@@ -43,19 +48,24 @@ export default function LogistiquePage() {
   const [companyId, setCompanyId] = useState<string | null>(null);
   const [deliveries, setDeliveries] = useState<Delivery[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [showForm, setShowForm] = useState(false);
   const [form, setForm] = useState({ waybillNumber: '', carrier: '', codAmount: '', recipientName: '', recipientPhone: '' });
 
   const load = useCallback(async (cid: string) => {
     setLoading(true);
-    try {
-      const res = await fetch(`/api/logistics/deliveries?companyId=${encodeURIComponent(cid)}`, { credentials: 'include' });
-      if (!res.ok) return;
-      const data = await res.json() as { deliveries?: Delivery[] };
-      setDeliveries(data.deliveries ?? []);
-    } finally {
-      setLoading(false);
+    setLoadError(null);
+    const result = await fetchEnterpriseModule<{ deliveries?: Delivery[] }>(
+      `/api/logistics/deliveries?companyId=${encodeURIComponent(cid)}`,
+    );
+    if (!result.ok) {
+      setLoadError(result.error);
+      setDeliveries([]);
+    } else {
+      setDeliveries(result.data.deliveries ?? []);
+      if (result.warning) setLoadError(result.warning);
     }
+    setLoading(false);
   }, []);
 
   useEffect(() => {
@@ -118,6 +128,12 @@ export default function LogistiquePage() {
               <Plus size={14} /> Nouveau BL
             </button>
           </div>
+
+          <ModuleLoadErrorBanner message={loadError} onDismiss={() => setLoadError(null)} />
+
+          {!companyId && !loading && (
+            <ModuleNoCompanyState moduleLabel="la logistique" />
+          )}
 
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
             <div className="bg-white rounded-xl border p-4 shadow-sm">

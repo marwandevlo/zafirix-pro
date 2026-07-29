@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { Copy, Loader2, Shield, Trash2 } from 'lucide-react';
 import { getActiveCompanyDbRowId } from '@/app/lib/atlas-active-company';
 import { onCompanySwitched } from '@/app/lib/atlas-company-switch-event';
+import { fetchEnterpriseModule, ModuleLoadErrorBanner } from '@/app/lib/use-enterprise-module-fetch';
 import { copyTextToClipboard } from '@/app/lib/copy-to-clipboard';
 
 type Pass = {
@@ -17,19 +18,24 @@ type Pass = {
 export function AuditorPassWidget() {
   const [passes, setPasses] = useState<Pass[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
   const [label, setLabel] = useState('');
 
   const load = useCallback(async (cid: string) => {
     setLoading(true);
-    try {
-      const res = await fetch(`/api/auditor/pass?companyId=${encodeURIComponent(cid)}`, { credentials: 'include' });
-      if (!res.ok) return;
-      const data = await res.json() as { passes?: Pass[] };
-      setPasses(data.passes ?? []);
-    } finally {
-      setLoading(false);
+    setLoadError(null);
+    const result = await fetchEnterpriseModule<{ passes?: Pass[] }>(
+      `/api/auditor/pass?companyId=${encodeURIComponent(cid)}`,
+    );
+    if (!result.ok) {
+      setLoadError(result.error);
+      setPasses([]);
+    } else {
+      setPasses(result.data.passes ?? []);
+      if (result.warning) setLoadError(result.warning);
     }
+    setLoading(false);
   }, []);
 
   useEffect(() => {
@@ -71,6 +77,8 @@ export function AuditorPassWidget() {
       </div>
 
       <div className="p-4 space-y-3">
+        <ModuleLoadErrorBanner message={loadError} onDismiss={() => setLoadError(null)} />
+
         <div className="flex gap-2">
           <input
             value={label}

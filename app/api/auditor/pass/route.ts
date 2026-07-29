@@ -1,6 +1,14 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { randomBytes } from 'crypto';
 import { requireAtlasSupabaseSession } from '@/app/lib/atlas-api-session';
+import { requireApiCompanyAccess } from '@/app/lib/atlas-api-company-guard';
+import {
+  apiBadRequest,
+  apiErrorMessageFr,
+  apiForbidden,
+  apiUnauthorized,
+  mapDbError,
+} from '@/app/lib/atlas-api-response';
 import { getSupabaseServiceRoleClient } from '@/app/lib/supabase-admin';
 import { getPublicAppUrl } from '@/app/lib/atlas-app-url';
 
@@ -9,20 +17,24 @@ export const dynamic = 'force-dynamic';
 
 export async function GET(request: NextRequest) {
   const session = await requireAtlasSupabaseSession(request);
-  if (!session.ok) return NextResponse.json({ error: 'auth_required' }, { status: 401 });
+  if (!session.ok) return apiUnauthorized();
 
   const companyId = new URL(request.url).searchParams.get('companyId');
-  if (!companyId) return NextResponse.json({ error: 'company_id_required' }, { status: 400 });
+  if (!companyId) return apiBadRequest('company_id_required', apiErrorMessageFr('company_id_required'));
 
   const admin = getSupabaseServiceRoleClient();
+  const access = await requireApiCompanyAccess(admin, session.userId, companyId);
+  if (!access.ok) return apiForbidden(apiErrorMessageFr(access.error));
+
   const { data, error } = await admin
     .from('zafirix_auditor_passes')
     .select('*')
-    .eq('company_id', companyId)
+    .eq('company_id', access.companyId)
+    .eq('user_id', session.userId)
     .is('revoked_at', null)
     .order('created_at', { ascending: false });
 
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  if (error) return mapDbError(error, { passes: [] });
 
   const base = getPublicAppUrl();
   const passes = (data ?? []).map((p) => ({
@@ -40,7 +52,7 @@ export async function GET(request: NextRequest) {
 
 export async function POST(request: NextRequest) {
   const session = await requireAtlasSupabaseSession(request);
-  if (!session.ok) return NextResponse.json({ error: 'auth_required' }, { status: 401 });
+  if (!session.ok) return apiUnauthorized();
 
   const body = (await request.json()) as {
     companyId?: string;
@@ -50,19 +62,22 @@ export async function POST(request: NextRequest) {
   };
 
   if (!body.companyId || !body.label) {
-    return NextResponse.json({ error: 'missing_fields' }, { status: 400 });
+    return apiBadRequest('missing_fields', apiErrorMessageFr('missing_fields'));
   }
+
+  const admin = getSupabaseServiceRoleClient();
+  const access = await requireApiCompanyAccess(admin, session.userId, body.companyId);
+  if (!access.ok) return apiForbidden(apiErrorMessageFr(access.error));
 
   const token = randomBytes(24).toString('hex');
   const days = body.expiresInDays ?? 14;
   const expiresAt = new Date(Date.now() + days * 86400000).toISOString();
 
-  const admin = getSupabaseServiceRoleClient();
   const { data, error } = await admin
     .from('zafirix_auditor_passes')
     .insert({
       user_id: session.userId,
-      company_id: body.companyId,
+      company_id: access.companyId,
       token,
       label: body.label,
       scope: body.scope ?? 'read_only',
@@ -71,7 +86,7 @@ export async function POST(request: NextRequest) {
     .select('*')
     .single();
 
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  if (error) return mapDbError(error);
 
   const base = getPublicAppUrl();
   return NextResponse.json({
@@ -87,10 +102,10 @@ export async function POST(request: NextRequest) {
 
 export async function DELETE(request: NextRequest) {
   const session = await requireAtlasSupabaseSession(request);
-  if (!session.ok) return NextResponse.json({ error: 'auth_required' }, { status: 401 });
+  if (!session.ok) return apiUnauthorized();
 
   const id = new URL(request.url).searchParams.get('id');
-  if (!id) return NextResponse.json({ error: 'missing_id' }, { status: 400 });
+  if (!id) return apiBadRequest('missing_fields', apiErrorMessageFr('missing_fields'));
 
   const admin = getSupabaseServiceRoleClient();
   const { error } = await admin
@@ -99,6 +114,6 @@ export async function DELETE(request: NextRequest) {
     .eq('id', id)
     .eq('user_id', session.userId);
 
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  if (error) return mapDbError(error);
   return NextResponse.json({ ok: true });
 }

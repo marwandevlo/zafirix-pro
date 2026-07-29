@@ -1,5 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { requireAtlasSupabaseSession } from '@/app/lib/atlas-api-session';
+import { requireApiCompanyAccess } from '@/app/lib/atlas-api-company-guard';
+import {
+  apiBadRequest,
+  apiErrorMessageFr,
+  apiForbidden,
+  apiUnauthorized,
+  mapDbError,
+} from '@/app/lib/atlas-api-response';
 import { getSupabaseServiceRoleClient } from '@/app/lib/supabase-admin';
 
 export const runtime = 'nodejs';
@@ -22,20 +30,24 @@ function rowToEntry(row: Record<string, unknown>) {
 
 export async function GET(request: NextRequest) {
   const session = await requireAtlasSupabaseSession(request);
-  if (!session.ok) return NextResponse.json({ error: 'auth_required' }, { status: 401 });
+  if (!session.ok) return apiUnauthorized();
 
   const companyId = new URL(request.url).searchParams.get('companyId');
-  if (!companyId) return NextResponse.json({ error: 'company_id_required' }, { status: 400 });
+  if (!companyId) return apiBadRequest('company_id_required', apiErrorMessageFr('company_id_required'));
 
   const admin = getSupabaseServiceRoleClient();
+  const access = await requireApiCompanyAccess(admin, session.userId, companyId);
+  if (!access.ok) return apiForbidden(apiErrorMessageFr(access.error));
+
   const { data, error } = await admin
     .from('zafirix_petty_cash_entries')
     .select('*')
-    .eq('company_id', companyId)
+    .eq('company_id', access.companyId)
+    .eq('user_id', session.userId)
     .order('entry_date', { ascending: false })
     .limit(100);
 
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  if (error) return mapDbError(error, { entries: [], balance: 0 });
 
   const entries = (data ?? []).map((r) => rowToEntry(r as Record<string, unknown>));
   const balance = entries
@@ -50,7 +62,7 @@ export async function GET(request: NextRequest) {
 
 export async function POST(request: NextRequest) {
   const session = await requireAtlasSupabaseSession(request);
-  if (!session.ok) return NextResponse.json({ error: 'auth_required' }, { status: 401 });
+  if (!session.ok) return apiUnauthorized();
 
   const body = (await request.json()) as {
     companyId?: string;
@@ -62,15 +74,18 @@ export async function POST(request: NextRequest) {
   };
 
   if (!body.companyId || !body.entryType || body.amount == null) {
-    return NextResponse.json({ error: 'missing_fields' }, { status: 400 });
+    return apiBadRequest('missing_fields', apiErrorMessageFr('missing_fields'));
   }
 
   const admin = getSupabaseServiceRoleClient();
+  const access = await requireApiCompanyAccess(admin, session.userId, body.companyId);
+  if (!access.ok) return apiForbidden(apiErrorMessageFr(access.error));
+
   const { data, error } = await admin
     .from('zafirix_petty_cash_entries')
     .insert({
       user_id: session.userId,
-      company_id: body.companyId,
+      company_id: access.companyId,
       entry_type: body.entryType,
       amount: body.amount,
       beneficiary: body.beneficiary ?? null,
@@ -81,16 +96,16 @@ export async function POST(request: NextRequest) {
     .select('*')
     .single();
 
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  if (error) return mapDbError(error);
   return NextResponse.json({ ok: true, entry: rowToEntry(data as Record<string, unknown>) });
 }
 
 export async function PATCH(request: NextRequest) {
   const session = await requireAtlasSupabaseSession(request);
-  if (!session.ok) return NextResponse.json({ error: 'auth_required' }, { status: 401 });
+  if (!session.ok) return apiUnauthorized();
 
   const body = (await request.json()) as { id?: string; status?: string; approvedBy?: string };
-  if (!body.id || !body.status) return NextResponse.json({ error: 'missing_fields' }, { status: 400 });
+  if (!body.id || !body.status) return apiBadRequest('missing_fields', apiErrorMessageFr('missing_fields'));
 
   const admin = getSupabaseServiceRoleClient();
   const { data, error } = await admin
@@ -104,6 +119,6 @@ export async function PATCH(request: NextRequest) {
     .select('*')
     .single();
 
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  if (error) return mapDbError(error);
   return NextResponse.json({ ok: true, entry: rowToEntry(data as Record<string, unknown>) });
 }

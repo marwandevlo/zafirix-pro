@@ -193,7 +193,12 @@ export async function middleware(request: NextRequest) {
     return NextResponse.next();
   }
 
-  if (process.env.NODE_ENV === 'production' && atlasDataBackend() !== 'supabase') {
+  if (
+    process.env.NODE_ENV === 'production' &&
+    process.env.ATLAS_E2E_LOCAL !== 'true' &&
+    process.env.NEXT_PUBLIC_ATLAS_E2E_LOCAL !== 'true' &&
+    atlasDataBackend() !== 'supabase'
+  ) {
     const url = request.nextUrl.clone();
     url.pathname = '/landing';
     url.searchParams.delete('next');
@@ -259,7 +264,13 @@ export async function middleware(request: NextRequest) {
   if (!user) {
     if (pathname.startsWith('/api/')) {
       return NextResponse.json(
-        { error: 'auth_required', code: 'auth_required', step: 'auth' },
+        {
+          ok: false,
+          error: 'auth_required',
+          message: 'Authentification requise.',
+          code: 'auth_required',
+          step: 'auth',
+        },
         { status: 401 },
       );
     }

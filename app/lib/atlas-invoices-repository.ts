@@ -62,33 +62,47 @@ export type ListAtlasInvoicesOptions = {
   companyId?: string | null;
 };
 
-export async function listAtlasInvoices(opts?: ListAtlasInvoicesOptions): Promise<AtlasInvoice[]> {
-  if (!isAtlasSupabaseDataEnabled()) return readInvoicesFromLocalStorage();
+export type ListAtlasInvoicesResult =
+  | { ok: true; invoices: AtlasInvoice[] }
+  | { ok: false; error: string };
+
+export async function listAtlasInvoicesResult(
+  opts?: ListAtlasInvoicesOptions,
+): Promise<ListAtlasInvoicesResult> {
+  if (!isAtlasSupabaseDataEnabled()) {
+    return { ok: true, invoices: readInvoicesFromLocalStorage() };
+  }
 
   const auth = await requireSupabaseUser();
-  if (!auth.ok) return [];
+  if (!auth.ok) return { ok: false, error: 'auth_required' };
 
   let companyId = opts?.companyId;
   if (companyId === undefined) {
     companyId = await getActiveCompanyDbRowId();
   }
-  if (!companyId) return [];
+  if (!companyId) return { ok: false, error: 'company_required' };
 
   const owned = await requireOwnedCompany(companyId);
-  if (!owned.ok) return [];
+  if (!owned.ok) return { ok: false, error: owned.error };
 
   const { data, error } = await supabase
     .from('atlas_invoices')
     .select('*')
-    .eq('company_id', companyId)
+    .eq('user_id', auth.userId)
+    .or(`company_id.eq.${companyId},company_id.is.null`)
     .order('issue_date', { ascending: false });
 
   if (error) {
     logAtlasServerEvent('atlas_invoices', 'error', 'list_failed', { message: error.message });
-    return [];
+    return { ok: false, error: 'list_failed' };
   }
 
-  return (data ?? []).map((row) => rowToInvoice(row as Record<string, unknown>));
+  return { ok: true, invoices: (data ?? []).map((row) => rowToInvoice(row as Record<string, unknown>)) };
+}
+
+export async function listAtlasInvoices(opts?: ListAtlasInvoicesOptions): Promise<AtlasInvoice[]> {
+  const result = await listAtlasInvoicesResult(opts);
+  return result.ok ? result.invoices : [];
 }
 
 export async function upsertAtlasInvoice(
@@ -199,6 +213,8 @@ export function atlasInvoiceErrorMessage(code: string): string {
       return 'Cette facture n’appartient pas à la société active.';
     case 'invalid_id':
       return 'Identifiant de facture invalide.';
+    case 'list_failed':
+      return 'Impossible de charger les factures. Vérifiez votre connexion ou réessayez.';
     default:
       return code || 'Une erreur est survenue. Réessayez.';
   }

@@ -1,5 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { requireAtlasSupabaseSession } from '@/app/lib/atlas-api-session';
+import { requireApiCompanyAccess } from '@/app/lib/atlas-api-company-guard';
+import {
+  apiBadRequest,
+  apiErrorMessageFr,
+  apiForbidden,
+  apiUnauthorized,
+  mapDbError,
+} from '@/app/lib/atlas-api-response';
 import { getSupabaseServiceRoleClient } from '@/app/lib/supabase-admin';
 
 export const runtime = 'nodejs';
@@ -25,26 +33,33 @@ function rowToDelivery(row: Record<string, unknown>) {
 
 export async function GET(request: NextRequest) {
   const session = await requireAtlasSupabaseSession(request);
-  if (!session.ok) return NextResponse.json({ error: 'auth_required' }, { status: 401 });
+  if (!session.ok) return apiUnauthorized();
 
   const companyId = new URL(request.url).searchParams.get('companyId');
-  if (!companyId) return NextResponse.json({ error: 'company_id_required' }, { status: 400 });
+  if (!companyId) return apiBadRequest('company_id_required', apiErrorMessageFr('company_id_required'));
 
   const admin = getSupabaseServiceRoleClient();
+  const access = await requireApiCompanyAccess(admin, session.userId, companyId);
+  if (!access.ok) return apiForbidden(apiErrorMessageFr(access.error));
+
   const { data, error } = await admin
     .from('zafirix_deliveries')
     .select('*')
-    .eq('company_id', companyId)
+    .eq('company_id', access.companyId)
+    .eq('user_id', session.userId)
     .order('created_at', { ascending: false })
     .limit(100);
 
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-  return NextResponse.json({ ok: true, deliveries: (data ?? []).map((r) => rowToDelivery(r as Record<string, unknown>)) });
+  if (error) return mapDbError(error, { deliveries: [] });
+  return NextResponse.json({
+    ok: true,
+    deliveries: (data ?? []).map((r) => rowToDelivery(r as Record<string, unknown>)),
+  });
 }
 
 export async function POST(request: NextRequest) {
   const session = await requireAtlasSupabaseSession(request);
-  if (!session.ok) return NextResponse.json({ error: 'auth_required' }, { status: 401 });
+  if (!session.ok) return apiUnauthorized();
 
   const body = (await request.json()) as {
     companyId?: string;
@@ -58,15 +73,18 @@ export async function POST(request: NextRequest) {
   };
 
   if (!body.companyId || !body.waybillNumber) {
-    return NextResponse.json({ error: 'missing_fields' }, { status: 400 });
+    return apiBadRequest('missing_fields', apiErrorMessageFr('missing_fields'));
   }
 
   const admin = getSupabaseServiceRoleClient();
+  const access = await requireApiCompanyAccess(admin, session.userId, body.companyId);
+  if (!access.ok) return apiForbidden(apiErrorMessageFr(access.error));
+
   const { data, error } = await admin
     .from('zafirix_deliveries')
     .insert({
       user_id: session.userId,
-      company_id: body.companyId,
+      company_id: access.companyId,
       invoice_id: body.invoiceId ?? null,
       waybill_number: body.waybillNumber,
       carrier: body.carrier ?? null,
@@ -79,13 +97,13 @@ export async function POST(request: NextRequest) {
     .select('*')
     .single();
 
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  if (error) return mapDbError(error);
   return NextResponse.json({ ok: true, delivery: rowToDelivery(data as Record<string, unknown>) });
 }
 
 export async function PATCH(request: NextRequest) {
   const session = await requireAtlasSupabaseSession(request);
-  if (!session.ok) return NextResponse.json({ error: 'auth_required' }, { status: 401 });
+  if (!session.ok) return apiUnauthorized();
 
   const body = (await request.json()) as {
     id?: string;
@@ -93,7 +111,7 @@ export async function PATCH(request: NextRequest) {
     codCollected?: number;
   };
 
-  if (!body.id) return NextResponse.json({ error: 'missing_id' }, { status: 400 });
+  if (!body.id) return apiBadRequest('missing_fields', apiErrorMessageFr('missing_fields'));
 
   const admin = getSupabaseServiceRoleClient();
   const patch: Record<string, unknown> = { updated_at: new Date().toISOString() };
@@ -111,6 +129,6 @@ export async function PATCH(request: NextRequest) {
     .select('*')
     .single();
 
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  if (error) return mapDbError(error);
   return NextResponse.json({ ok: true, delivery: rowToDelivery(data as Record<string, unknown>) });
 }

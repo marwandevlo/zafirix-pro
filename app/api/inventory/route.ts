@@ -1,5 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { requireAtlasSupabaseSession } from '@/app/lib/atlas-api-session';
+import { requireApiCompanyAccess } from '@/app/lib/atlas-api-company-guard';
+import {
+  apiBadRequest,
+  apiErrorMessageFr,
+  apiForbidden,
+  apiUnauthorized,
+  mapDbError,
+} from '@/app/lib/atlas-api-response';
 import { getSupabaseServiceRoleClient } from '@/app/lib/supabase-admin';
 
 export const runtime = 'nodejs';
@@ -7,29 +15,36 @@ export const dynamic = 'force-dynamic';
 
 export async function GET(request: NextRequest) {
   const session = await requireAtlasSupabaseSession(request);
-  if (!session.ok) return NextResponse.json({ error: 'auth_required' }, { status: 401 });
+  if (!session.ok) return apiUnauthorized();
 
   const companyId = new URL(request.url).searchParams.get('companyId');
-  if (!companyId) return NextResponse.json({ error: 'company_id_required' }, { status: 400 });
+  if (!companyId) return apiBadRequest('company_id_required', apiErrorMessageFr('company_id_required'));
 
   const admin = getSupabaseServiceRoleClient();
+  const access = await requireApiCompanyAccess(admin, session.userId, companyId);
+  if (!access.ok) return apiForbidden(apiErrorMessageFr(access.error));
 
-  const [{ data: stores }, { data: items }] = await Promise.all([
-    admin.from('zafirix_stores').select('*').eq('company_id', companyId).order('name'),
-    admin.from('zafirix_inventory_items').select('*').eq('company_id', companyId).order('name'),
+  const [{ data: stores, error: storesErr }, { data: items, error: itemsErr }] = await Promise.all([
+    admin.from('zafirix_stores').select('*').eq('company_id', access.companyId).eq('user_id', session.userId).order('name'),
+    admin.from('zafirix_inventory_items').select('*').eq('company_id', access.companyId).eq('user_id', session.userId).order('name'),
   ]);
+
+  if (storesErr) return mapDbError(storesErr);
+  if (itemsErr) return mapDbError(itemsErr);
 
   const storeIds = (stores ?? []).map((s) => s.id);
   let stock: Record<string, unknown>[] = [];
   if (storeIds.length > 0) {
-    const { data: stockData } = await admin
+    const { data: stockData, error: stockErr } = await admin
       .from('zafirix_inventory_stock')
       .select('*, zafirix_stores(name), zafirix_inventory_items(sku, name, reorder_level, unit)')
-      .in('store_id', storeIds);
+      .in('store_id', storeIds)
+      .eq('user_id', session.userId);
+    if (stockErr) return mapDbError(stockErr, { stores: stores ?? [], items: items ?? [], stock: [], lowStockCount: 0 });
     stock = stockData ?? [];
   }
 
-  const stockRows = (stock ?? []).map((s: Record<string, unknown>) => {
+  const stockRows = stock.map((s: Record<string, unknown>) => {
     const store = s.zafirix_stores as { name?: string } | null;
     const item = s.zafirix_inventory_items as { sku?: string; name?: string; reorder_level?: number; unit?: string } | null;
     const qty = Number(s.quantity ?? 0);
@@ -71,7 +86,7 @@ export async function GET(request: NextRequest) {
 
 export async function POST(request: NextRequest) {
   const session = await requireAtlasSupabaseSession(request);
-  if (!session.ok) return NextResponse.json({ error: 'auth_required' }, { status: 401 });
+  if (!session.ok) return apiUnauthorized();
 
   const body = (await request.json()) as {
     action?: 'create_store' | 'create_item' | 'adjust_stock';
@@ -88,22 +103,22 @@ export async function POST(request: NextRequest) {
   };
 
   const admin = getSupabaseServiceRoleClient();
-  const companyId = body.companyId;
-  if (!companyId) return NextResponse.json({ error: 'company_id_required' }, { status: 400 });
+  const access = await requireApiCompanyAccess(admin, session.userId, body.companyId);
+  if (!access.ok) return apiForbidden(apiErrorMessageFr(access.error));
 
   if (body.action === 'create_store' && body.name) {
     const { data, error } = await admin
       .from('zafirix_stores')
       .insert({
         user_id: session.userId,
-        company_id: companyId,
+        company_id: access.companyId,
         name: body.name,
         code: body.code ?? body.name.slice(0, 6).toUpperCase(),
         address: body.address ?? null,
       })
       .select('id, name, code')
       .single();
-    if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+    if (error) return mapDbError(error);
     return NextResponse.json({ ok: true, store: data });
   }
 
@@ -112,7 +127,7 @@ export async function POST(request: NextRequest) {
       .from('zafirix_inventory_items')
       .insert({
         user_id: session.userId,
-        company_id: companyId,
+        company_id: access.companyId,
         sku: body.sku,
         name: body.name,
         unit: body.unit ?? 'unité',
@@ -120,7 +135,7 @@ export async function POST(request: NextRequest) {
       })
       .select('id, sku, name')
       .single();
-    if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+    if (error) return mapDbError(error);
     return NextResponse.json({ ok: true, item: data });
   }
 
@@ -130,7 +145,7 @@ export async function POST(request: NextRequest) {
       .upsert(
         {
           user_id: session.userId,
-          company_id: companyId,
+          company_id: access.companyId,
           store_id: body.storeId,
           item_id: body.itemId,
           quantity: body.quantity,
@@ -140,9 +155,9 @@ export async function POST(request: NextRequest) {
       )
       .select('id, quantity')
       .single();
-    if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+    if (error) return mapDbError(error);
     return NextResponse.json({ ok: true, stock: data });
   }
 
-  return NextResponse.json({ error: 'invalid_action' }, { status: 400 });
+  return apiBadRequest('invalid_action', apiErrorMessageFr('invalid_action'));
 }

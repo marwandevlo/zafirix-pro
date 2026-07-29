@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { Bell, Loader2, RefreshCw } from 'lucide-react';
 import { getActiveCompanyDbRowId } from '@/app/lib/atlas-active-company';
 import { onCompanySwitched } from '@/app/lib/atlas-company-switch-event';
+import { fetchEnterpriseModule, ModuleLoadErrorBanner } from '@/app/lib/use-enterprise-module-fetch';
 import { NOTIFICATION_CATEGORY_LABELS } from '@/app/lib/atlas-notifications-engine';
 import type { NotificationCategory } from '@/app/types/atlas-enterprise-modules';
 
@@ -24,20 +25,26 @@ type Props = {
 export function NotificationCenterWidget({ compact = false, onUnreadChange }: Props) {
   const [notifications, setNotifications] = useState<NotificationRow[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [dispatching, setDispatching] = useState(false);
 
   const load = useCallback(async (companyId?: string | null) => {
     setLoading(true);
-    try {
-      const qs = companyId ? `?companyId=${encodeURIComponent(companyId)}&limit=30` : '?limit=30';
-      const res = await fetch(`/api/notifications${qs}`, { credentials: 'include' });
-      if (!res.ok) return;
-      const data = await res.json() as { notifications?: NotificationRow[]; unreadCount?: number };
-      setNotifications(data.notifications ?? []);
-      onUnreadChange?.(data.unreadCount ?? 0);
-    } finally {
-      setLoading(false);
+    setLoadError(null);
+    const qs = companyId ? `?companyId=${encodeURIComponent(companyId)}&limit=30` : '?limit=30';
+    const result = await fetchEnterpriseModule<{ notifications?: NotificationRow[]; unreadCount?: number }>(
+      `/api/notifications${qs}`,
+    );
+    if (!result.ok) {
+      setLoadError(result.error);
+      setNotifications([]);
+      onUnreadChange?.(0);
+    } else {
+      setNotifications(result.data.notifications ?? []);
+      onUnreadChange?.(result.data.unreadCount ?? 0);
+      if (result.warning) setLoadError(result.warning);
     }
+    setLoading(false);
   }, [onUnreadChange]);
 
   useEffect(() => {
@@ -79,6 +86,10 @@ export function NotificationCenterWidget({ compact = false, onUnreadChange }: Pr
           <RefreshCw size={12} className={dispatching ? 'animate-spin' : ''} />
           Scanner
         </button>
+      </div>
+
+      <div className="px-4 pt-3">
+        <ModuleLoadErrorBanner message={loadError} onDismiss={() => setLoadError(null)} />
       </div>
 
       {loading ? (

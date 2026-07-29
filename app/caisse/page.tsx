@@ -7,6 +7,11 @@ import { BetaSurfaceBadge } from '@/app/components/safety/BetaSurfaceBadge';
 import { RowShareActionBar } from '@/app/components/share';
 import { getActiveCompanyDbRowId } from '@/app/lib/atlas-active-company';
 import { onCompanySwitched } from '@/app/lib/atlas-company-switch-event';
+import {
+  fetchEnterpriseModule,
+  ModuleLoadErrorBanner,
+  ModuleNoCompanyState,
+} from '@/app/lib/use-enterprise-module-fetch';
 
 type Entry = {
   id: string;
@@ -36,20 +41,26 @@ export default function CaissePage() {
   const [entries, setEntries] = useState<Entry[]>([]);
   const [balance, setBalance] = useState(0);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [showForm, setShowForm] = useState(false);
   const [form, setForm] = useState({ entryType: 'expense', amount: '', beneficiary: '', purpose: '' });
 
   const load = useCallback(async (cid: string) => {
     setLoading(true);
-    try {
-      const res = await fetch(`/api/petty-cash?companyId=${encodeURIComponent(cid)}`, { credentials: 'include' });
-      if (!res.ok) return;
-      const data = await res.json() as { entries?: Entry[]; balance?: number };
-      setEntries(data.entries ?? []);
-      setBalance(data.balance ?? 0);
-    } finally {
-      setLoading(false);
+    setLoadError(null);
+    const result = await fetchEnterpriseModule<{ entries?: Entry[]; balance?: number }>(
+      `/api/petty-cash?companyId=${encodeURIComponent(cid)}`,
+    );
+    if (!result.ok) {
+      setLoadError(result.error);
+      setEntries([]);
+      setBalance(0);
+    } else {
+      setEntries(result.data.entries ?? []);
+      setBalance(result.data.balance ?? 0);
+      if (result.warning) setLoadError(result.warning);
     }
+    setLoading(false);
   }, []);
 
   useEffect(() => {
@@ -104,6 +115,12 @@ export default function CaissePage() {
               <Plus size={14} /> Nouvelle écriture
             </button>
           </div>
+
+          <ModuleLoadErrorBanner message={loadError} onDismiss={() => setLoadError(null)} />
+
+          {!companyId && !loading && (
+            <ModuleNoCompanyState moduleLabel="la caisse" />
+          )}
 
           <div className="bg-gradient-to-br from-[#1B2A4A] to-[#0F1F3D] rounded-xl p-6 text-white shadow-lg">
             <div className="flex items-center gap-2 mb-2"><Wallet size={20} /><span className="text-sm opacity-80">Solde caisse</span></div>

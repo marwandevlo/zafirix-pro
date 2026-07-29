@@ -8,6 +8,11 @@ import { RowShareActionBar } from '@/app/components/share';
 import { openWhatsAppShare } from '@/app/lib/atlas-quick-share';
 import { getActiveCompanyDbRowId } from '@/app/lib/atlas-active-company';
 import { onCompanySwitched } from '@/app/lib/atlas-company-switch-event';
+import {
+  fetchEnterpriseModule,
+  ModuleLoadErrorBanner,
+  ModuleNoCompanyState,
+} from '@/app/lib/use-enterprise-module-fetch';
 
 type DebtCase = {
   id: string;
@@ -34,19 +39,25 @@ export default function RecouvrementPage() {
   const [cases, setCases] = useState<DebtCase[]>([]);
   const [totalDue, setTotalDue] = useState(0);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [syncing, setSyncing] = useState(false);
 
   const load = useCallback(async (cid: string) => {
     setLoading(true);
-    try {
-      const res = await fetch(`/api/debt-collection?companyId=${encodeURIComponent(cid)}`, { credentials: 'include' });
-      if (!res.ok) return;
-      const data = await res.json() as { cases?: DebtCase[]; totalDue?: number };
-      setCases(data.cases ?? []);
-      setTotalDue(data.totalDue ?? 0);
-    } finally {
-      setLoading(false);
+    setLoadError(null);
+    const result = await fetchEnterpriseModule<{ cases?: DebtCase[]; totalDue?: number }>(
+      `/api/debt-collection?companyId=${encodeURIComponent(cid)}`,
+    );
+    if (!result.ok) {
+      setLoadError(result.error);
+      setCases([]);
+      setTotalDue(0);
+    } else {
+      setCases(result.data.cases ?? []);
+      setTotalDue(result.data.totalDue ?? 0);
+      if (result.warning) setLoadError(result.warning);
     }
+    setLoading(false);
   }, []);
 
   useEffect(() => {
@@ -123,6 +134,12 @@ export default function RecouvrementPage() {
               <RefreshCw size={14} className={syncing ? 'animate-spin' : ''} /> Importer impayés
             </button>
           </div>
+
+          <ModuleLoadErrorBanner message={loadError} onDismiss={() => setLoadError(null)} />
+
+          {!companyId && !loading && (
+            <ModuleNoCompanyState moduleLabel="le recouvrement" />
+          )}
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div className="bg-white rounded-xl border p-4 shadow-sm">

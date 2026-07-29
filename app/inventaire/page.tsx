@@ -7,6 +7,11 @@ import { BetaSurfaceBadge } from '@/app/components/safety/BetaSurfaceBadge';
 import { RowShareActionBar } from '@/app/components/share';
 import { getActiveCompanyDbRowId } from '@/app/lib/atlas-active-company';
 import { onCompanySwitched } from '@/app/lib/atlas-company-switch-event';
+import {
+  fetchEnterpriseModule,
+  ModuleLoadErrorBanner,
+  ModuleNoCompanyState,
+} from '@/app/lib/use-enterprise-module-fetch';
 
 type StoreRow = { id: string; name: string; code: string; address: string | null; isActive: boolean };
 type ItemRow = { id: string; sku: string; name: string; unit: string; reorderLevel: number };
@@ -22,6 +27,7 @@ export default function InventairePage() {
   const [stock, setStock] = useState<StockRow[]>([]);
   const [lowStockCount, setLowStockCount] = useState(0);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [showStoreForm, setShowStoreForm] = useState(false);
   const [showItemForm, setShowItemForm] = useState(false);
   const [newStore, setNewStore] = useState({ name: '', code: '', address: '' });
@@ -29,17 +35,27 @@ export default function InventairePage() {
 
   const load = useCallback(async (cid: string) => {
     setLoading(true);
-    try {
-      const res = await fetch(`/api/inventory?companyId=${encodeURIComponent(cid)}`, { credentials: 'include' });
-      if (!res.ok) return;
-      const data = await res.json() as { stores?: StoreRow[]; items?: ItemRow[]; stock?: StockRow[]; lowStockCount?: number };
-      setStores(data.stores ?? []);
-      setItems(data.items ?? []);
-      setStock(data.stock ?? []);
-      setLowStockCount(data.lowStockCount ?? 0);
-    } finally {
-      setLoading(false);
+    setLoadError(null);
+    const result = await fetchEnterpriseModule<{
+      stores?: StoreRow[];
+      items?: ItemRow[];
+      stock?: StockRow[];
+      lowStockCount?: number;
+    }>(`/api/inventory?companyId=${encodeURIComponent(cid)}`);
+    if (!result.ok) {
+      setLoadError(result.error);
+      setStores([]);
+      setItems([]);
+      setStock([]);
+      setLowStockCount(0);
+    } else {
+      setStores(result.data.stores ?? []);
+      setItems(result.data.items ?? []);
+      setStock(result.data.stock ?? []);
+      setLowStockCount(result.data.lowStockCount ?? 0);
+      if (result.warning) setLoadError(result.warning);
     }
+    setLoading(false);
   }, []);
 
   useEffect(() => {
@@ -112,6 +128,12 @@ export default function InventairePage() {
               </button>
             </div>
           </div>
+
+          <ModuleLoadErrorBanner message={loadError} onDismiss={() => setLoadError(null)} />
+
+          {!companyId && !loading && (
+            <ModuleNoCompanyState moduleLabel="l'inventaire" />
+          )}
 
           {lowStockCount > 0 && (
             <div className="flex items-center gap-2 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
@@ -206,7 +228,17 @@ export default function InventairePage() {
                             <td className="px-4 py-2 text-right">{item.reorderLevel}</td>
                             <td className="px-4 py-2">—</td>
                             <td className="px-4 py-2">
-                              <button type="button" onClick={() => void adjustStock(store.id, item.id, 0)} className="text-xs text-blue-600 hover:underline">Initialiser</button>
+                              <div className="flex items-center gap-1.5 justify-end flex-wrap">
+                                <button type="button" onClick={() => void adjustStock(store.id, item.id, 0)} className="text-xs text-blue-600 hover:underline shrink-0">Initialiser</button>
+                                <RowShareActionBar
+                                  entityLabel={`${item.name} — ${store.name}`}
+                                  whatsAppMessage={`Stock Zafirix Pro\n${item.name} (${item.sku}) — ${store.name}\nQuantité non initialisée (seuil: ${item.reorderLevel})`}
+                                  mailto={{
+                                    subject: `Stock — ${item.sku}`,
+                                    body: `${item.name} @ ${store.name}\nStock à initialiser.\nSeuil: ${item.reorderLevel}`,
+                                  }}
+                                />
+                              </div>
                             </td>
                           </tr>
                         );

@@ -10,7 +10,7 @@ import { exportInvoiceFormat, INVOICE_EXPORT_FORMATS } from '@/app/lib/atlas-inv
 import type { ExportFormat } from '@/app/lib/atlas-export-engine';
 import { useRouter } from 'next/navigation';
 import { addDaysYmd, isOverdue, todayYmd } from '@/app/lib/atlas-dates';
-import { deleteAtlasInvoice, atlasInvoiceErrorMessage, listAtlasInvoices, upsertAtlasInvoice } from '@/app/lib/atlas-invoices-repository';
+import { deleteAtlasInvoice, atlasInvoiceErrorMessage, listAtlasInvoices, listAtlasInvoicesResult, upsertAtlasInvoice } from '@/app/lib/atlas-invoices-repository';
 import type { AtlasInvoice } from '@/app/types/atlas-invoice';
 import type { AtlasPaymentTerms, AtlasPaymentTermsPreset } from '@/app/types/atlas-payment-terms';
 import { normalizePaymentTerms, paymentTermsLabel } from '@/app/types/atlas-payment-terms';
@@ -36,6 +36,7 @@ import { SourceDocumentBadge } from '@/app/components/SourceDocumentBadge';
 import { ExportMenu } from '@/app/components/ExportMenu';
 import type { ExportColumn } from '@/app/components/ExportMenu';
 import { EntityAuditTable } from '@/app/components/history/EntityAuditTable';
+import { ModuleLoadErrorBanner } from '@/app/lib/use-enterprise-module-fetch';
 
 const FACTURE_EXPORT_COLUMNS: ExportColumn[] = [
   { key: 'numero', label: 'Numéro' },
@@ -75,6 +76,7 @@ export default function FacturesPage() {
   const [activeTab, setActiveTab] = useState<'liste' | 'historique'>('liste');
   const [insight, setInsight] = useState<{ loading: boolean; text: string }>({ loading: false, text: '' });
   const [limitNotice, setLimitNotice] = useState('');
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [limitModal, setLimitModal] = useState<{ open: boolean; variant: 'warning' | 'blocked'; title: string; desc: string }>({
     open: false,
     variant: 'warning',
@@ -97,9 +99,16 @@ export default function FacturesPage() {
       if (isAtlasSupabaseDataEnabled()) {
         await refreshAtlasUsageState();
       }
-      const inv = await listAtlasInvoices();
-      setInvoices(inv);
-      syncInvoiceUsageCount(inv.length);
+      const invResult = await listAtlasInvoicesResult();
+      if (!invResult.ok) {
+        setLoadError(atlasInvoiceErrorMessage(invResult.error));
+        setInvoices([]);
+        syncInvoiceUsageCount(0);
+      } else {
+        setLoadError(null);
+        setInvoices(invResult.invoices);
+        syncInvoiceUsageCount(invResult.invoices.length);
+      }
 
       const pay = await listAtlasPayments();
       setPayments(pay);
@@ -555,6 +564,10 @@ export default function FacturesPage() {
           </button>
         </header>
 
+        <div className="shrink-0 px-8 pt-4">
+          <ModuleLoadErrorBanner message={loadError} onDismiss={() => setLoadError(null)} />
+        </div>
+
         <div className="shrink-0 px-8 pt-6 space-y-4">
           <div className="grid grid-cols-4 gap-4">
             <div className="bg-white rounded-2xl p-5 shadow-sm border border-gray-100 hover:shadow-md transition-shadow">
@@ -848,7 +861,7 @@ export default function FacturesPage() {
                     </td>
                     <td className="px-4 py-3">
                       <div className="flex items-center gap-1.5 justify-end flex-wrap min-w-0">
-                      <RowShareActionBar
+                        <RowShareActionBar
                         entityLabel={`Facture ${f.numero}`}
                         whatsAppMessage={invoiceShareMessage(f.numero, f.client, f.ttc)}
                         exportFormats={INVOICE_EXPORT_FORMATS}

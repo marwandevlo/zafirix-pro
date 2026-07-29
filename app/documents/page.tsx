@@ -1497,14 +1497,14 @@ export default function DocumentsPage() {
                               </button>
                             )
                           )}
-                          {supabaseMode && d.supabaseId && d.statut === 'analysé' && (
+                          {supabaseMode && d.supabaseId && (
                             <RowShareActionBar
                               entityLabel={d.nom}
                               whatsAppMessage={`Bonjour,\n\nDocument « ${d.nom} » disponible sur Zafirix Pro.\n${typeof window !== 'undefined' ? window.location.origin : ''}/documents`}
                               documentId={d.supabaseId}
-                              exportFormats={['pdf', 'xlsx', 'docx', 'xml']}
-                              menuExtraExportFormats={['zip']}
-                              onExport={(fmt) => downloadDocumentExport(d.supabaseId!, fmt)}
+                              exportFormats={d.statut === 'analysé' ? ['pdf', 'xlsx', 'docx', 'xml'] : undefined}
+                              menuExtraExportFormats={d.statut === 'analysé' ? ['zip'] : undefined}
+                              onExport={d.statut === 'analysé' ? (fmt) => downloadDocumentExport(d.supabaseId!, fmt) : undefined}
                               onSendEmail={() => setEmailModalDocId(d.supabaseId!)}
                               mailto={{
                                 subject: `Document — ${d.nom}`,

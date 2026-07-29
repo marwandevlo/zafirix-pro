@@ -9,7 +9,9 @@
     "lint": "eslint",
     "generate:icons": "node scripts/generate-zafirix-icons.mjs",
     "apply:routing-migration": "node scripts/apply-routing-migration.mjs",
-    "verify:production": "node scripts/verify-production-readiness.mjs"
+    "verify:production": "node scripts/verify-production-readiness.mjs",
+    "test:e2e": "playwright test",
+    "test:e2e:ui": "playwright test --ui"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.90.0",
@@ -37,6 +39,7 @@
     "xlsx": "^0.18.5"
   },
   "devDependencies": {
+    "@playwright/test": "^1.62.0",
     "@tailwindcss/postcss": "^4",
     "@types/node": "^20",
     "@types/react": "^19",

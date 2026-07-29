@@ -112,7 +112,7 @@ export async function requireOwnedInvoice(
     return { ok: false, error: 'invoice_not_found_or_forbidden' };
   }
 
-  if (companyId && data.company_id !== companyId) {
+  if (companyId && data.company_id && data.company_id !== companyId) {
     return { ok: false, error: 'invoice_company_mismatch' };
   }
 
@@ -138,7 +138,10 @@ export async function requireClientInCompany(
     .eq('user_id', auth.userId)
     .maybeSingle();
 
-  if (error || !data?.id || data.company_id !== companyId) {
+  if (error || !data?.id) {
+    return { ok: false, error: 'client_not_found_or_forbidden' };
+  }
+  if (data.company_id && data.company_id !== companyId) {
     return { ok: false, error: 'client_company_mismatch' };
   }
 

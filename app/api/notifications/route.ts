@@ -1,5 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { requireAtlasSupabaseSession } from '@/app/lib/atlas-api-session';
+import { requireApiCompanyAccess } from '@/app/lib/atlas-api-company-guard';
+import {
+  apiBadRequest,
+  apiErrorMessageFr,
+  apiForbidden,
+  apiUnauthorized,
+  mapDbError,
+} from '@/app/lib/atlas-api-response';
 import { getSupabaseServiceRoleClient } from '@/app/lib/supabase-admin';
 import { runNotificationDispatchers } from '@/app/lib/atlas-notifications-engine';
 
@@ -25,13 +33,19 @@ function rowToNotification(row: Record<string, unknown>) {
 
 export async function GET(request: NextRequest) {
   const session = await requireAtlasSupabaseSession(request);
-  if (!session.ok) return NextResponse.json({ error: 'auth_required' }, { status: 401 });
+  if (!session.ok) return apiUnauthorized();
 
   const { searchParams } = new URL(request.url);
   const companyId = searchParams.get('companyId');
   const limit = Math.min(100, parseInt(searchParams.get('limit') ?? '50', 10));
 
   const admin = getSupabaseServiceRoleClient();
+
+  if (companyId) {
+    const access = await requireApiCompanyAccess(admin, session.userId, companyId);
+    if (!access.ok) return apiForbidden(apiErrorMessageFr(access.error));
+  }
+
   let query = admin
     .from('zafirix_notifications')
     .select('*')
@@ -42,7 +56,7 @@ export async function GET(request: NextRequest) {
   if (companyId) query = query.eq('company_id', companyId);
 
   const { data, error } = await query;
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  if (error) return mapDbError(error, { notifications: [], unreadCount: 0 });
 
   const notifications = (data ?? []).map((r) => rowToNotification(r as Record<string, unknown>));
   const unread = notifications.filter((n) => n.status === 'sent').length;
@@ -52,7 +66,7 @@ export async function GET(request: NextRequest) {
 
 export async function POST(request: NextRequest) {
   const session = await requireAtlasSupabaseSession(request);
-  if (!session.ok) return NextResponse.json({ error: 'auth_required' }, { status: 401 });
+  if (!session.ok) return apiUnauthorized();
 
   const body = (await request.json()) as {
     action?: 'dispatch_all';
@@ -60,10 +74,13 @@ export async function POST(request: NextRequest) {
   };
 
   if (body.action !== 'dispatch_all' || !body.companyId) {
-    return NextResponse.json({ error: 'invalid_body' }, { status: 400 });
+    return apiBadRequest('invalid_action', apiErrorMessageFr('invalid_action'));
   }
 
   const admin = getSupabaseServiceRoleClient();
-  const counts = await runNotificationDispatchers(admin, session.userId, body.companyId);
+  const access = await requireApiCompanyAccess(admin, session.userId, body.companyId);
+  if (!access.ok) return apiForbidden(apiErrorMessageFr(access.error));
+
+  const counts = await runNotificationDispatchers(admin, session.userId, access.companyId);
   return NextResponse.json({ ok: true, counts });
 }
