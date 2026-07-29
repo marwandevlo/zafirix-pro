@@ -24,19 +24,27 @@ import {
   EXPORT_LABELS,
   type ExportFormat,
 } from '@/app/lib/atlas-export-engine';
+import { DriveSyncBadge, type DriveSyncState } from '@/app/components/share/DriveSyncBadge';
 
 export type QuickShareHubProps = {
   entityLabel: string;
   documentId?: string;
   exportFormats?: ExportFormat[];
+  /** Custom export handler (e.g. invoices without document API). */
+  onExport?: (format: ExportFormat) => void | Promise<void>;
   onSendEmail?: () => void;
   whatsAppMessage?: string;
   onDownloadPdf?: () => void;
+  /** Custom secure link copy (invoices / reports). */
+  onCopySecureLink?: () => void | Promise<void>;
   disabled?: boolean;
   className?: string;
+  /** Persisted Drive status from parent row state. */
+  driveSyncStatus?: DriveSyncState;
+  onDriveSyncStatusChange?: (status: DriveSyncState) => void;
 };
 
-type DriveStatus = 'idle' | 'syncing' | 'synced' | 'failed';
+type LocalDriveStatus = DriveSyncState;
 
 const DEFAULT_EXPORT_FORMATS: ExportFormat[] = ['pdf', 'xlsx', 'docx', 'xml'];
 
@@ -44,18 +52,31 @@ export function QuickShareHub({
   entityLabel,
   documentId,
   exportFormats = DEFAULT_EXPORT_FORMATS,
+  onExport,
   onSendEmail,
   whatsAppMessage,
   onDownloadPdf,
+  onCopySecureLink,
   disabled = false,
   className = '',
+  driveSyncStatus = 'idle',
+  onDriveSyncStatusChange,
 }: QuickShareHubProps) {
   const [open, setOpen] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
-  const [driveStatus, setDriveStatus] = useState<DriveStatus>('idle');
+  const [localDrive, setLocalDrive] = useState<LocalDriveStatus>(driveSyncStatus);
   const triggerRef = useRef<HTMLButtonElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
   const [coords, setCoords] = useState<{ top: number; left: number } | null>(null);
+
+  useEffect(() => {
+    setLocalDrive(driveSyncStatus);
+  }, [driveSyncStatus]);
+
+  const setDrive = (status: LocalDriveStatus) => {
+    setLocalDrive(status);
+    onDriveSyncStatusChange?.(status);
+  };
 
   const close = useCallback(() => setOpen(false), []);
 
@@ -72,13 +93,13 @@ export function QuickShareHub({
     const rect = trigger.getBoundingClientRect();
     const menuRect = menu.getBoundingClientRect();
     let top = rect.bottom + 6;
-    let left = rect.right - menuRect.width;
+    let left = rect.right - Math.min(menuRect.width, 240);
     if (top + menuRect.height > window.innerHeight - 8) {
       top = Math.max(8, rect.top - menuRect.height - 6);
     }
-    left = Math.max(8, Math.min(left, window.innerWidth - menuRect.width - 8));
+    left = Math.max(8, Math.min(left, window.innerWidth - 240 - 8));
     setCoords({ top, left });
-  }, [open]);
+  }, [open, exportFormats.length]);
 
   useEffect(() => {
     if (!open) return;
@@ -92,9 +113,28 @@ export function QuickShareHub({
         close();
       }
     };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') close();
+    };
     document.addEventListener('mousedown', onDoc);
-    return () => document.removeEventListener('mousedown', onDoc);
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('mousedown', onDoc);
+      document.removeEventListener('keydown', onKey);
+    };
   }, [open, close]);
+
+  const handleExport = async (fmt: ExportFormat) => {
+    if (onExport) {
+      await onExport(fmt);
+    } else if (documentId) {
+      downloadAuthenticatedExport(documentId, fmt);
+    } else if (fmt === 'pdf' && onDownloadPdf) {
+      onDownloadPdf();
+    }
+    close();
+    flash(`${EXPORT_LABELS[fmt]} téléchargé`);
+  };
 
   const handleWhatsApp = async () => {
     close();
@@ -107,17 +147,22 @@ export function QuickShareHub({
       openWhatsAppShare(message ?? `Document Zafirix Pro : ${entityLabel}`);
       flash('WhatsApp ouvert');
     } catch {
-      openWhatsAppShare(`Document Zafirix Pro : ${entityLabel}`);
+      openWhatsAppShare(whatsAppMessage ?? `Document Zafirix Pro : ${entityLabel}`);
     }
   };
 
   const handleCopyLink = async () => {
     close();
-    if (!documentId) {
-      flash('Lien indisponible');
-      return;
-    }
     try {
+      if (onCopySecureLink) {
+        await onCopySecureLink();
+        flash('Lien sécurisé copié');
+        return;
+      }
+      if (!documentId) {
+        flash('Lien indisponible');
+        return;
+      }
       await copyDocumentShareLink(documentId, entityLabel);
       flash('Lien sécurisé copié (7 jours)');
     } catch {
@@ -127,29 +172,23 @@ export function QuickShareHub({
 
   const handleDriveBackup = async () => {
     if (!documentId) return;
-    setDriveStatus('syncing');
+    setDrive('syncing');
     const result = await backupDocumentToDrive(documentId, 'pdf');
     if (result.ok) {
-      setDriveStatus('synced');
+      setDrive('synced');
       flash('Sauvegardé sur Google Drive');
     } else if (result.localFallback) {
-      setDriveStatus('failed');
+      setDrive('local_fallback');
       flash(result.message ?? 'Téléchargement local lancé');
     } else {
-      setDriveStatus('failed');
+      setDrive('local_fallback');
       flash(result.message ?? 'Sauvegarde échouée');
     }
     close();
   };
 
-  const driveBadge =
-    driveStatus === 'syncing' ? (
-      <Loader2 size={10} className="animate-spin text-blue-500" />
-    ) : driveStatus === 'synced' ? (
-      <span className="w-1.5 h-1.5 rounded-full bg-green-500" title="Synchronisé" />
-    ) : driveStatus === 'failed' ? (
-      <span className="w-1.5 h-1.5 rounded-full bg-amber-500" title="Fallback local" />
-    ) : null;
+  const showExports = onExport || documentId || onDownloadPdf;
+  const showCopyLink = onCopySecureLink || documentId;
 
   const menu = open ? (
     <div
@@ -160,37 +199,30 @@ export function QuickShareHub({
         left: coords?.left ?? -9999,
         visibility: coords ? 'visible' : 'hidden',
       }}
-      className="fixed z-[200] w-56 rounded-xl border border-gray-200 bg-white shadow-lg py-1"
+      className="fixed z-[200] w-[min(100vw-1rem,15rem)] sm:w-60 max-h-[min(70vh,24rem)] overflow-y-auto rounded-xl border border-gray-200 bg-white shadow-lg py-1"
     >
-      <p className="px-3 py-2 text-[10px] font-semibold uppercase tracking-wide text-gray-400 border-b border-gray-100">
+      <p className="px-3 py-2 text-[10px] font-semibold uppercase tracking-wide text-gray-400 border-b border-gray-100 sticky top-0 bg-white">
         Partager &amp; exporter
       </p>
 
-      {onDownloadPdf && (
+      {onDownloadPdf && !onExport && (
         <button
           type="button"
           role="menuitem"
-          onClick={() => {
-            onDownloadPdf();
-            close();
-          }}
+          onClick={() => void handleExport('pdf')}
           className="w-full flex items-center gap-2.5 px-3 py-2 text-sm text-gray-700 hover:bg-gray-50"
         >
           <Download size={14} /> Télécharger PDF
         </button>
       )}
 
-      {documentId &&
+      {showExports &&
         exportFormats.map((fmt) => (
           <button
             key={fmt}
             type="button"
             role="menuitem"
-            onClick={() => {
-              downloadAuthenticatedExport(documentId, fmt);
-              close();
-              flash(`${EXPORT_LABELS[fmt]} téléchargé`);
-            }}
+            onClick={() => void handleExport(fmt)}
             className="w-full flex items-center gap-2.5 px-3 py-2 text-sm text-gray-700 hover:bg-gray-50"
           >
             {fmt === 'xlsx' ? <FileSpreadsheet size={14} /> : <FileText size={14} />}
@@ -223,7 +255,7 @@ export function QuickShareHub({
         </button>
       )}
 
-      {documentId && (
+      {showCopyLink && (
         <button
           type="button"
           role="menuitem"
@@ -239,23 +271,23 @@ export function QuickShareHub({
           type="button"
           role="menuitem"
           onClick={() => void handleDriveBackup()}
-          disabled={driveStatus === 'syncing'}
+          disabled={localDrive === 'syncing'}
           className="w-full flex items-center gap-2.5 px-3 py-2 text-sm text-blue-700 hover:bg-blue-50 disabled:opacity-50"
         >
-          {driveStatus === 'syncing' ? (
+          {localDrive === 'syncing' ? (
             <Loader2 size={14} className="animate-spin" />
           ) : (
             <CloudUpload size={14} />
           )}
           <span className="flex-1 text-left">Sauvegarder Drive</span>
-          {driveBadge}
+          <DriveSyncBadge status={localDrive} compact />
         </button>
       )}
     </div>
   ) : null;
 
   return (
-    <div className={`relative inline-flex flex-col items-center ${className}`}>
+    <div className={`relative inline-flex flex-col items-center shrink-0 ${className}`}>
       <button
         ref={triggerRef}
         type="button"
@@ -269,13 +301,13 @@ export function QuickShareHub({
         aria-expanded={open}
         className="inline-flex items-center gap-1 rounded-lg border border-gray-200 bg-white px-2 py-1.5 text-xs font-medium text-[#1B2A4A] hover:bg-blue-50 hover:border-blue-200 transition-colors disabled:opacity-50"
       >
-        <Share2 size={14} />
+        <Share2 size={14} className="shrink-0" />
         <span className="hidden sm:inline">Partager</span>
-        {driveBadge}
+        {documentId && <DriveSyncBadge status={localDrive} compact />}
       </button>
 
       {toast && (
-        <span className="absolute top-full mt-1 z-10 whitespace-nowrap rounded-md bg-gray-900 px-2 py-0.5 text-[10px] font-medium text-white shadow-sm">
+        <span className="absolute top-full mt-1 z-10 max-w-[12rem] truncate rounded-md bg-gray-900 px-2 py-0.5 text-[10px] font-medium text-white shadow-sm">
           {toast}
         </span>
       )}

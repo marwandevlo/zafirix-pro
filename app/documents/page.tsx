@@ -3,7 +3,8 @@ import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'rea
 import { Upload, FileText, CheckCircle, Clock, Trash2, Sparkles, ShieldCheck, Archive, History, Eye, Download, Share2, Wrench, Mail, Link2, FileJson, FileSpreadsheet, FileCode2, Package, CloudUpload, Loader2 as DriveLoader } from 'lucide-react';
 import { EntityActionMenu, ConfirmDeleteDialog, EntityHistoryDrawer } from '@/app/components/actions';
 import type { ActionItem } from '@/app/components/actions';
-import { QuickShareHub } from '@/app/components/share';
+import { QuickShareHub, DriveSyncBadge, DocumentExportChips, type DriveSyncState } from '@/app/components/share';
+import { downloadAuthenticatedExport, type ExportFormat } from '@/app/lib/atlas-export-engine';
 import { SendEmailModal } from '@/app/documents/components/SendEmailModal';
 import { ValidationCenter } from '@/app/documents/components/ValidationCenter';
 import {
@@ -331,6 +332,7 @@ export default function DocumentsPage() {
   const [emailModalDocId, setEmailModalDocId] = useState<string | null>(null);
   const [shareToast, setShareToast] = useState<string | null>(null);
   const [driveBackingUpId, setDriveBackingUpId] = useState<string | null>(null);
+  const [driveSyncByDocId, setDriveSyncByDocId] = useState<Record<string, DriveSyncState>>({});
 
   // Library state
   const [library, setLibrary] = useState<AtlasDocument[]>([]);
@@ -487,6 +489,23 @@ export default function DocumentsPage() {
       enqueueOcrProgressPoll(String(doc.id));
     }
   }, [ocrDocuments, supabaseMode, tab, enqueueOcrProgressPoll]);
+
+  useEffect(() => {
+    if (!supabaseMode) return;
+    void fetch('/api/backups?limit=100&provider=google_drive', { credentials: 'include' })
+      .then((r) => r.json())
+      .then((data: { backups?: Array<{ entity_type?: string; entity_id?: string; sync_status?: string }> }) => {
+        const map: Record<string, DriveSyncState> = {};
+        for (const b of data.backups ?? []) {
+          if (b.entity_type !== 'document' || !b.entity_id) continue;
+          const id = String(b.entity_id);
+          if (b.sync_status === 'completed') map[id] = 'synced';
+          else if (b.sync_status === 'failed') map[id] = 'local_fallback';
+        }
+        setDriveSyncByDocId((prev) => ({ ...prev, ...map }));
+      })
+      .catch(() => {});
+  }, [supabaseMode, ocrDocuments.length]);
 
   useEffect(() => {
     if (tab !== 'library') return;
@@ -882,12 +901,8 @@ export default function DocumentsPage() {
     }
   };
 
-  const downloadDocumentExport = (documentId: string, format: 'json' | 'csv' | 'xml' | 'xlsx' | 'pdf' | 'zip') => {
-    const url = `/api/documents/${documentId}/export?format=${format}`;
-    const a = window.document.createElement('a');
-    a.href = url;
-    a.download = '';
-    a.click();
+  const downloadDocumentExport = (documentId: string, format: ExportFormat) => {
+    downloadAuthenticatedExport(documentId, format);
   };
 
   const backupToGoogleDrive = async (documentId: string) => {
@@ -1250,7 +1265,7 @@ export default function DocumentsPage() {
           </div>
 
           {ocrRows.length > 0 && (
-            <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
+            <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-x-auto">
               {SHOW_OCR_ROW_DEBUG && supabaseMode && (
                 <div className="px-4 py-2 bg-slate-900 text-slate-100 text-[10px] font-mono border-b border-slate-700">
                   DEBUG OCR (temporaire) — id · status · phase · err · textLen · updated_at
@@ -1404,7 +1419,13 @@ export default function DocumentsPage() {
                             return (
                               <div className="flex flex-col gap-0.5">
                                 {docType && docType !== 'unknown' && (
-                                  <span className="text-[10px] text-indigo-600 font-medium">{documentTypeLabel(docType)}</span>
+                                  <span className="inline-flex items-center gap-1 flex-wrap">
+                                    <span className="text-[10px] text-indigo-600 font-medium">{documentTypeLabel(docType)}</span>
+                                    <DriveSyncBadge
+                                      status={driveSyncByDocId[d.supabaseId!] ?? 'idle'}
+                                      compact
+                                    />
+                                  </span>
                                 )}
                                 {valStatus === 'validated' && (
                                   <span className="text-[10px] text-green-600 flex items-center gap-0.5">
@@ -1420,7 +1441,7 @@ export default function DocumentsPage() {
                         </div>
                       </td>
                       <td className="px-4 py-3">
-                        <div className="flex items-center justify-end gap-2 flex-wrap">
+                        <div className="flex items-center justify-end gap-1.5 flex-wrap max-w-[14rem] sm:max-w-none ml-auto">
                           {supabaseMode && d.statut === 'analysé' && d.supabaseId && (
                             <DocumentExplainerButton documentId={d.supabaseId} className="inline-block" />
                           )}
@@ -1477,12 +1498,23 @@ export default function DocumentsPage() {
                             )
                           )}
                           {supabaseMode && d.supabaseId && d.statut === 'analysé' && (
-                            <QuickShareHub
-                              entityLabel={d.nom}
-                              documentId={d.supabaseId}
-                              onSendEmail={() => setEmailModalDocId(d.supabaseId!)}
-                              disabled={driveBackingUpId === d.supabaseId}
-                            />
+                            <>
+                              <DocumentExportChips
+                                formats={['pdf', 'xlsx', 'docx', 'xml']}
+                                onExport={(fmt) => downloadDocumentExport(d.supabaseId!, fmt)}
+                              />
+                              <QuickShareHub
+                                entityLabel={d.nom}
+                                documentId={d.supabaseId}
+                                exportFormats={['pdf', 'xlsx', 'docx', 'xml', 'zip']}
+                                onSendEmail={() => setEmailModalDocId(d.supabaseId!)}
+                                disabled={driveBackingUpId === d.supabaseId}
+                                driveSyncStatus={driveSyncByDocId[d.supabaseId] ?? 'idle'}
+                                onDriveSyncStatusChange={(status) =>
+                                  setDriveSyncByDocId((prev) => ({ ...prev, [d.supabaseId!]: status }))
+                                }
+                              />
+                            </>
                           )}
                           {/* Three-dot action menu — all actions real */}
                           <EntityActionMenu

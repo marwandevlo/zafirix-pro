@@ -4,7 +4,10 @@ import { Plus, Trash2, Download, Send, ReceiptText, CheckCircle2, Wallet, AlertT
 import { EntityActionMenu, ConfirmDeleteDialog, EntityHistoryDrawer } from '@/app/components/actions';
 import type { ActionItem } from '@/app/components/actions';
 import { QuickShareHub } from '@/app/components/share';
-import { invoiceShareMessage } from '@/app/lib/atlas-quick-share';
+import { invoiceShareMessage, createDocumentShareLink } from '@/app/lib/atlas-quick-share';
+import { copyTextToClipboard } from '@/app/lib/copy-to-clipboard';
+import { exportInvoiceFormat, INVOICE_EXPORT_FORMATS } from '@/app/lib/atlas-invoice-export';
+import type { ExportFormat } from '@/app/lib/atlas-export-engine';
 import { useRouter } from 'next/navigation';
 import { addDaysYmd, isOverdue, todayYmd } from '@/app/lib/atlas-dates';
 import { deleteAtlasInvoice, atlasInvoiceErrorMessage, listAtlasInvoices, upsertAtlasInvoice } from '@/app/lib/atlas-invoices-repository';
@@ -264,6 +267,41 @@ export default function FacturesPage() {
     if (filter === 'overdue') return rows.filter((r) => r.statut === 'en retard');
     return rows;
   }, [filter, rows]);
+
+  const copyInvoiceSecureLink = async (r: FactureRow) => {
+    if (r.sourceDocumentId) {
+      const data = await createDocumentShareLink(r.sourceDocumentId, { permissions: 'download' });
+      if (data.shareLink) {
+        await copyTextToClipboard(data.shareLink);
+        return;
+      }
+    }
+    const summary =
+      `Facture ${r.numero} · ${r.client} · ${Math.round(r.ttc).toLocaleString('fr-MA')} MAD\n` +
+      `${typeof window !== 'undefined' ? window.location.origin : ''}/factures`;
+    await copyTextToClipboard(summary);
+  };
+
+  const exportInvoice = async (r: FactureRow, format: ExportFormat) => {
+    const company = (await getActiveAtlasCompany()) as AtlasCompany | null;
+    await exportInvoiceFormat(
+      {
+        numero: r.numero,
+        client: r.client,
+        date: r.date,
+        echeance: r.echeance,
+        montantHT: r.montantHT,
+        tva: r.tva,
+        ttc: r.ttc,
+        paye: r.paye,
+        reste: r.reste,
+        statut: r.statut,
+      },
+      format,
+      company,
+      () => downloadPdf(r),
+    );
+  };
 
   const sendReminder = (r: FactureRow) => {
     const decision = canPerformOperation();
@@ -707,7 +745,7 @@ export default function FacturesPage() {
           {activeTab === 'historique' && (
             <EntityAuditTable entityType="invoice" title="Historique — Factures clients" />
           )}
-          <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden" style={{ display: activeTab === 'historique' ? 'none' : undefined }}>
+          <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden overflow-x-auto" style={{ display: activeTab === 'historique' ? 'none' : undefined }}>
             <div className="px-4 py-3 border-b border-gray-100 flex items-center justify-between gap-3">
               <div className="flex items-center gap-3">
                 <p className="text-sm font-semibold text-gray-700">Liste des factures</p>
@@ -791,7 +829,7 @@ export default function FacturesPage() {
                       </span>
                     </td>
                     <td className="px-4 py-3">
-                      <div className="flex items-center gap-2 justify-end">
+                      <div className="flex items-center gap-1.5 justify-end flex-wrap min-w-0">
                         {f.reste > 0 && (
                           <button
                             onClick={() => setPaymentForm({ openFor: f.id, amount: String(Math.round(f.reste)), paidAt: todayYmd() })}
@@ -810,8 +848,10 @@ export default function FacturesPage() {
                         )}
                         <QuickShareHub
                           entityLabel={`Facture ${f.numero}`}
-                          onDownloadPdf={() => void downloadPdf(f)}
+                          exportFormats={INVOICE_EXPORT_FORMATS}
+                          onExport={(fmt) => void exportInvoice(f, fmt)}
                           onSendEmail={() => void sendInvoiceEmail(f)}
+                          onCopySecureLink={() => copyInvoiceSecureLink(f)}
                           whatsAppMessage={invoiceShareMessage(f.numero, f.client, f.ttc)}
                         />
                         <EntityActionMenu
