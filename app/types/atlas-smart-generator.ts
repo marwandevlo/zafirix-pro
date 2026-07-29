@@ -6,14 +6,32 @@ export type SmartGeneratorHeader = {
   ice?: string;
   if_fiscal?: string;
   rc?: string;
+  patent?: string;
+  cnss?: string;
+  capitalSocial?: string;
   adresse?: string;
   ville?: string;
-  patent?: string;
+  telephone?: string;
+  fax?: string;
+  email?: string;
   logoUrl?: string;
+  /** Base64 data URL or raw base64 for logo image */
+  logoBase64?: string;
+  logoMimeType?: string;
+  /** Base64-encoded custom header PDF template (first page used as background) */
+  headerPdfBase64?: string;
+};
+
+/** Branding assets passed to PDF export */
+export type SmartGeneratorBrandingAssets = {
+  logoBase64?: string;
+  logoMimeType?: string;
+  headerPdfBase64?: string;
 };
 
 /** Explicit item row — takes priority over LLM prompt when filled. */
 export type SmartGeneratorItemSpec = {
+  reference?: string;
   category?: string;
   designation: string;
   quantity: number;
@@ -31,12 +49,12 @@ export type SmartGeneratorParams = {
   numeroDebut: number;
   numeroFin: number;
   montantMaxParDocument: number;
-  /** Exact number of documents to produce (optional). */
   documentCount?: number;
   defaultClientName?: string;
 };
 
 export type SmartGeneratorLineItem = {
+  reference?: string;
   description: string;
   quantity: number;
   unit: string;
@@ -51,7 +69,6 @@ export type SmartGeneratorLineItem = {
 
 export type SmartGeneratorDocument = {
   docType: SmartGeneratorDocType;
-  /** Display title on PDF/Excel (preset label or custom). */
   docTitle: string;
   customDocTitle?: string;
   number: string;
@@ -82,6 +99,7 @@ export type SmartGeneratorResult = {
 export type SmartGeneratorGenerateRequest = {
   companyId?: string | null;
   customHeader?: SmartGeneratorHeader | null;
+  brandingAssets?: SmartGeneratorBrandingAssets | null;
   prompt: string;
   docType: SmartGeneratorDocType;
   customDocTitle?: string;

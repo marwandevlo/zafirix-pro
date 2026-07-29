@@ -131,10 +131,12 @@ export function computeLineItem(raw: RawLlmLine & Partial<SmartGeneratorItemSpec
   const totalTTC = roundDgiAmount(amountHT + vatAmount);
   const pcge = raw.pcgeAccount ? String(raw.pcgeAccount).replace(/\D/g, '').slice(0, 8) : undefined;
   const category = raw.category ? String(raw.category).trim() : undefined;
+  const reference = raw.reference ? String(raw.reference).trim() : undefined;
   const designation = String(raw.designation ?? raw.description ?? 'Prestation').trim() || 'Prestation';
   const description = category ? `[${category}] ${designation}` : designation;
 
   return {
+    reference,
     description,
     quantity,
     unit: String(raw.unit ?? 'Pcs').trim() || 'Pcs',
@@ -351,6 +353,7 @@ export function buildFromExplicitItemSpecs(
     .filter((s) => s.designation?.trim())
     .map((s) => ({
       description: s.designation,
+      reference: s.reference,
       category: s.category,
       quantity: s.quantity,
       unit: s.unit,
@@ -559,19 +562,25 @@ export async function loadCompanyForSmartGenerator(
 export function mergeCompanyHeader(
   dbCompany: Partial<AtlasCompany> | null,
   customHeader?: SmartGeneratorHeader | null,
-): Partial<AtlasCompany> & { taxeProfessionnelle?: string } {
+): Partial<AtlasCompany> & { taxeProfessionnelle?: string; capitalSocial?: string; fax?: string } {
   const base = dbCompany ?? {};
   const custom = customHeader ?? {};
+  const baseJson = base as Record<string, unknown>;
   return {
     ...base,
     raisonSociale: custom.raisonSociale?.trim() || base.raisonSociale || '',
     ice: custom.ice?.trim() || base.ice || '',
     if_fiscal: custom.if_fiscal?.trim() || base.if_fiscal || '',
     rc: custom.rc?.trim() || base.rc || '',
+    cnss: custom.cnss?.trim() || base.cnss || '',
     adresse: custom.adresse?.trim() || base.adresse || '',
     ville: custom.ville?.trim() || base.ville || '',
+    telephone: custom.telephone?.trim() || base.telephone || '',
+    email: custom.email?.trim() || base.email || '',
     logoUrl: custom.logoUrl?.trim() || base.logoUrl,
     taxeProfessionnelle: custom.patent?.trim() || (base as { taxeProfessionnelle?: string }).taxeProfessionnelle || '',
+    capitalSocial: custom.capitalSocial?.trim() || String(baseJson.capitalSocial ?? baseJson.capital_social ?? ''),
+    fax: custom.fax?.trim() || String(baseJson.fax ?? ''),
   };
 }
 

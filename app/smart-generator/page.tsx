@@ -1,29 +1,32 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import {
-  Building2,
   FileSpreadsheet,
   FileText,
   Loader2,
-  Plus,
   Sparkles,
-  Trash2,
   Wand2,
 } from 'lucide-react';
 import { AppSidebar } from '@/app/components/shell/AppSidebar';
 import { BetaSurfaceBadge } from '@/app/components/safety/BetaSurfaceBadge';
+import {
+  SmartGeneratorItemsTable,
+  emptyItemRow,
+  type ItemRow,
+} from '@/app/components/smart-generator/SmartGeneratorItemsTable';
+import {
+  SmartGeneratorLegalHeaderPanel,
+  EMPTY_HEADER,
+  companyToHeader,
+  type CompanyMode,
+} from '@/app/components/smart-generator/SmartGeneratorLegalHeaderPanel';
 import { getActiveAtlasCompany, getActiveCompanyDbRowId } from '@/app/lib/atlas-active-company';
 import { listAtlasCompanies } from '@/app/lib/atlas-companies-repository';
 import { onCompanySwitched } from '@/app/lib/atlas-company-switch-event';
 import { isAtlasSupabaseDataEnabled } from '@/app/lib/atlas-data-source';
-import { normalizeIce, normalizeIf } from '@/app/lib/atlas-morocco-compliance';
 import type { AtlasCompany } from '@/app/types/atlas-company';
-import type { SmartGeneratorDocType, SmartGeneratorItemSpec } from '@/app/types/atlas-smart-generator';
-
-type CompanyMode = 'none' | 'active' | 'manual';
-
-type ItemRow = SmartGeneratorItemSpec & { id: string };
+import type { SmartGeneratorBrandingAssets, SmartGeneratorDocType, SmartGeneratorHeader } from '@/app/types/atlas-smart-generator';
 
 type GeneratedDoc = {
   id?: string;
@@ -53,26 +56,17 @@ type GenerateResponse = {
   };
 };
 
+type BrandingState = SmartGeneratorBrandingAssets & {
+  logoPreview?: string;
+  headerPdfName?: string;
+};
+
 const DOC_TYPES: { id: SmartGeneratorDocType; label: string; labelAr: string }[] = [
   { id: 'facture', label: 'Facture', labelAr: 'فاتورة' },
   { id: 'devis', label: 'Devis', labelAr: 'عرض سعر' },
   { id: 'bon_commande', label: 'Bon de Commande', labelAr: 'أمر شراء' },
   { id: 'autre', label: 'Autre / Custom', labelAr: 'مخصص' },
 ];
-
-const UNITS = ['Pcs', 'Heures', 'Forfait', 'Kg', 'm²', 'Lot', 'Jour'];
-
-const EMPTY_ITEM = (): ItemRow => ({
-  id: crypto.randomUUID(),
-  category: '',
-  designation: '',
-  quantity: 1,
-  unit: 'Pcs',
-  unitPriceHT: undefined,
-  unitPriceMin: undefined,
-  unitPriceMax: undefined,
-  vatRatePercent: 20,
-});
 
 const PROMPT_PLACEHOLDERS = [
   'Ex: Génère 3 factures pour le client Atlas SARL — prestations comptables 5000 MAD HT/TVA 20%…',
@@ -111,15 +105,8 @@ export default function SmartGeneratorPage() {
   const [selectedCompanyId, setSelectedCompanyId] = useState<string | null>(null);
   const [persistToDb, setPersistToDb] = useState(true);
 
-  const [manualHeader, setManualHeader] = useState({
-    raisonSociale: '',
-    ice: '',
-    if_fiscal: '',
-    rc: '',
-    adresse: '',
-    ville: '',
-    patent: '',
-  });
+  const [manualHeader, setManualHeader] = useState<SmartGeneratorHeader>({ ...EMPTY_HEADER });
+  const [branding, setBranding] = useState<BrandingState>({});
 
   const [docType, setDocType] = useState<SmartGeneratorDocType>('facture');
   const [customDocTitle, setCustomDocTitle] = useState('');
@@ -127,8 +114,8 @@ export default function SmartGeneratorPage() {
   const [prompt, setPrompt] = useState('');
   const [defaultClient, setDefaultClient] = useState('');
   const [documentCount, setDocumentCount] = useState(1);
-  const [items, setItems] = useState<ItemRow[]>([]);
-  const [showItemBuilder, setShowItemBuilder] = useState(false);
+  const [items, setItems] = useState<ItemRow[]>([emptyItemRow()]);
+  const [showItemBuilder, setShowItemBuilder] = useState(true);
 
   const [dateDebut, setDateDebut] = useState(monthStartYmd());
   const [dateFin, setDateFin] = useState(todayYmd());
@@ -151,16 +138,7 @@ export default function SmartGeneratorPage() {
     setActiveCompany(active);
     if (cid) setSelectedCompanyId(cid);
     if (active && companyMode === 'active') {
-      const json = active as Record<string, unknown>;
-      setManualHeader({
-        raisonSociale: active.raisonSociale ?? '',
-        ice: active.ice ?? '',
-        if_fiscal: active.if_fiscal ?? '',
-        rc: active.rc ?? '',
-        adresse: active.adresse ?? '',
-        ville: active.ville ?? '',
-        patent: String(json.taxeProfessionnelle ?? json.patent ?? ''),
-      });
+      setManualHeader(companyToHeader(active));
     }
   }, [companyMode]);
 
@@ -169,28 +147,6 @@ export default function SmartGeneratorPage() {
     const off = onCompanySwitched(() => { void reloadCompanies(); });
     return off;
   }, [reloadCompanies]);
-
-  const applyCompanyToHeader = (c: AtlasCompany) => {
-    const json = c as Record<string, unknown>;
-    setManualHeader({
-      raisonSociale: c.raisonSociale ?? '',
-      ice: c.ice ?? '',
-      if_fiscal: c.if_fiscal ?? '',
-      rc: c.rc ?? '',
-      adresse: c.adresse ?? '',
-      ville: c.ville ?? '',
-      patent: String(json.taxeProfessionnelle ?? json.patent ?? ''),
-    });
-  };
-
-  const branding = useMemo(() => ({
-    name: manualHeader.raisonSociale || '—',
-    ice: manualHeader.ice ? normalizeIce(manualHeader.ice) : '—',
-    ifFiscal: manualHeader.if_fiscal ? normalizeIf(manualHeader.if_fiscal) : '—',
-    rc: manualHeader.rc || '—',
-    patent: manualHeader.patent || '—',
-    header: [manualHeader.adresse, manualHeader.ville].filter(Boolean).join(', ') || '—',
-  }), [manualHeader]);
 
   const filledItems = items.filter((i) => i.designation.trim());
   const canGenerate = Boolean(prompt.trim() || filledItems.length);
@@ -206,6 +162,13 @@ export default function SmartGeneratorPage() {
       companyMode === 'manual' && persistToDb && selectedCompanyId ? selectedCompanyId :
       null;
 
+    const customHeaderPayload: SmartGeneratorHeader = companyMode !== 'none' ? {
+      ...manualHeader,
+      logoBase64: branding.logoBase64,
+      logoMimeType: branding.logoMimeType,
+      headerPdfBase64: branding.headerPdfBase64,
+    } : {};
+
     try {
       const res = await fetch('/api/smart-generator/generate', {
         method: 'POST',
@@ -214,15 +177,12 @@ export default function SmartGeneratorPage() {
         body: JSON.stringify({
           companyId,
           persistToDb: companyId ? persistToDb : false,
-          customHeader: companyMode !== 'none' ? {
-            raisonSociale: manualHeader.raisonSociale,
-            ice: manualHeader.ice,
-            if_fiscal: manualHeader.if_fiscal,
-            rc: manualHeader.rc,
-            adresse: manualHeader.adresse,
-            ville: manualHeader.ville,
-            patent: manualHeader.patent,
-          } : {},
+          customHeader: customHeaderPayload,
+          brandingAssets: {
+            logoBase64: branding.logoBase64,
+            logoMimeType: branding.logoMimeType,
+            headerPdfBase64: branding.headerPdfBase64,
+          },
           prompt: prompt.trim(),
           docType,
           customDocTitle: docType === 'autre' ? customDocTitle : undefined,
@@ -279,7 +239,6 @@ export default function SmartGeneratorPage() {
         <div className="flex-1 overflow-y-auto px-8 py-6">
           <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
             <div className="xl:col-span-2 space-y-6">
-              {/* Document types */}
               <div className="bg-white rounded-xl border border-gray-100 shadow-sm p-5">
                 <p className="text-xs font-semibold text-gray-500 uppercase mb-3">Type de document</p>
                 <div className="flex flex-wrap gap-2">
@@ -307,7 +266,6 @@ export default function SmartGeneratorPage() {
                 )}
               </div>
 
-              {/* Prompt */}
               <div className="bg-white rounded-xl border border-gray-100 shadow-sm p-5 space-y-3">
                 <div className="flex items-center justify-between gap-3">
                   <p className="text-xs font-semibold text-gray-500 uppercase">Consigne IA (optionnelle si articles remplis)</p>
@@ -330,7 +288,6 @@ export default function SmartGeneratorPage() {
                 />
               </div>
 
-              {/* Items builder */}
               <div className="bg-white rounded-xl border border-gray-100 shadow-sm p-5">
                 <div className="flex items-center justify-between mb-4">
                   <div>
@@ -339,7 +296,10 @@ export default function SmartGeneratorPage() {
                   </div>
                   <button
                     type="button"
-                    onClick={() => { setShowItemBuilder(true); if (!items.length) setItems([EMPTY_ITEM()]); }}
+                    onClick={() => {
+                      setShowItemBuilder((v) => !v);
+                      if (!items.length) setItems([emptyItemRow()]);
+                    }}
                     className="text-xs text-indigo-600 hover:underline"
                   >
                     {showItemBuilder ? 'Masquer' : 'Afficher le builder'}
@@ -347,89 +307,10 @@ export default function SmartGeneratorPage() {
                 </div>
 
                 {showItemBuilder && (
-                  <div className="space-y-3">
-                    {items.map((item, idx) => (
-                      <div key={item.id} className="grid grid-cols-1 md:grid-cols-12 gap-2 p-3 bg-gray-50 rounded-lg border border-gray-100">
-                        <input
-                          value={item.category ?? ''}
-                          onChange={(e) => setItems((prev) => prev.map((r, i) => i === idx ? { ...r, category: e.target.value } : r))}
-                          placeholder="Type / catégorie"
-                          className="md:col-span-2 px-2 py-1.5 text-xs border border-gray-200 rounded-lg"
-                        />
-                        <input
-                          value={item.designation}
-                          onChange={(e) => setItems((prev) => prev.map((r, i) => i === idx ? { ...r, designation: e.target.value } : r))}
-                          placeholder="Désignation précise *"
-                          className="md:col-span-3 px-2 py-1.5 text-xs border border-gray-200 rounded-lg"
-                        />
-                        <input
-                          type="number"
-                          min={0.001}
-                          step="any"
-                          value={item.quantity}
-                          onChange={(e) => setItems((prev) => prev.map((r, i) => i === idx ? { ...r, quantity: Number(e.target.value) } : r))}
-                          className="md:col-span-1 px-2 py-1.5 text-xs border border-gray-200 rounded-lg"
-                          title="Quantité"
-                        />
-                        <select
-                          value={item.unit}
-                          onChange={(e) => setItems((prev) => prev.map((r, i) => i === idx ? { ...r, unit: e.target.value } : r))}
-                          className="md:col-span-1 px-2 py-1.5 text-xs border border-gray-200 rounded-lg"
-                        >
-                          {UNITS.map((u) => <option key={u} value={u}>{u}</option>)}
-                        </select>
-                        <input
-                          type="number"
-                          min={0}
-                          value={item.unitPriceHT ?? ''}
-                          onChange={(e) => setItems((prev) => prev.map((r, i) => i === idx ? { ...r, unitPriceHT: e.target.value ? Number(e.target.value) : undefined } : r))}
-                          placeholder="PU HT"
-                          className="md:col-span-1 px-2 py-1.5 text-xs border border-gray-200 rounded-lg"
-                        />
-                        <input
-                          type="number"
-                          min={0}
-                          value={item.unitPriceMin ?? ''}
-                          onChange={(e) => setItems((prev) => prev.map((r, i) => i === idx ? { ...r, unitPriceMin: e.target.value ? Number(e.target.value) : undefined } : r))}
-                          placeholder="Min"
-                          className="md:col-span-1 px-2 py-1.5 text-xs border border-gray-200 rounded-lg"
-                        />
-                        <input
-                          type="number"
-                          min={0}
-                          value={item.unitPriceMax ?? ''}
-                          onChange={(e) => setItems((prev) => prev.map((r, i) => i === idx ? { ...r, unitPriceMax: e.target.value ? Number(e.target.value) : undefined } : r))}
-                          placeholder="Max"
-                          className="md:col-span-1 px-2 py-1.5 text-xs border border-gray-200 rounded-lg"
-                        />
-                        <select
-                          value={item.vatRatePercent ?? 20}
-                          onChange={(e) => setItems((prev) => prev.map((r, i) => i === idx ? { ...r, vatRatePercent: Number(e.target.value) } : r))}
-                          className="md:col-span-1 px-2 py-1.5 text-xs border border-gray-200 rounded-lg"
-                        >
-                          {[0, 7, 10, 14, 20].map((r) => <option key={r} value={r}>TVA {r}%</option>)}
-                        </select>
-                        <button
-                          type="button"
-                          onClick={() => setItems((prev) => prev.filter((_, i) => i !== idx))}
-                          className="md:col-span-1 flex items-center justify-center text-red-400 hover:text-red-600"
-                        >
-                          <Trash2 size={14} />
-                        </button>
-                      </div>
-                    ))}
-                    <button
-                      type="button"
-                      onClick={() => setItems((prev) => [...prev, EMPTY_ITEM()])}
-                      className="flex items-center gap-1 text-xs text-indigo-600 hover:underline"
-                    >
-                      <Plus size={14} /> Ajouter une ligne
-                    </button>
-                  </div>
+                  <SmartGeneratorItemsTable items={items} onChange={setItems} />
                 )}
               </div>
 
-              {/* Advanced params */}
               <div className="bg-white rounded-xl border border-gray-100 shadow-sm p-5">
                 <p className="text-xs font-semibold text-gray-500 uppercase mb-4">Paramètres avancés</p>
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
@@ -536,105 +417,24 @@ export default function SmartGeneratorPage() {
               )}
             </div>
 
-            {/* Company / header panel */}
             <div className="space-y-4">
-              <div className="bg-white rounded-xl border border-gray-100 shadow-sm p-5 sticky top-6 space-y-4">
-                <p className="text-xs font-semibold text-gray-500 uppercase">En-tête & société</p>
-
-                <div className="flex flex-col gap-2">
-                  {([
-                    ['none', 'Sans société (en-tête libre / vide)'],
-                    ['active', 'Préremplir depuis société active'],
-                    ['manual', 'Saisie manuelle complète'],
-                  ] as const).map(([mode, label]) => (
-                    <label key={mode} className="flex items-center gap-2 text-xs cursor-pointer">
-                      <input
-                        type="radio"
-                        name="companyMode"
-                        checked={companyMode === mode}
-                        onChange={() => {
-                          setCompanyMode(mode);
-                          if (mode === 'active' && activeCompany) applyCompanyToHeader(activeCompany);
-                          if (mode === 'none') setManualHeader({ raisonSociale: '', ice: '', if_fiscal: '', rc: '', adresse: '', ville: '', patent: '' });
-                        }}
-                      />
-                      {label}
-                    </label>
-                  ))}
-                </div>
-
-                {companyMode === 'active' && companies.length > 0 && (
-                  <select
-                    value={selectedCompanyId ?? ''}
-                    onChange={(e) => {
-                      const id = e.target.value;
-                      setSelectedCompanyId(id);
-                      const c = companies.find((x) => x.dbRowId === id || String(x.id) === id);
-                      if (c) applyCompanyToHeader(c);
-                    }}
-                    className="w-full text-xs border border-gray-200 rounded-lg px-2 py-2"
-                  >
-                    {companies.map((c) => (
-                      <option key={String(c.dbRowId ?? c.id)} value={String(c.dbRowId ?? c.id)}>
-                        {c.raisonSociale}
-                      </option>
-                    ))}
-                  </select>
-                )}
-
-                {(companyMode === 'manual' || companyMode === 'active') && (
-                  <div className="space-y-2">
-                    <input value={manualHeader.raisonSociale} onChange={(e) => setManualHeader((h) => ({ ...h, raisonSociale: e.target.value }))}
-                      placeholder="Raison sociale" className="w-full px-3 py-2 text-xs border border-gray-200 rounded-lg" />
-                    <div className="grid grid-cols-2 gap-2">
-                      <input value={manualHeader.ice} onChange={(e) => setManualHeader((h) => ({ ...h, ice: e.target.value }))}
-                        placeholder="ICE" className="px-3 py-2 text-xs border border-gray-200 rounded-lg font-mono" />
-                      <input value={manualHeader.if_fiscal} onChange={(e) => setManualHeader((h) => ({ ...h, if_fiscal: e.target.value }))}
-                        placeholder="IF" className="px-3 py-2 text-xs border border-gray-200 rounded-lg font-mono" />
-                      <input value={manualHeader.rc} onChange={(e) => setManualHeader((h) => ({ ...h, rc: e.target.value }))}
-                        placeholder="RC" className="px-3 py-2 text-xs border border-gray-200 rounded-lg font-mono" />
-                      <input value={manualHeader.patent} onChange={(e) => setManualHeader((h) => ({ ...h, patent: e.target.value }))}
-                        placeholder="Patente" className="px-3 py-2 text-xs border border-gray-200 rounded-lg font-mono" />
-                    </div>
-                    <input value={manualHeader.adresse} onChange={(e) => setManualHeader((h) => ({ ...h, adresse: e.target.value }))}
-                      placeholder="Adresse" className="w-full px-3 py-2 text-xs border border-gray-200 rounded-lg" />
-                    <input value={manualHeader.ville} onChange={(e) => setManualHeader((h) => ({ ...h, ville: e.target.value }))}
-                      placeholder="Ville" className="w-full px-3 py-2 text-xs border border-gray-200 rounded-lg" />
-                  </div>
-                )}
-
-                {selectedCompanyId && companyMode !== 'none' && (
-                  <label className="flex items-center gap-2 text-xs text-gray-600">
-                    <input type="checkbox" checked={persistToDb} onChange={(e) => setPersistToDb(e.target.checked)} />
-                    Enregistrer dans atlas_invoices (optionnel)
-                  </label>
-                )}
-
-                <div className="rounded-xl border-2 border-dashed border-indigo-200 bg-indigo-50/30 p-4 space-y-2">
-                  <div className="flex items-start gap-3">
-                    <div className="w-10 h-10 rounded-lg bg-indigo-100 flex items-center justify-center shrink-0">
-                      <Building2 size={18} className="text-indigo-600" />
-                    </div>
-                    <div>
-                      <p className="font-bold text-sm text-gray-800">{branding.name}</p>
-                      <p className="text-[10px] text-gray-500">{branding.header}</p>
-                    </div>
-                  </div>
-                  <div className="grid grid-cols-2 gap-1.5 text-[10px]">
-                    <div className="bg-white rounded px-2 py-1 border"><span className="text-gray-400">ICE </span>{branding.ice}</div>
-                    <div className="bg-white rounded px-2 py-1 border"><span className="text-gray-400">IF </span>{branding.ifFiscal}</div>
-                    <div className="bg-white rounded px-2 py-1 border"><span className="text-gray-400">RC </span>{branding.rc}</div>
-                    <div className="bg-white rounded px-2 py-1 border"><span className="text-gray-400">Pat. </span>{branding.patent}</div>
-                  </div>
-                </div>
-
-                <div className="p-3 bg-gray-50 rounded-lg text-xs text-gray-500 space-y-1">
-                  <p className="font-semibold text-gray-600">Mode indépendant</p>
-                  <p>• Génération sans société en base possible</p>
-                  <p>• Articles explicites prioritaires sur l&apos;IA</p>
-                  <p>• Types custom: BL, Attestation, Avoir…</p>
-                </div>
-              </div>
+              <SmartGeneratorLegalHeaderPanel
+                companyMode={companyMode}
+                onCompanyModeChange={setCompanyMode}
+                companies={companies}
+                activeCompany={activeCompany}
+                selectedCompanyId={selectedCompanyId}
+                onSelectCompany={(id, c) => {
+                  setSelectedCompanyId(id);
+                  setManualHeader(companyToHeader(c));
+                }}
+                header={manualHeader}
+                onHeaderChange={setManualHeader}
+                branding={branding}
+                onBrandingChange={setBranding}
+                persistToDb={persistToDb}
+                onPersistToDbChange={setPersistToDb}
+              />
             </div>
           </div>
         </div>

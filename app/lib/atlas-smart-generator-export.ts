@@ -5,8 +5,9 @@
 import ExcelJS from 'exceljs';
 import { jsPDF } from 'jspdf';
 import type { AtlasCompany } from '@/app/types/atlas-company';
-import type { SmartGeneratorDocument, SmartGeneratorParams } from '@/app/types/atlas-smart-generator';
+import type { SmartGeneratorDocument, SmartGeneratorParams, SmartGeneratorBrandingAssets } from '@/app/types/atlas-smart-generator';
 import { formatDgiIce, formatDgiIdentifiantFiscal } from '@/app/lib/atlas-tva-dgi';
+import { renderPdfFirstPageToPng } from '@/app/lib/atlas-pdf-ocr-render';
 
 const COLOR_HEADER = 'FF1B365D';
 const COLOR_BORDER = 'FFD9D9D9';
@@ -30,6 +31,36 @@ function companyDisplayName(company: Partial<AtlasCompany>): string {
 function companyPatent(company: Partial<AtlasCompany> & { taxeProfessionnelle?: string }): string {
   const json = company as Record<string, unknown>;
   return String(json.taxeProfessionnelle ?? json.patent ?? '');
+}
+
+type ExtendedCompany = Partial<AtlasCompany> & {
+  taxeProfessionnelle?: string;
+  capitalSocial?: string;
+  fax?: string;
+};
+
+function companyCapital(company: ExtendedCompany): string {
+  const json = company as Record<string, unknown>;
+  return String(company.capitalSocial ?? json.capitalSocial ?? json.capital_social ?? '');
+}
+
+function companyFax(company: ExtendedCompany): string {
+  const json = company as Record<string, unknown>;
+  return String(company.fax ?? json.fax ?? '');
+}
+
+function parseLogoForJsPdf(logoBase64?: string, mimeType?: string): { format: 'PNG' | 'JPEG'; data: string } | null {
+  if (!logoBase64) return null;
+  if (logoBase64.startsWith('data:')) {
+    const match = logoBase64.match(/^data:image\/(\w+);base64,(.+)$/);
+    if (!match) return null;
+    const fmt = match[1].toUpperCase();
+    if (fmt === 'WEBP' || fmt === 'GIF') return null;
+    const format = fmt === 'JPG' || fmt === 'JPEG' ? 'JPEG' : 'PNG';
+    return { format, data: match[2] };
+  }
+  const format = mimeType?.includes('jpeg') || mimeType?.includes('jpg') ? 'JPEG' : 'PNG';
+  return { format, data: logoBase64 };
 }
 
 export function smartGeneratorExportBasename(
@@ -63,7 +94,13 @@ export async function generateSmartGeneratorExcelBuffer(
     ['ICE', formatDgiIce(company.ice)],
     ['IF', formatDgiIdentifiantFiscal(company.if_fiscal)],
     ['RC', String(company.rc ?? '')],
-    ['Patente', companyPatent(company as Partial<AtlasCompany> & { taxeProfessionnelle?: string })],
+    ['Patente', companyPatent(company as ExtendedCompany)],
+    ['CNSS', String(company.cnss ?? '')],
+    ['Capital social', companyCapital(company as ExtendedCompany)],
+    ['Adresse', [company.adresse, company.ville].filter(Boolean).join(', ')],
+    ['Téléphone', String(company.telephone ?? '')],
+    ['Fax', companyFax(company as ExtendedCompany)],
+    ['Email', String(company.email ?? '')],
     ['Période', `${params.dateDebut} → ${params.dateFin}`],
     ['Numérotation', `${params.numeroDebut} — ${params.numeroFin}`],
     ['Plafond / doc (MAD)', String(params.montantMaxParDocument)],
@@ -123,7 +160,7 @@ export async function generateSmartGeneratorExcelBuffer(
   ];
 
   const detailWs = wb.addWorksheet('Détail lignes');
-  const lineHeaders = ['N° Doc', 'Désignation', 'Qté', 'Unité', 'PU HT', 'Taux TVA', 'HT', 'TVA', 'TTC', 'Compte PCGE'];
+  const lineHeaders = ['N° Doc', 'Code / Réf.', 'Désignation', 'Qté', 'Unité', 'PU HT', 'Taux TVA', 'HT', 'TVA', 'TTC', 'Compte PCGE'];
   lineHeaders.forEach((h, i) => {
     const cell = detailWs.getCell(1, i + 1);
     cell.value = h;
@@ -135,19 +172,20 @@ export async function generateSmartGeneratorExcelBuffer(
   for (const doc of documents) {
     for (const line of doc.lines) {
       detailWs.getCell(lr, 1).value = doc.number;
-      detailWs.getCell(lr, 2).value = line.description;
-      detailWs.getCell(lr, 3).value = line.quantity;
-      detailWs.getCell(lr, 4).value = line.unit;
-      detailWs.getCell(lr, 5).value = line.unitPriceHT;
-      detailWs.getCell(lr, 5).numFmt = CURRENCY_FMT;
-      detailWs.getCell(lr, 6).value = line.vatRatePercent;
-      detailWs.getCell(lr, 7).value = line.amountHT;
-      detailWs.getCell(lr, 7).numFmt = CURRENCY_FMT;
-      detailWs.getCell(lr, 8).value = line.vatAmount;
+      detailWs.getCell(lr, 2).value = line.reference ?? '';
+      detailWs.getCell(lr, 3).value = line.description;
+      detailWs.getCell(lr, 4).value = line.quantity;
+      detailWs.getCell(lr, 5).value = line.unit;
+      detailWs.getCell(lr, 6).value = line.unitPriceHT;
+      detailWs.getCell(lr, 6).numFmt = CURRENCY_FMT;
+      detailWs.getCell(lr, 7).value = line.vatRatePercent;
+      detailWs.getCell(lr, 8).value = line.amountHT;
       detailWs.getCell(lr, 8).numFmt = CURRENCY_FMT;
-      detailWs.getCell(lr, 9).value = line.totalTTC;
+      detailWs.getCell(lr, 9).value = line.vatAmount;
       detailWs.getCell(lr, 9).numFmt = CURRENCY_FMT;
-      detailWs.getCell(lr, 10).value = line.pcgeAccount ?? '';
+      detailWs.getCell(lr, 10).value = line.totalTTC;
+      detailWs.getCell(lr, 10).numFmt = CURRENCY_FMT;
+      detailWs.getCell(lr, 11).value = line.pcgeAccount ?? '';
       lr += 1;
     }
   }
@@ -160,58 +198,96 @@ type DocWithAutoTable = jsPDF & { lastAutoTable?: { finalY: number } };
 
 export async function generateSmartGeneratorPdfBuffer(
   documents: SmartGeneratorDocument[],
-  company: Partial<AtlasCompany>,
+  company: ExtendedCompany,
+  branding?: SmartGeneratorBrandingAssets | null,
 ): Promise<Buffer> {
   const { default: autoTable } = await import('jspdf-autotable');
   const doc = new jsPDF({ unit: 'mm', format: 'a4' });
+
+  let headerBgBase64: string | null = null;
+  if (branding?.headerPdfBase64) {
+    try {
+      const pdfBytes = Buffer.from(branding.headerPdfBase64, 'base64');
+      const pngBuf = await renderPdfFirstPageToPng(pdfBytes);
+      headerBgBase64 = pngBuf.toString('base64');
+    } catch {
+      headerBgBase64 = null;
+    }
+  }
+
+  const logoImage = parseLogoForJsPdf(branding?.logoBase64, branding?.logoMimeType);
 
   for (let idx = 0; idx < documents.length; idx++) {
     if (idx > 0) doc.addPage();
 
     const item = documents[idx]!;
     const docLabel = item.docTitle;
-    doc.setFillColor(27, 54, 93);
-    doc.rect(0, 0, 210, 32, 'F');
-    doc.setTextColor(255, 255, 255);
-    doc.setFont('helvetica', 'bold');
-    doc.setFontSize(16);
-    doc.text(companyDisplayName(company), 14, 12);
-    doc.setFontSize(9);
-    doc.setFont('helvetica', 'normal');
-    const ids = [
-      company.ice ? `ICE: ${formatDgiIce(company.ice)}` : null,
-      company.if_fiscal ? `IF: ${formatDgiIdentifiantFiscal(company.if_fiscal)}` : null,
-      company.rc ? `RC: ${company.rc}` : null,
-      companyPatent(company as Partial<AtlasCompany> & { taxeProfessionnelle?: string })
-        ? `Patente: ${companyPatent(company as Partial<AtlasCompany> & { taxeProfessionnelle?: string })}`
-        : null,
-    ].filter(Boolean).join(' · ');
-    if (ids) doc.text(ids, 14, 18);
-    const addr = [company.adresse, company.ville].filter(Boolean).join(', ');
-    if (addr) doc.text(addr, 14, 24);
+    let contentStartY = 54;
 
-    doc.setFont('helvetica', 'bold');
-    doc.setFontSize(14);
-    doc.text(docLabel, 196, 12, { align: 'right' });
-    doc.setFontSize(9);
-    doc.setFont('helvetica', 'normal');
-    doc.text(`N° ${item.number}`, 196, 18, { align: 'right' });
-    doc.text(`Date: ${item.issueDate}`, 196, 23, { align: 'right' });
-    if (item.dueDate && item.docType === 'facture') {
-      doc.text(`Échéance: ${item.dueDate}`, 196, 28, { align: 'right' });
+    if (headerBgBase64) {
+      doc.addImage(`data:image/png;base64,${headerBgBase64}`, 'PNG', 0, 0, 210, 45);
+      contentStartY = 50;
+    } else {
+      doc.setFillColor(27, 54, 93);
+      doc.rect(0, 0, 210, 32, 'F');
+
+      if (logoImage) {
+        try {
+          doc.addImage(logoImage.data, logoImage.format, 14, 4, 22, 22);
+        } catch {
+          /* ignore invalid logo */
+        }
+      }
+
+      doc.setTextColor(255, 255, 255);
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(16);
+      const nameX = logoImage ? 40 : 14;
+      doc.text(companyDisplayName(company), nameX, 12);
+      doc.setFontSize(8);
+      doc.setFont('helvetica', 'normal');
+      const ids = [
+        company.ice ? `ICE: ${formatDgiIce(company.ice)}` : null,
+        company.if_fiscal ? `IF: ${formatDgiIdentifiantFiscal(company.if_fiscal)}` : null,
+        company.rc ? `RC: ${company.rc}` : null,
+        companyPatent(company) ? `Patente: ${companyPatent(company)}` : null,
+        company.cnss ? `CNSS: ${company.cnss}` : null,
+        companyCapital(company) ? `Capital: ${companyCapital(company)}` : null,
+      ].filter(Boolean).join(' · ');
+      if (ids) doc.text(ids, nameX, 18, { maxWidth: 130 });
+      const addr = [company.adresse, company.ville].filter(Boolean).join(', ');
+      if (addr) doc.text(addr, nameX, 24, { maxWidth: 130 });
+      const contact = [
+        company.telephone ? `Tél: ${company.telephone}` : null,
+        companyFax(company) ? `Fax: ${companyFax(company)}` : null,
+        company.email ? company.email : null,
+      ].filter(Boolean).join(' · ');
+      if (contact) doc.text(contact, nameX, 29, { maxWidth: 130 });
     }
 
     doc.setTextColor(31, 41, 55);
     doc.setFont('helvetica', 'bold');
-    doc.setFontSize(10);
-    doc.text('Client / Destinataire', 14, 42);
+    doc.setFontSize(14);
+    doc.text(docLabel, 196, headerBgBase64 ? 38 : 12, { align: 'right' });
+    doc.setFontSize(9);
     doc.setFont('helvetica', 'normal');
-    doc.text(item.clientName, 14, 48);
+    doc.text(`N° ${item.number}`, 196, headerBgBase64 ? 43 : 18, { align: 'right' });
+    doc.text(`Date: ${item.issueDate}`, 196, headerBgBase64 ? 47 : 23, { align: 'right' });
+    if (item.dueDate && item.docType === 'facture') {
+      doc.text(`Échéance: ${item.dueDate}`, 196, headerBgBase64 ? 51 : 28, { align: 'right' });
+    }
+
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(10);
+    doc.text('Client / Destinataire', 14, contentStartY - 6);
+    doc.setFont('helvetica', 'normal');
+    doc.text(item.clientName, 14, contentStartY);
 
     autoTable(doc, {
-      startY: 54,
-      head: [['Désignation', 'Qté', 'Unité', 'PU HT', 'TVA %', 'HT', 'TVA', 'TTC', 'PCGE']],
+      startY: contentStartY + 6,
+      head: [['Code / Réf.', 'Désignation', 'Qté', 'Unité', 'PU HT', 'TVA %', 'HT', 'TVA', 'TTC', 'PCGE']],
       body: item.lines.map((l) => [
+        l.reference ?? '',
         l.description,
         String(l.quantity),
         l.unit,
@@ -228,7 +304,7 @@ export async function generateSmartGeneratorPdfBuffer(
       margin: { left: 14, right: 14 },
     });
 
-    let y = ((doc as DocWithAutoTable).lastAutoTable?.finalY ?? 54) + 8;
+    let y = ((doc as DocWithAutoTable).lastAutoTable?.finalY ?? contentStartY + 6) + 8;
     doc.setFont('helvetica', 'bold');
     doc.text(`Total HT: ${item.amountHT.toFixed(2)} MAD`, 140, y);
     y += 6;

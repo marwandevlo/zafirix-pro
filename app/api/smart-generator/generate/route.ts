@@ -18,6 +18,7 @@ import type {
   SmartGeneratorHeader,
   SmartGeneratorItemSpec,
   SmartGeneratorParams,
+  SmartGeneratorBrandingAssets,
 } from '@/app/types/atlas-smart-generator';
 
 export const runtime = 'nodejs';
@@ -62,8 +63,25 @@ function parseCustomHeader(body: Record<string, unknown>): SmartGeneratorHeader 
     adresse: String(h.adresse ?? h.address ?? '').trim() || undefined,
     ville: String(h.ville ?? h.city ?? '').trim() || undefined,
     patent: String(h.patent ?? h.patente ?? h.taxeProfessionnelle ?? '').trim() || undefined,
+    cnss: String(h.cnss ?? '').trim() || undefined,
+    capitalSocial: String(h.capitalSocial ?? h.capital_social ?? '').trim() || undefined,
+    telephone: String(h.telephone ?? h.tel ?? '').trim() || undefined,
+    fax: String(h.fax ?? '').trim() || undefined,
+    email: String(h.email ?? '').trim() || undefined,
     logoUrl: String(h.logoUrl ?? h.logo_url ?? '').trim() || undefined,
+    logoBase64: String(h.logoBase64 ?? h.logo_base64 ?? '').trim() || undefined,
+    logoMimeType: String(h.logoMimeType ?? h.logo_mime_type ?? '').trim() || undefined,
+    headerPdfBase64: String(h.headerPdfBase64 ?? h.header_pdf_base64 ?? '').trim() || undefined,
   };
+}
+
+function parseBrandingAssets(body: Record<string, unknown>, header: SmartGeneratorHeader | null): SmartGeneratorBrandingAssets | null {
+  const b = (body.brandingAssets ?? body.branding_assets) as Record<string, unknown> | undefined;
+  const logoBase64 = String(b?.logoBase64 ?? b?.logo_base64 ?? header?.logoBase64 ?? '').trim() || undefined;
+  const logoMimeType = String(b?.logoMimeType ?? b?.logo_mime_type ?? header?.logoMimeType ?? '').trim() || undefined;
+  const headerPdfBase64 = String(b?.headerPdfBase64 ?? b?.header_pdf_base64 ?? header?.headerPdfBase64 ?? '').trim() || undefined;
+  if (!logoBase64 && !headerPdfBase64) return null;
+  return { logoBase64, logoMimeType, headerPdfBase64 };
 }
 
 function parseItemSpecs(body: Record<string, unknown>): SmartGeneratorItemSpec[] {
@@ -76,6 +94,7 @@ function parseItemSpecs(body: Record<string, unknown>): SmartGeneratorItemSpec[]
     const designation = String(r.designation ?? r.description ?? '').trim();
     if (!designation) continue;
     out.push({
+      reference: String(r.reference ?? r.code ?? r.ref ?? '').trim() || undefined,
       category: String(r.category ?? r.type ?? r.type_marchandise ?? '').trim() || undefined,
       designation,
       quantity: Math.max(0.001, Number(r.quantity ?? r.quantite ?? 1)),
@@ -122,6 +141,7 @@ export async function POST(request: NextRequest) {
   const persistToDb = body.persistToDb !== false && body.persist_to_db !== false;
   const itemSpecs = parseItemSpecs(body);
   const customHeader = parseCustomHeader(body);
+  const brandingAssets = parseBrandingAssets(body, customHeader);
 
   if (!VALID_DOC_TYPES.has(docType)) {
     return NextResponse.json({ error: 'invalid_doc_type' }, { status: 400 });
@@ -165,7 +185,7 @@ export async function POST(request: NextRequest) {
     const company = result.company ?? {};
     const docTitle = result.documents[0]?.docTitle ?? 'DOCUMENT';
     const [pdfBuffer, excelBuffer] = await Promise.all([
-      generateSmartGeneratorPdfBuffer(result.documents, company),
+      generateSmartGeneratorPdfBuffer(result.documents, company, brandingAssets),
       generateSmartGeneratorExcelBuffer(result.documents, company, params),
     ]);
 
