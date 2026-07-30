@@ -14,6 +14,8 @@ import { BrandWordmark } from '@/app/components/branding/BrandWordmark';
 import { ZafirixLogo } from '@/app/components/branding/ZafirixLogo';
 import {
   filterAtlasNavItemsForPath,
+  getCoreAtlasNavItems,
+  getZafirixEnterpriseNavItems,
   resolveActiveAtlasNavId,
   type AtlasAppNavItem,
 } from '@/app/lib/atlas-app-nav';
@@ -141,6 +143,10 @@ export function AppSidebar({
     const base = filterAtlasNavItemsForPath(pathname);
     return showAdminNav ? base : base.filter((item) => item.id !== 'admin');
   }, [pathname, showAdminNav]);
+
+  const coreNavItems = useMemo(() => getCoreAtlasNavItems(visibleItems), [visibleItems]);
+  const enterpriseNavItems = useMemo(() => getZafirixEnterpriseNavItems(visibleItems), [visibleItems]);
+
   const activeId = useMemo(() => resolveActiveAtlasNavId(pathname, visibleItems), [pathname, visibleItems]);
 
   const go = (href: string) => {
@@ -162,6 +168,39 @@ export function AppSidebar({
       return `${base} bg-indigo-500/25 text-indigo-100 border border-indigo-400/30`;
     }
     return `${base} bg-white/15 text-white`;
+  };
+
+  const renderNavItem = (item: AtlasAppNavItem) => {
+    const isActive = item.id === activeId;
+    if (item.id === 'dashboard' && variant === 'module') {
+      return (
+        <button
+          key={item.id}
+          type="button"
+          onClick={() => go('/')}
+          className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-all ${
+            isActive ? 'bg-white/15 text-white' : 'text-white/50 hover:bg-white/10 hover:text-white'
+          }`}
+        >
+          <ArrowLeft size={16} /> {navLabel(item, t)}
+        </button>
+      );
+    }
+    return (
+      <button
+        key={item.id}
+        type="button"
+        onClick={() => go(item.href)}
+        className={navButtonClass(item, isActive)}
+        title={item.href}
+      >
+        <item.icon size={16} className="shrink-0" />
+        <span className={`truncate ${isHome ? 'flex-1 text-left' : ''}`}>{navLabel(item, t)}</span>
+        {item.id === 'tva' && isHome && (
+          <span className="w-2 h-2 bg-red-400 rounded-full animate-pulse shrink-0" aria-hidden />
+        )}
+      </button>
+    );
   };
 
   const asideClass = isHome
@@ -196,37 +235,17 @@ export function AppSidebar({
       </div>
 
       <nav className={`flex-1 px-3 py-4 overflow-y-auto ${isHome ? 'space-y-0.5' : 'space-y-1'}`}>
-        {visibleItems.map((item) => {
-          const isActive = item.id === activeId;
-          if (item.id === 'dashboard' && variant === 'module') {
-            return (
-              <button
-                key={item.id}
-                type="button"
-                onClick={() => go('/')}
-                className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-all ${
-                  isActive ? 'bg-white/15 text-white' : 'text-white/50 hover:bg-white/10 hover:text-white'
-                }`}
-              >
-                <ArrowLeft size={16} /> {navLabel(item, t)}
-              </button>
-            );
-          }
-          return (
-            <button
-              key={item.id}
-              type="button"
-              onClick={() => go(item.href)}
-              className={navButtonClass(item, isActive)}
-            >
-              <item.icon size={16} className="shrink-0" />
-              <span className={isHome ? 'flex-1 text-left' : ''}>{navLabel(item, t)}</span>
-              {item.id === 'tva' && isHome && (
-                <span className="w-2 h-2 bg-red-400 rounded-full animate-pulse" aria-hidden />
-              )}
-            </button>
-          );
-        })}
+        {coreNavItems.map(renderNavItem)}
+
+        {enterpriseNavItems.length > 0 && (
+          <div className={isHome ? 'mt-3 pt-3 border-t border-white/10 space-y-0.5' : 'mt-3 pt-3 border-t border-white/10 space-y-1'}>
+            <p className="px-3 pb-1.5 text-[10px] font-semibold uppercase tracking-wider text-white/35 select-none">
+              {t ? t('Modules Zafirix', 'وحدات زفيريكس') : 'Modules Zafirix'}
+            </p>
+            {enterpriseNavItems.map(renderNavItem)}
+          </div>
+        )}
+
         {children}
       </nav>
 

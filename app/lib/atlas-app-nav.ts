@@ -32,6 +32,8 @@ import {
   Mail,
   MessageSquareHeart,
   GitCompare,
+  KeyRound,
+  ScrollText,
 } from 'lucide-react';
 
 export type AtlasNavItemId =
@@ -67,6 +69,7 @@ export type AtlasNavItemId =
   | 'calendrier-fiscal'
   | 'contrats'
   | 'briefing-ceo'
+  | 'auditor-pass'
   | 'is'
   | 'liasse'
   | 'ir'
@@ -116,7 +119,8 @@ export const ATLAS_APP_NAV_ITEMS: AtlasAppNavItem[] = [
   { id: 'satisfaction-client', label: 'Satisfaction client', labelAr: 'رضا العملاء', icon: MessageSquareHeart, href: '/satisfaction-client' },
   { id: 'caisse', label: 'Caisse', labelAr: 'الصندوق', icon: Wallet, href: '/caisse' },
   { id: 'juridique', label: 'Juridique', labelAr: 'القانونية', icon: Scale, href: '/juridique' },
-  { id: 'gouvernance', label: 'Gouvernance & CA', labelAr: 'الحوكمة', icon: Shield, href: '/gouvernance' },
+  { id: 'gouvernance', label: 'Gouvernance & CA', labelAr: 'الحوكمة', icon: ScrollText, href: '/gouvernance' },
+  { id: 'auditor-pass', label: 'Pass auditeur', labelAr: 'تصريح المدقق', icon: KeyRound, href: '/auditor/test-token' },
   { id: 'contrats', label: 'Contrats', labelAr: 'العقود', icon: FileSignature, href: '/contrats' },
   { id: 'rh', label: 'Ressources humaines', labelAr: 'الموارد البشرية', icon: Users, href: '/rh' },
   { id: 'etude', label: 'Étude de projet', labelAr: 'دراسة الجدوى', icon: BarChart2, href: '/etude-projet' },
@@ -134,6 +138,40 @@ export const ATLAS_APP_NAV_ITEMS: AtlasAppNavItem[] = [
   { id: 'admin', label: 'Administration', labelAr: 'الإدارة', icon: Shield, href: '/admin' },
 ];
 
+/**
+ * Sixteen Zafirix enterprise modules — grouped in the sidebar under "Modules Zafirix".
+ * Order matches product dashboard layout.
+ */
+export const ZAFIRIX_ENTERPRISE_NAV_IDS: AtlasNavItemId[] = [
+  'briefing-ceo',
+  'inventaire',
+  'caisse',
+  'logistique',
+  'recouvrement',
+  'contrats',
+  'calendrier-fiscal',
+  'simulateur-fiscal',
+  'immobilisations',
+  'rh',
+  'gouvernance',
+  'commissions',
+  'courrier',
+  'satisfaction-client',
+  'auditor-pass',
+  'settings',
+];
+
+const ZAFIRIX_ENTERPRISE_NAV_ID_SET = new Set<AtlasNavItemId>(ZAFIRIX_ENTERPRISE_NAV_IDS);
+
+export function getZafirixEnterpriseNavItems(items: AtlasAppNavItem[]): AtlasAppNavItem[] {
+  const byId = new Map(items.map((item) => [item.id, item]));
+  return ZAFIRIX_ENTERPRISE_NAV_IDS.map((id) => byId.get(id)).filter(Boolean) as AtlasAppNavItem[];
+}
+
+export function getCoreAtlasNavItems(items: AtlasAppNavItem[]): AtlasAppNavItem[] {
+  return items.filter((item) => !ZAFIRIX_ENTERPRISE_NAV_ID_SET.has(item.id));
+}
+
 /** Full module list for the sidebar on every app route (single source of truth: `ATLAS_APP_NAV_ITEMS` order). */
 const ALL_ATLAS_NAV_IDS: AtlasNavItemId[] = ATLAS_APP_NAV_ITEMS.map((item) => item.id);
 
@@ -149,6 +187,9 @@ export function filterAtlasNavItemsForPath(pathname: string): AtlasAppNavItem[] 
 
 export function resolveActiveAtlasNavId(pathname: string, visible: AtlasAppNavItem[]): AtlasNavItemId {
   const p = pathname || '/';
+  if (p.startsWith('/auditor/') && visible.some((item) => item.id === 'auditor-pass')) {
+    return 'auditor-pass';
+  }
   let best: { id: AtlasNavItemId; len: number } | null = null;
   for (const item of visible) {
     if (item.href === '/') {
