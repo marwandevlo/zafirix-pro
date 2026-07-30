@@ -26,6 +26,15 @@ create index if not exists atlas_supplier_invoices_user_company_idx
 create index if not exists atlas_supplier_invoices_status_idx
   on public.atlas_supplier_invoices (user_id, status);
 
+-- Dedupe rows that would violate the partial unique index (keep newest per user + document).
+delete from public.atlas_supplier_invoices a
+using public.atlas_supplier_invoices b
+where a.document_id is not null
+  and b.document_id is not null
+  and a.user_id = b.user_id
+  and a.document_id = b.document_id
+  and a.created_at < b.created_at;
+
 -- Re-assert idempotency index (safe if baseline already created it).
 create unique index if not exists atlas_supplier_invoices_user_document_unique
   on public.atlas_supplier_invoices (user_id, document_id)

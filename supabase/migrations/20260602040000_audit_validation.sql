@@ -78,12 +78,23 @@ alter table public.atlas_accounting_entries
   add constraint atlas_accounting_entries_validation_status_check
     check (validation_status in ('draft','needs_review','reviewed','validated','rejected','archived'));
 
--- zafirix_tva_suggestions — add 'reviewed' to status options
+-- zafirix_tva_suggestions — extend validation_status options (column is validation_status, not status)
 alter table public.zafirix_tva_suggestions
   drop constraint if exists zafirix_tva_suggestions_status_check;
 alter table public.zafirix_tva_suggestions
-  add constraint zafirix_tva_suggestions_status_check
-    check (status in ('pending','reviewed','validated','rejected','archived'));
+  drop constraint if exists zafirix_tva_suggestions_validation_status_check;
+
+update public.zafirix_tva_suggestions
+set validation_status = 'pending'
+where validation_status not in (
+  'pending', 'reviewed', 'validated', 'rejected', 'archived', 'included_in_declaration'
+);
+
+alter table public.zafirix_tva_suggestions
+  add constraint zafirix_tva_suggestions_validation_status_check
+    check (validation_status in (
+      'pending', 'reviewed', 'validated', 'rejected', 'archived', 'included_in_declaration'
+    ));
 
 -- ── Useful views ──────────────────────────────────────────────────────────────
 
