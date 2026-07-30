@@ -79,11 +79,17 @@ async function resolveWorkspaceRole(
   return slug && slug in ATLAS_ROLE_RANK ? (slug as AtlasRoleSlug) : null;
 }
 
-async function resolveCompanyRole(
+export type CompanyRoleContext = {
+  role: AtlasRoleSlug | null;
+  workspaceId: string | null;
+  owned: boolean;
+};
+
+export async function resolveCompanyRole(
   db: SupabaseClient,
   userId: string,
   companyId: string,
-): Promise<{ role: AtlasRoleSlug | null; workspaceId: string | null; owned: boolean }> {
+): Promise<CompanyRoleContext> {
   const { data: company } = await db
     .from('atlas_companies')
     .select('id, user_id, workspace_id')

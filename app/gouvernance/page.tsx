@@ -214,7 +214,7 @@ export default function GouvernancePage() {
 
   return (
     <div className="flex h-screen bg-gray-50">
-      <AppSidebar />
+      <AppSidebar variant="module" />
       <main className="flex-1 flex flex-col overflow-hidden">
         <div className="flex-1 overflow-y-auto px-6 py-6 space-y-6">
           <div className="flex flex-wrap items-start justify-between gap-4">
@@ -436,7 +436,7 @@ export default function GouvernancePage() {
                 </div>
               )}
 
-              {(tab === 'all' || tab === 'meetings') && tab !== 'board' && tab !== 'access_log' && (
+              {(tab === 'all' || tab === 'meetings') && (
                 <section className="bg-white rounded-xl border overflow-hidden">
                   <div className="px-4 py-3 border-b bg-gray-50 flex items-center gap-2">
                     <Gavel className="h-4 w-4 text-indigo-600" />
@@ -481,7 +481,7 @@ export default function GouvernancePage() {
                 </section>
               )}
 
-              {(tab === 'all' || tab === 'resolutions') && tab !== 'board' && tab !== 'access_log' && (
+              {(tab === 'all' || tab === 'resolutions') && (
                 <section className="bg-white rounded-xl border overflow-hidden">
                   <div className="px-4 py-3 border-b bg-gray-50"><h2 className="text-sm font-semibold">Résolutions associés (AGO/AGE)</h2></div>
                   {resolutions.length === 0 ? (
@@ -516,7 +516,7 @@ export default function GouvernancePage() {
                 </section>
               )}
 
-              {(tab === 'all' || tab === 'documents') && tab !== 'board' && tab !== 'access_log' && (
+              {(tab === 'all' || tab === 'documents') && (
                 <section className="bg-white rounded-xl border overflow-hidden">
                   <div className="px-4 py-3 border-b bg-gray-50"><h2 className="text-sm font-semibold">Documents de gouvernance</h2></div>
                   {documents.length === 0 ? (

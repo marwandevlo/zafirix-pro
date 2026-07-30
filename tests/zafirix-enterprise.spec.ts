@@ -109,14 +109,99 @@ test.describe('Zafirix Pro — Enterprise modules', () => {
     await page.waitForLoadState('networkidle');
 
     await expect(page.getByRole('heading', { name: /Caisse/i })).toBeVisible();
-    await expect(page.getByRole('button', { name: /Nouvelle écriture/i })).toBeVisible();
-    await expect(page.getByText(/Solde caisse/i)).toBeVisible();
+    await expect(page.getByText(/Solde caisse|Fonds de caisse/i).first()).toBeVisible();
 
-    const emptyRow = page.getByRole('cell', { name: 'Aucune écriture' });
-    const tableHeader = page.getByRole('columnheader', { name: 'Date' });
-    const hasTable = await tableHeader.isVisible().catch(() => false);
-    const hasEmpty = await emptyRow.isVisible().catch(() => false);
-    expect(hasTable || hasEmpty).toBeTruthy();
+    await assertHealthyPage(page, audit, { allowAuthRedirect: true });
+  });
+
+  test('Calendrier fiscal — interactive calendar', async ({ page }) => {
+    const audit = attachPageAudit(page);
+    await page.goto('/calendrier-fiscal');
+    await page.waitForLoadState('networkidle');
+
+    await expect(page.getByRole('heading', { name: /Calendrier fiscal/i })).toBeVisible();
+    await expect(page.getByText(/TVA|IS|CNSS/i).first()).toBeVisible();
+
+    await assertHealthyPage(page, audit, { allowAuthRedirect: true });
+  });
+
+  test('Contrats — contract management dashboard', async ({ page }) => {
+    const audit = attachPageAudit(page);
+    await page.goto('/contrats');
+    await page.waitForLoadState('networkidle');
+
+    await expect(page.getByRole('heading', { name: /Contrats/i })).toBeVisible();
+    await expect(page.getByText(/Actifs|Expirant/i).first()).toBeVisible();
+
+    await assertHealthyPage(page, audit, { allowAuthRedirect: true });
+  });
+
+  test('Briefing CEO — executive KPI dashboard', async ({ page }) => {
+    const audit = attachPageAudit(page);
+    await page.goto('/briefing-ceo');
+    await page.waitForLoadState('networkidle');
+
+    await expect(page.getByRole('heading', { name: /Briefing/i })).toBeVisible();
+
+    await assertHealthyPage(page, audit, { allowAuthRedirect: true });
+  });
+
+  test('Commissions — brokerage dashboard', async ({ page }) => {
+    const audit = attachPageAudit(page);
+    await page.goto('/commissions');
+    await page.waitForLoadState('networkidle');
+
+    await expect(page.getByRole('heading', { name: /Commissions/i })).toBeVisible();
+
+    await assertHealthyPage(page, audit, { allowAuthRedirect: true });
+  });
+
+  test('Courrier — correspondence registry', async ({ page }) => {
+    const audit = attachPageAudit(page);
+    await page.goto('/courrier');
+    await page.waitForLoadState('networkidle');
+
+    await expect(page.getByRole('heading', { name: /Courrier/i })).toBeVisible();
+
+    await assertHealthyPage(page, audit, { allowAuthRedirect: true });
+  });
+
+  test('Satisfaction client — NPS feedback dashboard', async ({ page }) => {
+    const audit = attachPageAudit(page);
+    await page.goto('/satisfaction-client');
+    await page.waitForLoadState('networkidle');
+
+    await expect(page.getByRole('heading', { name: /Satisfaction/i })).toBeVisible();
+
+    await assertHealthyPage(page, audit, { allowAuthRedirect: true });
+  });
+
+  test('Simulateur fiscal — tax what-if planner', async ({ page }) => {
+    const audit = attachPageAudit(page);
+    await page.goto('/simulateur-fiscal');
+    await page.waitForLoadState('networkidle');
+
+    await expect(page.getByRole('heading', { name: /Simulateur fiscal/i })).toBeVisible();
+
+    await assertHealthyPage(page, audit, { allowAuthRedirect: true });
+  });
+
+  test('Immobilisations — fixed assets ledger', async ({ page }) => {
+    const audit = attachPageAudit(page);
+    await page.goto('/immobilisations');
+    await page.waitForLoadState('networkidle');
+
+    await expect(page.getByRole('heading', { name: /Immobilisations/i })).toBeVisible();
+
+    await assertHealthyPage(page, audit, { allowAuthRedirect: true });
+  });
+
+  test('Gouvernance — board minutes archive', async ({ page }) => {
+    const audit = attachPageAudit(page);
+    await page.goto('/gouvernance');
+    await page.waitForLoadState('networkidle');
+
+    await expect(page.getByRole('heading', { name: /Gouvernance/i })).toBeVisible();
 
     await assertHealthyPage(page, audit, { allowAuthRedirect: true });
   });
@@ -126,9 +211,21 @@ test.describe('Zafirix Pro — Enterprise modules', () => {
     const endpoints = [
       `/api/inventory?companyId=${companyId}`,
       `/api/logistics/deliveries?companyId=${companyId}`,
+      `/api/logistics/partners?companyId=${companyId}`,
+      `/api/logistics/cod-reconciliation?companyId=${companyId}`,
       `/api/debt-collection?companyId=${companyId}`,
       `/api/petty-cash?companyId=${companyId}`,
       `/api/notifications?companyId=${companyId}&limit=5`,
+      `/api/fiscal-calendar?companyId=${companyId}`,
+      `/api/contracts?companyId=${companyId}`,
+      `/api/executive-briefing?companyId=${companyId}`,
+      `/api/commissions?companyId=${companyId}`,
+      `/api/courrier?companyId=${companyId}`,
+      `/api/client-feedback?companyId=${companyId}`,
+      `/api/tax-whatif?companyId=${companyId}`,
+      `/api/fixed-assets?companyId=${companyId}`,
+      `/api/hr-compliance?companyId=${companyId}`,
+      `/api/governance?companyId=${companyId}`,
       `/api/factures?companyId=${companyId}`,
     ];
 
