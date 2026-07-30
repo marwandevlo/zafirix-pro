@@ -76,6 +76,44 @@ export async function copyDocumentShareLink(documentId: string, entityLabel: str
   return data.shareLink;
 }
 
+export type FeedbackShareLinkResponse = {
+  ok?: boolean;
+  item?: { shareUrl?: string | null; clientName?: string | null; subjectLabel?: string };
+  error?: string;
+};
+
+/** Create a client feedback request link (invoice, project, or manual). */
+export async function createFeedbackShareLink(
+  companyId: string,
+  options: {
+    invoiceId?: string;
+    projectId?: string;
+    subjectLabel?: string;
+    clientName?: string;
+    channel?: 'whatsapp' | 'email' | 'link';
+  },
+): Promise<FeedbackShareLinkResponse> {
+  const action = options.invoiceId
+    ? 'create_for_invoice'
+    : options.projectId
+      ? 'create_for_project'
+      : 'create_request';
+
+  const body: Record<string, unknown> = { action, companyId, channel: options.channel ?? 'whatsapp' };
+  if (options.invoiceId) body.invoiceId = options.invoiceId;
+  if (options.projectId) body.projectId = options.projectId;
+  if (options.subjectLabel) body.subjectLabel = options.subjectLabel;
+  if (options.clientName) body.clientName = options.clientName;
+
+  const res = await fetch('/api/client-feedback', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    credentials: 'include',
+    body: JSON.stringify(body),
+  });
+  return (await res.json()) as FeedbackShareLinkResponse;
+}
+
 /** Backup document to Google Drive; falls back to local PDF download on failure. */
 export async function backupDocumentToDrive(
   documentId: string,
@@ -121,5 +159,23 @@ export function invoiceShareMessage(invoiceNumber: string, clientName: string, a
     `Votre facture ${invoiceNumber} d'un montant de ${amountMad.toLocaleString('fr-MA')} MAD ` +
     `est disponible sur Zafirix Pro.\n${origin}/factures\n\n` +
     `Cordialement.`
+  );
+}
+
+/** Professional message for client satisfaction / NPS feedback links. */
+export function buildFeedbackShareMessage(params: {
+  clientName?: string;
+  subjectLabel: string;
+  shareUrl: string;
+  companyName?: string;
+}): string {
+  const greeting = params.clientName?.trim() ? `Bonjour ${params.clientName.trim()}` : 'Bonjour';
+  const company = params.companyName?.trim() ? `\n— ${params.companyName.trim()}` : '';
+  return (
+    `${greeting},\n\n` +
+    `Votre avis compte pour nous concernant « ${params.subjectLabel} ».\n` +
+    `Merci de répondre en 1 minute via ce lien sécurisé :\n${params.shareUrl}\n\n` +
+    `مرحباً، رأيكم يهمنا. يرجى تعبئة الاستبيان عبر الرابط أعلاه.` +
+    company
   );
 }

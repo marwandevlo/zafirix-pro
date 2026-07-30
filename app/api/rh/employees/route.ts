@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { atlasDataBackend } from '@/app/lib/atlas-data-source';
 import { requireAgentsRouteDb } from '@/app/lib/atlas-agents-route-db';
+import { seedEmployeeCompliance } from '@/app/lib/atlas-hr-compliance-server';
+import { getSupabaseServiceRoleClient } from '@/app/lib/supabase-admin';
 
 export async function GET(request: NextRequest) {
   if (atlasDataBackend() !== 'supabase') {
@@ -80,5 +82,13 @@ export async function POST(request: NextRequest) {
     .single();
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+
+  try {
+    const admin = getSupabaseServiceRoleClient();
+    await seedEmployeeCompliance(admin, ctx.userId, companyId, data.id);
+  } catch {
+    // Compliance tables may not be migrated yet — employee creation still succeeds.
+  }
+
   return NextResponse.json({ employee: data });
 }

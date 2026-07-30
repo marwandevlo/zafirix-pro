@@ -13,6 +13,7 @@ import {
   MessageCircle,
   Share2,
   Bell,
+  MessageSquareHeart,
   MoreHorizontal,
 } from 'lucide-react';
 import {
@@ -37,6 +38,8 @@ export type QuickShareHubProps = {
   onSendEmail?: () => void;
   /** Trigger automated notification (invoice reminder, etc.). */
   onSendReminder?: () => void | Promise<void>;
+  /** Send client satisfaction / NPS feedback request link. */
+  onSendFeedbackRequest?: () => void | Promise<void>;
   whatsAppMessage?: string;
   onDownloadPdf?: () => void;
   /** Custom secure link copy (invoices / reports). */
@@ -67,6 +70,7 @@ export function QuickShareHub({
   onExport,
   onSendEmail,
   onSendReminder,
+  onSendFeedbackRequest,
   whatsAppMessage,
   onDownloadPdf,
   onCopySecureLink,
@@ -208,7 +212,7 @@ export function QuickShareHub({
   const showExports = !hideExports ? (onExport || documentId || onDownloadPdf) : extraExportFormats.length > 0 && Boolean(onExport || documentId);
   const showCopyLink = onCopySecureLink || documentId;
   const menuHasExports = (onDownloadPdf && !onExport && !hideExports) || menuExportFormats.length > 0;
-  const menuHasShareExtras = Boolean(onSendReminder || showCopyLink || documentId);
+  const menuHasShareExtras = Boolean(onSendReminder || onSendFeedbackRequest || showCopyLink || documentId);
 
   const menu = open ? (
     <div
@@ -296,6 +300,22 @@ export function QuickShareHub({
           className="w-full flex items-center gap-2.5 px-3 py-2 text-sm text-amber-700 hover:bg-amber-50"
         >
           <Bell size={14} /> Rappel automatique
+        </button>
+      )}
+
+      {onSendFeedbackRequest && (
+        <button
+          type="button"
+          role="menuitem"
+          onClick={() => {
+            void Promise.resolve(onSendFeedbackRequest()).then(() => {
+              close();
+              flash('Demande d\'avis envoyée');
+            });
+          }}
+          className="w-full flex items-center gap-2.5 px-3 py-2 text-sm text-indigo-700 hover:bg-indigo-50"
+        >
+          <MessageSquareHeart size={14} /> Demander un avis client
         </button>
       )}
 

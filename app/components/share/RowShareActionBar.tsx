@@ -20,6 +20,7 @@ export type RowShareActionBarProps = {
   documentId?: string;
   onCopySecureLink?: () => void | Promise<void>;
   onSendReminder?: () => void | Promise<void>;
+  onSendFeedbackRequest?: () => void | Promise<void>;
   onDownloadPdf?: () => void;
   driveSyncStatus?: DriveSyncState;
   onDriveSyncStatusChange?: (status: DriveSyncState) => void;
@@ -45,6 +46,7 @@ export function RowShareActionBar({
   documentId,
   onCopySecureLink,
   onSendReminder,
+  onSendFeedbackRequest,
   onDownloadPdf,
   driveSyncStatus,
   onDriveSyncStatusChange,
@@ -82,6 +84,7 @@ export function RowShareActionBar({
         onExport={onExport}
         onSendEmail={onSendEmail}
         onSendReminder={onSendReminder}
+        onSendFeedbackRequest={onSendFeedbackRequest}
         onCopySecureLink={onCopySecureLink}
         onDownloadPdf={onDownloadPdf}
         whatsAppMessage={whatsAppMessage}

@@ -1,10 +1,10 @@
 'use client';
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Plus, Trash2, Download, Send, ReceiptText, CheckCircle2, Wallet, AlertTriangle, Archive, History, Eye, Share2, Edit3 } from 'lucide-react';
+import { Plus, Trash2, Download, Send, ReceiptText, CheckCircle2, Wallet, AlertTriangle, Archive, History, Eye, Share2, Edit3, Truck } from 'lucide-react';
 import { EntityActionMenu, ConfirmDeleteDialog, EntityHistoryDrawer } from '@/app/components/actions';
 import type { ActionItem } from '@/app/components/actions';
 import { RowShareActionBar } from '@/app/components/share';
-import { invoiceShareMessage, createDocumentShareLink } from '@/app/lib/atlas-quick-share';
+import { invoiceShareMessage, createDocumentShareLink, createFeedbackShareLink, buildFeedbackShareMessage, openWhatsAppShare } from '@/app/lib/atlas-quick-share';
 import { copyTextToClipboard } from '@/app/lib/copy-to-clipboard';
 import { exportInvoiceFormat, INVOICE_EXPORT_FORMATS } from '@/app/lib/atlas-invoice-export';
 import type { ExportFormat } from '@/app/lib/atlas-export-engine';
@@ -37,6 +37,9 @@ import { ExportMenu } from '@/app/components/ExportMenu';
 import type { ExportColumn } from '@/app/components/ExportMenu';
 import { EntityAuditTable } from '@/app/components/history/EntityAuditTable';
 import { ModuleLoadErrorBanner } from '@/app/lib/use-enterprise-module-fetch';
+import { InvoiceShipmentPanel, type InvoiceShipmentTarget } from '@/app/components/logistics/InvoiceShipmentPanel';
+import { ShipmentStatusBadge } from '@/app/components/logistics/ShipmentStatusBadge';
+import type { AtlasDelivery } from '@/app/types/atlas-enterprise-modules';
 
 const FACTURE_EXPORT_COLUMNS: ExportColumn[] = [
   { key: 'numero', label: 'Numéro' },
@@ -96,6 +99,9 @@ export default function FacturesPage() {
     amount: '',
     paidAt: todayYmd(),
   });
+  const [deliveriesByInvoice, setDeliveriesByInvoice] = useState<Record<string, AtlasDelivery>>({});
+  const [shipmentModal, setShipmentModal] = useState<InvoiceShipmentTarget | null>(null);
+  const [activeCompanyId, setActiveCompanyId] = useState<string | null>(null);
 
   const resetInvoiceUiState = useCallback(() => {
     setShowForm(false);
@@ -146,6 +152,30 @@ export default function FacturesPage() {
 
     const pay = await listAtlasPayments();
     setPayments(pay);
+
+    if (isAtlasSupabaseDataEnabled()) {
+      const companyId = await getActiveCompanyDbRowId();
+      setActiveCompanyId(companyId);
+      if (companyId) {
+        try {
+          const res = await fetch(`/api/logistics/deliveries?companyId=${encodeURIComponent(companyId)}`, {
+            credentials: 'include',
+          });
+          if (res.ok) {
+            const body = (await res.json()) as { deliveries?: AtlasDelivery[] };
+            const map: Record<string, AtlasDelivery> = {};
+            for (const d of body.deliveries ?? []) {
+              if (d.invoiceId) map[d.invoiceId] = d;
+            }
+            setDeliveriesByInvoice(map);
+          }
+        } catch {
+          setDeliveriesByInvoice({});
+        }
+      } else {
+        setDeliveriesByInvoice({});
+      }
+    }
   }, [searchParams, resetInvoiceUiState, clearUrlInvoiceId]);
 
   useEffect(() => {
@@ -325,6 +355,23 @@ export default function FacturesPage() {
       `Facture ${r.numero} · ${r.client} · ${Math.round(r.ttc).toLocaleString('fr-MA')} MAD\n` +
       `${typeof window !== 'undefined' ? window.location.origin : ''}/factures`;
     await copyTextToClipboard(summary);
+  };
+
+  const sendInvoiceFeedbackRequest = async (r: FactureRow) => {
+    if (!activeCompanyId || !isAtlasSupabaseDataEnabled()) return;
+    const data = await createFeedbackShareLink(activeCompanyId, {
+      invoiceId: String(r.id),
+      channel: 'whatsapp',
+    });
+    if (!data.ok || !data.item?.shareUrl) {
+      throw new Error(data.error ?? 'feedback_link_failed');
+    }
+    const message = buildFeedbackShareMessage({
+      clientName: r.client,
+      subjectLabel: data.item.subjectLabel ?? `Facture ${r.numero}`,
+      shareUrl: data.item.shareUrl,
+    });
+    openWhatsAppShare(message);
   };
 
   const exportInvoice = async (r: FactureRow, format: ExportFormat) => {
@@ -882,6 +929,7 @@ export default function FacturesPage() {
                         {f.sourceDocumentId && (
                           <SourceDocumentBadge sourceDocumentId={f.sourceDocumentId} sourceDocumentType="sales_invoice" variant="compact" />
                         )}
+                        <ShipmentStatusBadge delivery={deliveriesByInvoice[String(f.id)]} compact />
                       </div>
                     </td>
                     <td className="px-4 py-3 text-gray-600">{f.client}</td>
@@ -907,6 +955,11 @@ export default function FacturesPage() {
                         onExport={(fmt) => void exportInvoice(f, fmt)}
                         onSendEmail={() => void sendInvoiceEmail(f)}
                         onSendReminder={() => sendInvoiceNotificationReminder(f)}
+                        onSendFeedbackRequest={
+                          isAtlasSupabaseDataEnabled() && activeCompanyId && f.statut === 'payée'
+                            ? () => sendInvoiceFeedbackRequest(f)
+                            : undefined
+                        }
                         onCopySecureLink={() => copyInvoiceSecureLink(f)}
                         mailto={{
                           subject: `Facture ${f.numero}`,
@@ -919,6 +972,22 @@ export default function FacturesPage() {
                             className="text-gray-300 hover:text-emerald-600 transition-colors text-xs font-medium"
                           >
                             + Paiement
+                          </button>
+                        )}
+                        {isAtlasSupabaseDataEnabled() && activeCompanyId && (
+                          <button
+                            type="button"
+                            onClick={() => setShipmentModal({
+                              id: String(f.id),
+                              number: f.numero,
+                              clientName: f.client,
+                              totalTTC: f.ttc,
+                              reste: f.reste,
+                            })}
+                            className="text-gray-300 hover:text-blue-600 transition-colors text-xs font-medium inline-flex items-center gap-0.5"
+                            title="Livraison & COD"
+                          >
+                            <Truck size={12} /> Livraison
                           </button>
                         )}
                         {f.statut === 'en retard' && (
@@ -961,6 +1030,20 @@ export default function FacturesPage() {
                               label: 'Envoyer par email',
                               Icon: Send,
                               onClick: () => void sendInvoiceEmail(f),
+                            },
+                            {
+                              id: 'shipment',
+                              label: deliveriesByInvoice[String(f.id)] ? 'Suivi livraison & COD' : 'Créer expédition COD',
+                              Icon: Truck,
+                              onClick: () => setShipmentModal({
+                                id: String(f.id),
+                                number: f.numero,
+                                clientName: f.client,
+                                totalTTC: f.ttc,
+                                reste: f.reste,
+                              }),
+                              hidden: !isAtlasSupabaseDataEnabled() || !activeCompanyId,
+                              dividerAfter: true,
                             },
                             {
                               id: 'share',
@@ -1071,6 +1154,17 @@ export default function FacturesPage() {
         })()}
         onClose={() => setHistoryInvoiceId(null)}
       />
+
+      {activeCompanyId && shipmentModal && (
+        <InvoiceShipmentPanel
+          open={!!shipmentModal}
+          onClose={() => setShipmentModal(null)}
+          companyId={activeCompanyId}
+          invoice={shipmentModal}
+          existingDelivery={deliveriesByInvoice[shipmentModal.id] ?? null}
+          onSaved={() => void loadPageData()}
+        />
+      )}
     </div>
   );
 }

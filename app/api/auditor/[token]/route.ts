@@ -1,62 +1,56 @@
 import { NextRequest, NextResponse } from 'next/server';
+import {
+  AuditorPassError,
+  buildAuditorPortalPayload,
+  recordAuditorAccess,
+  validateAuditorPass,
+} from '@/app/lib/atlas-auditor-pass-server';
 import { getSupabaseServiceRoleClient } from '@/app/lib/supabase-admin';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
+function clientIp(request: NextRequest): string | undefined {
+  return request.headers.get('x-forwarded-for')?.split(',')[0]?.trim()
+    ?? request.headers.get('x-real-ip')
+    ?? undefined;
+}
+
 export async function GET(
-  _request: NextRequest,
+  request: NextRequest,
   context: { params: Promise<{ token: string }> },
 ) {
   const { token } = await context.params;
   if (!token) return NextResponse.json({ error: 'missing_token' }, { status: 400 });
 
   const admin = getSupabaseServiceRoleClient();
-  const { data: pass, error } = await admin
-    .from('zafirix_auditor_passes')
-    .select('*')
-    .eq('token', token)
-    .is('revoked_at', null)
-    .maybeSingle();
+  const view = (new URL(request.url).searchParams.get('view') ?? 'dashboard') as
+    'dashboard' | 'journal' | 'ledger' | 'invoices' | 'payments' | 'bank' | 'full';
 
-  if (error || !pass) return NextResponse.json({ error: 'invalid_token' }, { status: 404 });
-  if (new Date(pass.expires_at) < new Date()) {
-    return NextResponse.json({ error: 'expired' }, { status: 410 });
+  try {
+    const pass = await validateAuditorPass(admin, token);
+    const payload = await buildAuditorPortalPayload(admin, pass, view);
+
+    const actionMap: Record<string, 'portal_view' | 'view_journal' | 'view_ledger' | 'view_invoices'> = {
+      dashboard: 'portal_view',
+      journal: 'view_journal',
+      ledger: 'view_ledger',
+      invoices: 'view_invoices',
+      full: 'portal_view',
+    };
+
+    await recordAuditorAccess(admin, pass, actionMap[view] ?? 'portal_view', {
+      resource: view,
+      ip: clientIp(request),
+      userAgent: request.headers.get('user-agent') ?? undefined,
+    });
+
+    return NextResponse.json({ ok: true, ...payload });
+  } catch (e) {
+    if (e instanceof AuditorPassError) {
+      const status = e.code === 'expired' ? 410 : e.code === 'forbidden' ? 403 : 404;
+      return NextResponse.json({ error: e.code }, { status });
+    }
+    return NextResponse.json({ error: 'server_error' }, { status: 500 });
   }
-
-  await admin
-    .from('zafirix_auditor_passes')
-    .update({ access_count: (pass.access_count ?? 0) + 1 })
-    .eq('id', pass.id);
-
-  const companyId = pass.company_id as string | null;
-
-  const [invoices, documents, legalDocs] = await Promise.all([
-    companyId
-      ? admin.from('atlas_invoices').select('id, number, client_name, total_ttc, status, due_date').eq('company_id', companyId).limit(50)
-      : Promise.resolve({ data: [] }),
-    companyId
-      ? admin.from('atlas_documents').select('id, filename, document_type, created_at').eq('company_id', companyId).limit(30)
-      : Promise.resolve({ data: [] }),
-    companyId
-      ? admin.from('zafirix_legal_documents').select('id, title, expiry_date, document_type').eq('company_id', companyId).limit(20)
-      : Promise.resolve({ data: [] }),
-  ]);
-
-  return NextResponse.json({
-    ok: true,
-    pass: {
-      label: pass.label,
-      scope: pass.scope,
-      expiresAt: pass.expires_at,
-    },
-    summary: {
-      invoiceCount: invoices.data?.length ?? 0,
-      documentCount: documents.data?.length ?? 0,
-      contractCount: legalDocs.data?.length ?? 0,
-    },
-    invoices: invoices.data ?? [],
-    documents: documents.data ?? [],
-    contracts: legalDocs.data ?? [],
-  });
 }

@@ -26,6 +26,12 @@ import {
   Truck,
   Wallet,
   Gavel,
+  Calendar,
+  FileSignature,
+  BadgePercent,
+  Mail,
+  MessageSquareHeart,
+  GitCompare,
 } from 'lucide-react';
 
 export type AtlasNavItemId =
@@ -46,12 +52,21 @@ export type AtlasNavItemId =
   | 'inventaire'
   | 'logistique'
   | 'recouvrement'
+  | 'commissions'
+  | 'courrier'
+  | 'satisfaction-client'
+  | 'simulateur-fiscal'
+  | 'immobilisations'
   | 'caisse'
   | 'juridique'
+  | 'gouvernance'
   | 'rh'
   | 'etude'
   | 'rapports'
   | 'tva'
+  | 'calendrier-fiscal'
+  | 'contrats'
+  | 'briefing-ceo'
   | 'is'
   | 'liasse'
   | 'ir'
@@ -82,6 +97,7 @@ export const ATLAS_APP_NAV_ITEMS: AtlasAppNavItem[] = [
   { id: 'cabinet', label: 'Portfolio cabinet', labelAr: 'محفظة المكتب', icon: Users, href: '/cabinet' },
   { id: 'clients', label: 'Clients', labelAr: 'العملاء', icon: Users, href: '/clients' },
   { id: 'consultant', label: 'Consultant IA', labelAr: 'المستشار الذكي', icon: Brain, href: '/consultant' },
+  { id: 'briefing-ceo', label: 'Briefing CEO', labelAr: 'موجز المدير', icon: Sparkles, href: '/briefing-ceo' },
   { id: 'assistant', label: 'Assistant IA', labelAr: 'المساعد المحاسبي', icon: Sparkles, href: '/assistant' },
   { id: 'smart-generator', label: 'Smart Generator', labelAr: 'المولّد الذكي', icon: Wand2, href: '/smart-generator' },
   { id: 'audit', label: 'Audit IA', labelAr: 'التدقيق الذكي', icon: Shield, href: '/audit' },
@@ -89,17 +105,25 @@ export const ATLAS_APP_NAV_ITEMS: AtlasAppNavItem[] = [
   { id: 'documents', label: 'Documents IA', labelAr: 'وثائق ذكية', icon: Upload, href: '/documents' },
   { id: 'validation', label: 'Validation', labelAr: 'التحقق', icon: ClipboardList, href: '/validation' },
   { id: 'comptabilite', label: 'Comptabilité', labelAr: 'المحاسبة', icon: LayoutDashboard, href: '/comptabilite' },
+  { id: 'immobilisations', label: 'Immobilisations', labelAr: 'الأصول الثابتة', icon: Building2, href: '/immobilisations' },
   { id: 'banque', label: 'Banque', labelAr: 'البنك', icon: Landmark, href: '/banque' },
   { id: 'factures', label: 'Factures', labelAr: 'الفواتير', icon: FileText, href: '/factures' },
   { id: 'inventaire', label: 'Inventaire', labelAr: 'المخزون', icon: Package, href: '/inventaire' },
   { id: 'logistique', label: 'Logistique & COD', labelAr: 'اللوجستيك', icon: Truck, href: '/logistique' },
   { id: 'recouvrement', label: 'Recouvrement', labelAr: 'التحصيل', icon: Gavel, href: '/recouvrement' },
+  { id: 'commissions', label: 'Commissions', labelAr: 'العمولات', icon: BadgePercent, href: '/commissions' },
+  { id: 'courrier', label: 'Courrier', labelAr: 'البريد', icon: Mail, href: '/courrier' },
+  { id: 'satisfaction-client', label: 'Satisfaction client', labelAr: 'رضا العملاء', icon: MessageSquareHeart, href: '/satisfaction-client' },
   { id: 'caisse', label: 'Caisse', labelAr: 'الصندوق', icon: Wallet, href: '/caisse' },
   { id: 'juridique', label: 'Juridique', labelAr: 'القانونية', icon: Scale, href: '/juridique' },
+  { id: 'gouvernance', label: 'Gouvernance & CA', labelAr: 'الحوكمة', icon: Shield, href: '/gouvernance' },
+  { id: 'contrats', label: 'Contrats', labelAr: 'العقود', icon: FileSignature, href: '/contrats' },
   { id: 'rh', label: 'Ressources humaines', labelAr: 'الموارد البشرية', icon: Users, href: '/rh' },
   { id: 'etude', label: 'Étude de projet', labelAr: 'دراسة الجدوى', icon: BarChart2, href: '/etude-projet' },
   { id: 'rapports', label: 'Rapports', labelAr: 'التقارير', icon: FileText, href: '/rapports' },
   { id: 'tva', label: 'TVA', labelAr: 'الضريبة TVA', icon: Receipt, href: '/tva' },
+  { id: 'simulateur-fiscal', label: 'Simulateur fiscal IA', labelAr: 'محاكاة ضريبية', icon: GitCompare, href: '/simulateur-fiscal' },
+  { id: 'calendrier-fiscal', label: 'Calendrier fiscal', labelAr: 'التقويم الضريبي', icon: Calendar, href: '/calendrier-fiscal' },
   { id: 'is', label: 'IS Fiscal', labelAr: 'ضريبة الشركات', icon: Calculator, href: '/is' },
   { id: 'liasse', label: 'Liasse fiscale', labelAr: 'الحزمة الضريبية', icon: ClipboardList, href: '/liasse' },
   { id: 'ir', label: 'IR / Salaires', labelAr: 'الرواتب والضرائب', icon: TrendingUp, href: '/ir' },

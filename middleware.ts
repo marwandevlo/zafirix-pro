@@ -72,6 +72,8 @@ function isPublicPath(pathname: string): boolean {
   if (pathname.startsWith('/sitemap')) return true;
   if (pathname === '/share' || pathname.startsWith('/share/')) return true;
   if (pathname.startsWith('/api/share/')) return true;
+  if (pathname.startsWith('/feedback/')) return true;
+  if (pathname.startsWith('/api/client-feedback/public/')) return true;
   if (pathname.startsWith('/auditor/')) return true;
   if (pathname.startsWith('/api/auditor/') && !pathname.startsWith('/api/auditor/pass')) return true;
   if (isClientPortalPublicPath(pathname)) return true;

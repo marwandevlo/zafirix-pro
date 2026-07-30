@@ -12,6 +12,7 @@ import {
   requireOwnedCompany,
   requireOwnedInvoice,
 } from '@/app/lib/atlas-entity-ownership';
+import { syncInvoiceInventoryCogs, type InvoiceInventoryMetadata } from '@/app/lib/atlas-inventory';
 
 export function readInvoicesFromLocalStorage(): AtlasInvoice[] {
   if (blockCriticalLocalStorageInProduction('atlas_invoices')) return [];
@@ -211,11 +212,19 @@ export async function upsertAtlasInvoice(
       .eq('user_id', auth.userId)
       .eq('company_id', companyId);
     if (error) return { ok: false, error: error.message };
+    const invMeta = (invoice.metadata ?? {}) as InvoiceInventoryMetadata;
+    if (invMeta.inventoryLines?.length) {
+      void syncInvoiceInventoryCogs(companyId, invoice.id, invMeta.inventoryLines);
+    }
     return { ok: true };
   }
 
-  const { error } = await supabase.from('atlas_invoices').insert(row);
+  const { data: inserted, error } = await supabase.from('atlas_invoices').insert(row).select('id').single();
   if (error) return { ok: false, error: error.message };
+  const invMeta = (invoice.metadata ?? {}) as InvoiceInventoryMetadata;
+  if (invMeta.inventoryLines?.length && inserted?.id) {
+    void syncInvoiceInventoryCogs(companyId, String(inserted.id), invMeta.inventoryLines);
+  }
   return { ok: true };
 }
 

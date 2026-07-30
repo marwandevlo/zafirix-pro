@@ -89,9 +89,9 @@ export type AccountingJournalLine = {
   compte: string;
   debit: number;
   credit: number;
-  source_document_id: string;
+  source_document_id?: string;
   source_invoice_id?: string;
-  generated_by: 'documents_ia';
+  generated_by: 'documents_ia' | 'petty_cash' | 'fixed_assets';
   validation_status: 'draft';
 };
 
@@ -269,7 +269,7 @@ export async function persistJournalLines(
       credit: line.credit,
     },
     entry_date: line.date,
-    source_document_id: line.source_document_id,
+    source_document_id: line.source_document_id ?? null,
     source_invoice_id: line.source_invoice_id ?? null,
     generated_by: line.generated_by,
     validation_status: line.validation_status,

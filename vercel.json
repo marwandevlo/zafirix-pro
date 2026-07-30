@@ -7,6 +7,14 @@
     {
       "path": "/api/cron/ocr-recovery",
       "schedule": "0 6 * * *"
+    },
+    {
+      "path": "/api/cron/notification-alerts",
+      "schedule": "0 * * * *"
+    },
+    {
+      "path": "/api/cron/fiscal-calendar-alerts",
+      "schedule": "0 8 * * *"
     }
   ]
 }
