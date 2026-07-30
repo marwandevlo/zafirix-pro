@@ -25,6 +25,23 @@ export type AuditorAccessAction =
   | 'export_verification'
   | 'token_invalid';
 
+export type AtlasAuditorPass = {
+  id: string;
+  companyId: string | null;
+  token: string;
+  label: string;
+  scope: AuditorScope;
+  auditorRole?: AuditorRole;
+  permissions?: AuditorPermission[];
+  auditorEmail?: string | null;
+  auditorFirm?: string | null;
+  expiresAt: string;
+  revokedAt: string | null;
+  accessCount: number;
+  lastAccessAt?: string | null;
+  createdAt: string;
+};
+
 export type AtlasAuditorPassSession = {
   passId: string;
   companyId: string;

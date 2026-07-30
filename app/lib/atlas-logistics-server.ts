@@ -5,7 +5,7 @@ import type {
   AtlasShipmentTrackingEvent,
   CodCollectionMethod,
   DeliveryStatus,
-} from '@/app/types/atlas-enterprise-modules';
+} from '@/app/types/atlas-logistics';
 import { buildTrackingUrl } from '@/app/lib/atlas-logistics';
 
 export function rowToPartner(row: Record<string, unknown>): AtlasDeliveryPartner {

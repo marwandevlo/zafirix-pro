@@ -10,7 +10,7 @@ import {
   invoiceDedupeKey,
   resolveManagerContacts,
 } from '@/app/lib/atlas-notification-queue';
-import type { AtlasDebtCollectionCase, DebtCollectionStage } from '@/app/types/atlas-enterprise-modules';
+import type { AtlasDebtCollectionCase, DebtCollectionStage } from '@/app/types/atlas-debt-collection';
 import type {
   AgingBucket,
   AtlasClientRiskProfile,

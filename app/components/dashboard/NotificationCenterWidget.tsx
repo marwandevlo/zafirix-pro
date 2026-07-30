@@ -6,7 +6,7 @@ import { getActiveCompanyDbRowId } from '@/app/lib/atlas-active-company';
 import { onCompanySwitched } from '@/app/lib/atlas-company-switch-event';
 import { fetchEnterpriseModule, ModuleLoadErrorBanner } from '@/app/lib/use-enterprise-module-fetch';
 import { NOTIFICATION_CATEGORY_LABELS } from '@/app/lib/atlas-notifications-engine';
-import type { NotificationCategory } from '@/app/types/atlas-enterprise-modules';
+import type { NotificationCategory } from '@/app/types/atlas-notifications';
 
 type NotificationRow = {
   id: string;

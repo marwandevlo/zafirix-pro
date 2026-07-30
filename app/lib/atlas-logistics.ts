@@ -1,6 +1,6 @@
 /** Logistics & COD — labels, status helpers, URL builders. */
 
-import type { DeliveryStatus } from '@/app/types/atlas-enterprise-modules';
+import type { DeliveryStatus } from '@/app/types/atlas-logistics';
 
 export const DELIVERY_STATUS_LABELS: Record<DeliveryStatus, string> = {
   pending: 'En attente',

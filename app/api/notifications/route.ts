@@ -9,27 +9,14 @@ import {
   mapDbError,
 } from '@/app/lib/atlas-api-response';
 import { getSupabaseServiceRoleClient } from '@/app/lib/supabase-admin';
-import { runNotificationDispatchers } from '@/app/lib/atlas-notifications-engine';
+import {
+  listPendingQueueItems,
+  rowToNotification,
+  runNotificationDispatchers,
+} from '@/app/lib/atlas-notifications-server';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
-
-function rowToNotification(row: Record<string, unknown>) {
-  return {
-    id: String(row.id),
-    companyId: (row.company_id as string | null) ?? null,
-    channel: row.channel,
-    category: row.category,
-    title: String(row.title ?? ''),
-    body: (row.body as string | null) ?? null,
-    entityType: (row.entity_type as string | null) ?? null,
-    entityId: (row.entity_id as string | null) ?? null,
-    status: row.status,
-    scheduledAt: (row.scheduled_at as string | null) ?? null,
-    sentAt: (row.sent_at as string | null) ?? null,
-    createdAt: String(row.created_at ?? ''),
-  };
-}
 
 export async function GET(request: NextRequest) {
   const session = await requireAtlasSupabaseSession(request);
@@ -38,12 +25,21 @@ export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url);
   const companyId = searchParams.get('companyId');
   const limit = Math.min(100, parseInt(searchParams.get('limit') ?? '50', 10));
+  const view = searchParams.get('view') ?? 'in_app';
 
   const admin = getSupabaseServiceRoleClient();
 
   if (companyId) {
     const access = await requireApiCompanyAccess(admin, session.userId, companyId);
     if (!access.ok) return apiForbidden(apiErrorMessageFr(access.error));
+  }
+
+  if (view === 'queue') {
+    const queue = await listPendingQueueItems(admin, session.userId, {
+      companyId,
+      limit,
+    });
+    return NextResponse.json({ ok: true, queue });
   }
 
   let query = admin
@@ -59,9 +55,9 @@ export async function GET(request: NextRequest) {
   if (error) return mapDbError(error, { notifications: [], unreadCount: 0 });
 
   const notifications = (data ?? []).map((r) => rowToNotification(r as Record<string, unknown>));
-  const unread = notifications.filter((n) => n.status === 'sent').length;
+  const unreadCount = notifications.filter((n) => n.status === 'sent').length;
 
-  return NextResponse.json({ ok: true, notifications, unreadCount: unread });
+  return NextResponse.json({ ok: true, notifications, unreadCount });
 }
 
 export async function POST(request: NextRequest) {
@@ -81,6 +77,6 @@ export async function POST(request: NextRequest) {
   const access = await requireApiCompanyAccess(admin, session.userId, body.companyId);
   if (!access.ok) return apiForbidden(apiErrorMessageFr(access.error));
 
-  const counts = await runNotificationDispatchers(admin, session.userId, access.companyId);
-  return NextResponse.json({ ok: true, counts });
+  const scan = await runNotificationDispatchers(admin, session.userId, body.companyId);
+  return NextResponse.json({ ok: true, ...scan });
 }

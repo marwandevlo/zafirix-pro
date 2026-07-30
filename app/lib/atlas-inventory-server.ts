@@ -13,7 +13,7 @@ import type {
   InventoryMovementType,
   StockTransferStatus,
   StoreType,
-} from '@/app/types/atlas-enterprise-modules';
+} from '@/app/types/atlas-inventory';
 
 export type InventoryLineInput = {
   itemId: string;

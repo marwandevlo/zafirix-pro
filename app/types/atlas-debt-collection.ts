@@ -1,6 +1,35 @@
 /** Smart debt collection types — aging, risk, follow-ups. */
 
-import type { DebtCollectionStage } from '@/app/types/atlas-enterprise-modules';
+export type DebtCollectionStage =
+  | 'reminder_1'
+  | 'reminder_2'
+  | 'formal_notice'
+  | 'legal'
+  | 'closed'
+  | 'paid';
+
+export type AtlasDebtCollectionCase = {
+  id: string;
+  companyId: string | null;
+  invoiceId: string | null;
+  clientId?: string | null;
+  clientName: string;
+  amountDue: number;
+  outstandingAmount?: number;
+  paidAmount?: number;
+  invoiceNumber?: string | null;
+  dueDate?: string | null;
+  daysOverdue?: number;
+  agingBucket?: AgingBucket;
+  stage: DebtCollectionStage;
+  stageLabel?: string;
+  lastContactAt: string | null;
+  nextActionAt: string | null;
+  notes: string | null;
+  createdAt: string;
+  clientEmail?: string | null;
+  clientPhone?: string | null;
+};
 
 export type AgingBucket = 'current' | '1-30' | '31-60' | '61-90' | '90+';
 export type RiskBand = 'low' | 'medium' | 'high' | 'critical';
@@ -42,7 +71,7 @@ export type DebtAgingSummary = {
 };
 
 export type DebtCollectionDashboard = {
-  cases: import('@/app/types/atlas-enterprise-modules').AtlasDebtCollectionCase[];
+  cases: AtlasDebtCollectionCase[];
   totalDue: number;
   aging: DebtAgingSummary[];
   riskProfiles: AtlasClientRiskProfile[];

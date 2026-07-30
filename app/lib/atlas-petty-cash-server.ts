@@ -12,7 +12,7 @@ import type {
   AtlasPettyCashReconciliation,
   AtlasPettyCashVoucher,
   PettyCashVoucherStatus,
-} from '@/app/types/atlas-enterprise-modules';
+} from '@/app/types/atlas-petty-cash';
 
 export const DEFAULT_PETTY_CASH_ACCOUNT = '516100';
 export const DEFAULT_EXPENSE_ACCOUNT = '618000';

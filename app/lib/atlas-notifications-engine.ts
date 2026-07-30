@@ -9,7 +9,7 @@ import {
   type DispatchNotificationInput,
 } from '@/app/lib/atlas-notifications-core';
 import { sendWhatsAppMessage } from '@/app/lib/whatsapp-service';
-import type { NotificationCategory } from '@/app/types/atlas-enterprise-modules';
+import type { NotificationCategory } from '@/app/types/atlas-notifications';
 
 export type { DispatchNotificationInput } from '@/app/lib/atlas-notifications-core';
 export { recordNotification } from '@/app/lib/atlas-notifications-core';

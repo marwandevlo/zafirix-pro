@@ -3,7 +3,7 @@
  */
 
 import type { SupabaseClient } from '@supabase/supabase-js';
-import type { NotificationCategory, NotificationChannel } from '@/app/types/atlas-enterprise-modules';
+import type { NotificationCategory, NotificationChannel } from '@/app/types/atlas-notifications';
 
 export type DispatchNotificationInput = {
   userId: string;

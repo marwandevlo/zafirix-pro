@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import { atlasDataBackend } from '@/app/lib/atlas-data-source';
-import { runAutomatedAlertsForAllCompanies } from '@/app/lib/atlas-notification-alerts';
+import { runAutomatedAlertsForAllCompanies } from '@/app/lib/atlas-notifications-server';
 
 const MAX_COMPANIES_PER_RUN = 200;
 

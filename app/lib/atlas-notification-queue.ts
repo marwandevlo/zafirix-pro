@@ -6,7 +6,7 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import { sendEmailViaResend } from '@/app/lib/atlas-email-resend';
 import { recordNotification, type DispatchNotificationInput } from '@/app/lib/atlas-notifications-core';
 import { sendWhatsAppMessage } from '@/app/lib/whatsapp-service';
-import type { NotificationCategory, NotificationChannel } from '@/app/types/atlas-enterprise-modules';
+import type { NotificationCategory, NotificationChannel } from '@/app/types/atlas-notifications';
 
 export type EnqueueInput = DispatchNotificationInput & {
   dedupeKey: string;

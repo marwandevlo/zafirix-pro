@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { requireAtlasSupabaseSession } from '@/app/lib/atlas-api-session';
 import { getSupabaseServiceRoleClient } from '@/app/lib/supabase-admin';
 import { dispatchNotification } from '@/app/lib/atlas-notifications-engine';
-import type { NotificationCategory, NotificationChannel } from '@/app/types/atlas-enterprise-modules';
+import type { NotificationCategory, NotificationChannel } from '@/app/types/atlas-notifications';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
