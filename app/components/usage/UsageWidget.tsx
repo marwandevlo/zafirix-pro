@@ -8,6 +8,7 @@ import {
 } from '@/app/lib/atlas-usage-limits';
 import { isAtlasSupabaseDataEnabled } from '@/app/lib/atlas-data-source';
 import { formatLimit } from '@/app/lib/atlas-pricing-plans';
+import { UsageUpsellBanner } from '@/app/components/pricing/UsageUpsellBanner';
 
 type Row = {
   key: 'companies' | 'users' | 'operations' | 'invoices';
@@ -71,6 +72,7 @@ export function UsageWidget() {
       </div>
 
       <div className="p-4 space-y-4">
+        <UsageUpsellBanner />
         {rows.map((r) => {
           if (r.key === 'invoices' && limits.invoices === null) return null;
           const used = usage[r.key] ?? 0;

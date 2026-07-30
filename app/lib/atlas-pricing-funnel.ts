@@ -1,10 +1,12 @@
 import type { AtlasPricingPlan } from '@/app/lib/atlas-pricing-plans';
 import { ATLAS_PRICING_PLANS, formatLimit, formatPriceMadYear } from '@/app/lib/atlas-pricing-plans';
 
-/** Public pricing funnel: 3 plans max — maps to existing `AtlasPricingPlan` ids. */
-export const FUNNEL_PLAN_IDS = ['starter', 'pro', 'business'] as const;
+/** Public pricing funnel: 3 tiers — Starter (entry), Pro (target), Ultimate/Enterprise (anchor). */
+export const FUNNEL_PLAN_IDS = ['starter', 'pro', 'enterprise'] as const;
 
 export type FunnelPlanId = (typeof FUNNEL_PLAN_IDS)[number];
+
+export type FunnelPlanBadge = 'most_popular' | 'enterprise_standard' | null;
 
 export type FunnelPlanPresentation = {
   plan: AtlasPricingPlan;
@@ -13,67 +15,88 @@ export type FunnelPlanPresentation = {
   personaTitleAr: string;
   taglineFr: string;
   taglineAr: string;
-  /** Value-first bullets (not raw feature names). */
   benefitsFr: string[];
   benefitsAr: string[];
   isMostPopular: boolean;
+  badge: FunnelPlanBadge;
+  /** Modules locked below this tier (shown on pricing card). */
+  premiumHighlightsFr: string[];
+  anchorNoteFr?: string;
 };
 
 const FUNNEL_META: Record<
   FunnelPlanId,
-  Omit<FunnelPlanPresentation, 'plan' | 'isMostPopular'> & { isMostPopular?: boolean }
+  Omit<FunnelPlanPresentation, 'plan' | 'isMostPopular' | 'badge'>
 > = {
   starter: {
     funnelId: 'starter',
-    personaTitleFr: 'Starter — Entrepreneur & indépendant',
-    personaTitleAr: 'Starter — رائد أعمال ومستقل',
-    taglineFr: 'Une base solide pour facturer et rester à jour.',
-    taglineAr: 'أساس متين للفوترة والبقاء محدّثاً.',
+    personaTitleFr: 'Starter — Entrée symbolique',
+    personaTitleAr: 'Starter — دخول رمزي',
+    taglineFr: 'L’essentiel pour facturer et rester conforme — sans friction.',
+    taglineAr: 'أساسيات الفوترة والامتثال بلا تعقيد.',
     benefitsFr: [
-      'Centralisez vos factures et clients',
-      'Préparez TVA / IS avec des repères marocains',
-      'Idéal pour démarrer sans complexité',
+      'Facturation & clients centralisés',
+      'TVA / IS — repères marocains',
+      '1 société · 150 opérations/mois',
+      '80 % des outils quotidiens exclus (audit IA, recouvrement auto…)',
     ],
     benefitsAr: [
-      'جمّع الفواتير والعملاء',
-      'أعد TVA / IS مع معالم مغربية',
-      'مثالي للبداية بلا تعقيد',
+      'فوترة وعملاء مركزيون',
+      'TVA / IS — معالم مغربية',
+      'شركة واحدة · 150 عملية/شهر',
+    ],
+    premiumHighlightsFr: [
+      'Pass auditeur',
+      'Simulateur fiscal IA',
+      'Gouvernance CA',
+      'Recouvrement intelligent',
     ],
   },
   pro: {
     funnelId: 'pro',
-    personaTitleFr: 'Pro — PME en croissance',
-    personaTitleAr: 'Pro — شركة ناشئة',
-    taglineFr: 'Le meilleur équilibre volume / collaboration.',
-    taglineAr: 'أفضل توازن بين الحجم والتعاون.',
+    personaTitleFr: 'Pro — Le choix des PME',
+    personaTitleAr: 'Pro — خيار الشركات',
+    taglineFr: '~80 % des outils Atlas OS — le meilleur rapport valeur/volume.',
+    taglineAr: '~80٪ من أدوات Atlas OS — أفضل قيمة.',
     benefitsFr: [
-      'Jusqu’à 25 sociétés incluses — extensions +3 / +5 (option payante, à part)',
-      'Équipe jusqu’à 5 utilisateurs · volume confortable TVA, IR et facturation',
-      'Priorité usage au quotidien',
+      '25 sociétés · 5 utilisateurs · 1 500 opérations',
+      'Briefing CEO IA & recouvrement intelligent',
+      'Commissions, courrier, inventaire, logistique',
+      'Factures illimitées · priorité support',
     ],
     benefitsAr: [
-      'حتى 25 شركة مضمنة — إضافات +3 / +5 (اختيارية، منفصلة)',
-      'فريق حتى 5 مستخدمين · حجم مريح لـ TVA وIR والفوترة',
-      'أولوية للاستخدام اليومي',
+      '25 شركة · 5 مستخدمين · 1500 عملية',
+      'موجز CEO وتحصيل ذكي',
+      'عمولات وبريد ومخزون',
     ],
-    isMostPopular: true,
+    premiumHighlightsFr: [
+      'Pass auditeur invité',
+      'Projections fiscales IA avancées',
+      'Archive gouvernance CA',
+      'Multi-rôles conseil d’administration',
+    ],
   },
-  business: {
-    funnelId: 'business',
-    personaTitleFr: 'Cabinet — Cabinets & groupes',
-    personaTitleAr: 'Cabinet — مكاتب ومجموعات',
-    taglineFr: 'Limites élevées pour plusieurs dossiers clients.',
-    taglineAr: 'حدود عالية لعدة ملفات عملاء.',
+  enterprise: {
+    funnelId: 'enterprise',
+    personaTitleFr: 'Ultimate / Enterprise — Groupes & grands comptes',
+    personaTitleAr: 'Ultimate / Enterprise — المجموعات',
+    taglineFr: 'Ancre de valeur : conformité, audit, gouvernance & IA sans limites.',
+    taglineAr: 'امتثال وتدقيق وحوكمة وذكاء بلا حدود.',
     benefitsFr: [
-      'Jusqu’à 70 sociétés et 12 utilisateurs',
-      'Pilotage de portefeuilles clients',
-      'Conçu pour la production cabinet',
+      'Sociétés & utilisateurs illimités (fair usage)',
+      'Pass auditeur · audit IA · journal d’accès',
+      'Simulateur fiscal what-if & projections IS/TVA',
+      'Gouvernance CA · PV · résolutions · multi-rôles',
+      'Account manager & SLA prioritaire',
     ],
     benefitsAr: [
-      'حتى 70 شركة و12 مستخدماً',
-      'إدارة محافظ العملاء',
-      'مصمم لإنتاج المكاتب',
+      'شركات ومستخدمون بلا حد',
+      'تصريح مدقق وتدقيق IA',
+      'محاكاة ضريبية متقدمة',
+      'حوكمة ومجلس إدارة',
     ],
+    premiumHighlightsFr: [],
+    anchorNoteFr: 'Conçu pour ancrer la valeur Pro — la plupart des PME choisissent Pro ; les groupes exigent Ultimate.',
   },
 };
 
@@ -91,7 +114,10 @@ export function getFunnelPlanPresentations(): FunnelPlanPresentation[] {
       taglineAr: meta.taglineAr,
       benefitsFr: meta.benefitsFr,
       benefitsAr: meta.benefitsAr,
-      isMostPopular: meta.isMostPopular ?? false,
+      premiumHighlightsFr: meta.premiumHighlightsFr,
+      anchorNoteFr: meta.anchorNoteFr,
+      isMostPopular: id === 'pro',
+      badge: id === 'pro' ? 'most_popular' : id === 'enterprise' ? 'enterprise_standard' : null,
     };
   });
 }

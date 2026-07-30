@@ -4,7 +4,7 @@ import type React from 'react';
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
-import { Building2, CreditCard, LayoutDashboard, ShieldCheck, Users, Boxes, BarChart3, Banknote, TrendingUp, ScrollText, HeartPulse } from 'lucide-react';
+import { Building2, CreditCard, LayoutDashboard, ShieldCheck, Users, Boxes, BarChart3, Banknote, TrendingUp, ScrollText, HeartPulse, Activity } from 'lucide-react';
 import { atlasDataBackend, isAtlasSupabaseDataEnabled } from '@/app/lib/atlas-data-source';
 import { supabase } from '@/app/lib/supabase';
 import { AdminTableSkeleton } from '@/app/admin/_components/AdminUi';
@@ -136,6 +136,7 @@ export default function AdminShell(props: { title: string; children: React.React
             <SidebarLink href="/admin/billing" icon={<CreditCard size={16} />} label="Billing" />
             <SidebarLink href="/admin/subscriptions" icon={<CreditCard size={16} />} label="Subscriptions" />
             <SidebarLink href="/admin/users" icon={<Users size={16} />} label="Users" />
+            <SidebarLink href="/admin/activity" icon={<Activity size={16} />} label="Activity" />
             <SidebarLink href="/admin/companies" icon={<Building2 size={16} />} label="Companies" />
             <SidebarLink href="/admin/plans" icon={<Boxes size={16} />} label="Plans" />
             <SidebarLink href="/admin/payments" icon={<CreditCard size={16} />} label="Payments" />
@@ -164,6 +165,7 @@ export default function AdminShell(props: { title: string; children: React.React
               <SidebarLink href="/admin/billing" icon={<CreditCard size={16} />} label="Billing" />
               <SidebarLink href="/admin/subscriptions" icon={<CreditCard size={16} />} label="Subscriptions" />
               <SidebarLink href="/admin/users" icon={<Users size={16} />} label="Users" />
+            <SidebarLink href="/admin/activity" icon={<Activity size={16} />} label="Activity" />
               <SidebarLink href="/admin/companies" icon={<Building2 size={16} />} label="Companies" />
               <SidebarLink href="/admin/plans" icon={<Boxes size={16} />} label="Plans" />
               <SidebarLink href="/admin/payments" icon={<CreditCard size={16} />} label="Payments" />

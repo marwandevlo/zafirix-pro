@@ -3,6 +3,7 @@ import { createServerClient } from '@supabase/ssr';
 import type { EmailOtpType } from '@supabase/supabase-js';
 import { createServiceRoleClient } from '@/app/lib/atlas-profile-status-server';
 import { ensureUserProfile } from '@/app/lib/ensure-user-profile';
+import { recordUserLogin } from '@/app/lib/atlas-user-activity';
 
 const DEFAULT_NEXT = '/dashboard';
 
@@ -103,6 +104,8 @@ export async function GET(request: NextRequest) {
     } else {
       console.warn('[auth/callback] service_role missing — profile not ensured server-side');
     }
+
+    void recordUserLogin(userData.user.id, { email: userData.user.email });
 
     return redirectWithCookies(request, `${origin}${next}`, response);
   } catch (err) {

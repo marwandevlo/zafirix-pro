@@ -37,3 +37,29 @@ export const AUDIT_ACTION_COLORS: Record<AuditAction, string> = {
   deleted: 'bg-red-50 text-red-800 border-red-200',
   restored: 'bg-teal-50 text-teal-700 border-teal-100',
 };
+
+export type AuditEntityType =
+  | 'document'
+  | 'invoice'
+  | 'supplier_invoice'
+  | 'accounting_entry'
+  | 'tva_suggestion'
+  | 'legal_document'
+  | 'payroll_record'
+  | 'bank_statement'
+  | 'bank_transaction'
+  | 'routing_record'
+  | 'export'
+  | 'backup';
+
+export type AuditLogParams = {
+  entityType: AuditEntityType;
+  entityId: string;
+  action: AuditAction;
+  performedBy: string;
+  companyId?: string | null;
+  sourceDocumentId?: string | null;
+  oldValues?: Record<string, unknown>;
+  newValues?: Record<string, unknown>;
+  metadata?: Record<string, unknown>;
+};

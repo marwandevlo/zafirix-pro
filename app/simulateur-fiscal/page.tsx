@@ -12,6 +12,7 @@ import {
 } from 'lucide-react';
 import { AppSidebar } from '@/app/components/shell/AppSidebar';
 import { BetaSurfaceBadge } from '@/app/components/safety/BetaSurfaceBadge';
+import { ModuleGate } from '@/app/components/pricing/ModuleGate';
 import { getActiveCompanyDbRowId } from '@/app/lib/atlas-active-company';
 import { onCompanySwitched } from '@/app/lib/atlas-company-switch-event';
 import { EXPERT_DISCLAIMER } from '@/app/lib/atlas-payroll-calculations';
@@ -204,6 +205,7 @@ export default function SimulateurFiscalPage() {
     <div className="flex h-screen bg-gray-50">
       <AppSidebar variant="module" />
       <main className="flex-1 overflow-y-auto">
+        <ModuleGate moduleId="tax_whatif" blockContent>
         <div className="max-w-7xl mx-auto p-6 space-y-6">
           <div className="flex flex-wrap items-start justify-between gap-4">
             <div>
@@ -457,6 +459,7 @@ export default function SimulateurFiscalPage() {
             </>
           ) : null}
         </div>
+        </ModuleGate>
       </main>
     </div>
   );

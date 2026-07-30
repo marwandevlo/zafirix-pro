@@ -3,6 +3,7 @@ import type { User } from '@supabase/supabase-js';
 import { atlasDataBackend } from '@/app/lib/atlas-data-source';
 import { getSupabaseServiceRoleClient } from '@/app/lib/supabase-admin';
 import { requireAdmin } from '@/app/lib/admin/require-admin';
+import { enrichUsersWithActivity } from '@/app/lib/atlas-user-activity';
 
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
@@ -89,7 +90,9 @@ export async function GET(request: NextRequest) {
         return true;
       });
 
-    return NextResponse.json({ users });
+    const enriched = await enrichUsersWithActivity(users);
+
+    return NextResponse.json({ users: enriched });
   } catch (e) {
     const message = e instanceof Error ? e.message : 'Erreur';
     return NextResponse.json({ error: 'server_error', message }, { status: 500 });

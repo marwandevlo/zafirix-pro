@@ -114,6 +114,11 @@ const STEPS = [
     file: '20260730270000_zafirix_corporate_governance.sql',
     probeTable: 'zafirix_board_meetings',
   },
+  {
+    label: 'User activity & presence tracking',
+    file: '20260730280000_atlas_user_activity_tracking.sql',
+    probeTable: 'atlas_user_activity',
+  },
 ];
 
 const VERIFY_TABLES = [
@@ -147,6 +152,7 @@ const VERIFY_TABLES = [
   'zafirix_shareholder_resolutions',
   'zafirix_governance_documents',
   'zafirix_board_members',
+  'atlas_user_activity',
 ];
 
 function parseCliArgs() {

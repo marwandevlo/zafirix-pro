@@ -146,7 +146,7 @@ export const ATLAS_PRICING_PLANS: AtlasPricingPlan[] = [
     usersLimit: unlimited(),
     operationsLimit: fairUsage(),
     invoicesLimit: unlimited(),
-    description: 'Sur mesure pour grandes organisations : illimité + fair usage.',
+    description: 'Ultimate / Enterprise — audit IA, gouvernance CA, projections fiscales & fair usage illimité.',
     isPopular: false,
     ctaLabel: 'Contacter les ventes',
   },

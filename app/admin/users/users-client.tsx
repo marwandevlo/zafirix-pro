@@ -17,6 +17,9 @@ type AdminUserRow = {
   status?: string;
   created_at?: string;
   last_login?: string | null;
+  last_seen_at?: string | null;
+  is_active_now?: boolean;
+  operations_today?: number;
 };
 
 export default function UsersAdminClient() {
@@ -190,7 +193,15 @@ export default function UsersAdminClient() {
       <div className="mt-6 bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
         <div className="px-6 py-4 border-b border-gray-100">
           <p className="text-sm font-semibold text-gray-900">Users · المستخدمون</p>
-          <p className="text-xs text-gray-500 mt-0.5">Search, filter, and moderate accounts.</p>
+          <p className="text-xs text-gray-500 mt-0.5">Search, filter, and moderate accounts. Presence updates every 2 minutes.</p>
+          <div className="mt-3">
+            <Link
+              href="/admin/activity"
+              className="inline-flex items-center gap-1 text-xs font-semibold text-indigo-700 hover:underline"
+            >
+              Open real-time activity monitor →
+            </Link>
+          </div>
           <div className="mt-4 flex flex-wrap gap-2">
             <button
               type="button"
@@ -271,7 +282,7 @@ export default function UsersAdminClient() {
         </div>
         {loading ? (
           <div className="px-6 py-6">
-            <AdminTableSkeleton cols={8} rows={7} />
+            <AdminTableSkeleton cols={10} rows={7} />
           </div>
         ) : visible.length === 0 ? (
           <div className="px-6 py-8">
@@ -286,6 +297,8 @@ export default function UsersAdminClient() {
                   <th className="px-6 py-4 font-semibold">Role</th>
                   <th className="px-6 py-4 font-semibold">Plan</th>
                   <th className="px-6 py-4 font-semibold">Status</th>
+                  <th className="px-6 py-4 font-semibold">Presence</th>
+                  <th className="px-6 py-4 font-semibold">Ops today</th>
                   <th className="px-6 py-4 font-semibold">Created</th>
                   <th className="px-6 py-4 font-semibold">Last login</th>
                   <th className="px-6 py-4 font-semibold">User ID</th>
@@ -303,6 +316,18 @@ export default function UsersAdminClient() {
                     <td className="px-6 py-4 text-gray-700">{u.role || 'user'}</td>
                     <td className="px-6 py-4 text-gray-700">{u.plan || '—'}</td>
                     <td className="px-6 py-4 text-gray-700">{u.status || '—'}</td>
+                    <td className="px-6 py-4">
+                      {u.is_active_now ? (
+                        <span className="inline-flex items-center gap-1 text-xs font-semibold text-emerald-800">
+                          <span aria-hidden>🟢</span> Active
+                        </span>
+                      ) : (
+                        <span className="inline-flex items-center gap-1 text-xs font-semibold text-gray-500">
+                          <span aria-hidden>⚪</span> Offline
+                        </span>
+                      )}
+                    </td>
+                    <td className="px-6 py-4 text-gray-700 font-semibold">{u.operations_today ?? 0}</td>
                     <td className="px-6 py-4 text-gray-700">{u.created_at ? new Date(u.created_at).toLocaleDateString() : '—'}</td>
                     <td className="px-6 py-4 text-gray-700">{u.last_login ? new Date(u.last_login).toLocaleString() : '—'}</td>
                     <td className="px-6 py-4 font-mono text-xs text-gray-700">{u.id}</td>

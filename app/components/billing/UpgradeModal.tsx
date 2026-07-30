@@ -1,18 +1,24 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { X, ArrowUpRight, Check } from 'lucide-react';
+import { useRouter } from 'next/navigation';
+import { X, ArrowUpRight, Check, Sparkles } from 'lucide-react';
 import type { AtlasSubscriptionPlan, PlanCode } from '@/app/types/atlas-billing';
 import { FEATURE_LABELS_FR, ATLAS_FEATURE_CODES } from '@/app/types/atlas-billing';
+import { formatMad } from '@/app/lib/atlas-plan-modules';
 
 export type UpgradeModalProps = {
   open: boolean;
   onClose: () => void;
   currentPlanCode?: PlanCode;
   onSelectPlan?: (code: PlanCode) => void;
+  /** Value-framed headline when quota triggered upgrade */
+  valueHeadline?: string;
+  valueDetail?: string;
 };
 
-export function UpgradeModal({ open, onClose, currentPlanCode = 'FREE', onSelectPlan }: UpgradeModalProps) {
+export function UpgradeModal({ open, onClose, currentPlanCode = 'FREE', onSelectPlan, valueHeadline, valueDetail }: UpgradeModalProps) {
+  const router = useRouter();
   const [plans, setPlans] = useState<AtlasSubscriptionPlan[]>([]);
   const [loading, setLoading] = useState(false);
   const [requesting, setRequesting] = useState<string | null>(null);
@@ -54,8 +60,12 @@ export function UpgradeModal({ open, onClose, currentPlanCode = 'FREE', onSelect
       >
         <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100">
           <div>
-            <h2 className="text-lg font-bold text-gray-900">Changer d&apos;offre</h2>
-            <p className="text-sm text-gray-500">Plan actuel: {currentPlanCode} — paiement non requis à cette étape</p>
+            <h2 className="text-lg font-bold text-gray-900">Passer à l&apos;offre supérieure</h2>
+            <p className="text-sm text-gray-500">Plan actuel: {currentPlanCode}</p>
+            {valueHeadline && (
+              <p className="text-sm font-semibold text-emerald-700 mt-2">{valueHeadline}</p>
+            )}
+            {valueDetail && <p className="text-xs text-gray-500 mt-1">{valueDetail}</p>}
           </div>
           <button type="button" onClick={onClose} className="p-2 rounded-lg hover:bg-gray-100">
             <X size={18} />
@@ -88,13 +98,24 @@ export function UpgradeModal({ open, onClose, currentPlanCode = 'FREE', onSelect
                 <button
                   type="button"
                   disabled={isCurrent || loading}
-                  onClick={() => void requestUpgrade(plan.code)}
+                  onClick={() => {
+                    if (plan.code === 'ENTERPRISE' || plan.code === 'CABINET') {
+                      router.push('/payment?plan=enterprise');
+                      onClose();
+                      return;
+                    }
+                    void requestUpgrade(plan.code);
+                  }}
                   className={`w-full py-2 rounded-lg text-sm font-medium flex items-center justify-center gap-1 ${
                     isCurrent ? 'bg-gray-100 text-gray-400 cursor-default' : 'bg-[#0F1F3D] text-white hover:bg-[#1B2A4A]'
                   }`}
                 >
                   {requesting === plan.code ? 'En cours…' : isCurrent ? 'Plan actuel' : (
-                    <>Demander upgrade <ArrowUpRight size={14} /></>
+                    <>
+                      <Sparkles size={14} />
+                      Upgrade — économisez jusqu&apos;à {formatMad(15000)}/mois
+                      <ArrowUpRight size={14} />
+                    </>
                   )}
                 </button>
               </div>

@@ -9,35 +9,10 @@
  */
 
 import { getSupabaseServiceRoleClient } from '@/app/lib/supabase-admin';
-import type { AuditAction } from '@/app/lib/atlas-audit-log-constants';
+import { logActivityFromAudit } from '@/app/lib/atlas-user-activity';
+import type { AuditAction, AuditEntityType, AuditLogParams } from '@/app/lib/atlas-audit-log-constants';
 
-export type { AuditAction } from '@/app/lib/atlas-audit-log-constants';
-
-export type AuditEntityType =
-  | 'document'
-  | 'invoice'
-  | 'supplier_invoice'
-  | 'accounting_entry'
-  | 'tva_suggestion'
-  | 'legal_document'
-  | 'payroll_record'
-  | 'bank_statement'
-  | 'bank_transaction'
-  | 'routing_record'
-  | 'export'
-  | 'backup';
-
-export type AuditLogParams = {
-  entityType: AuditEntityType;
-  entityId: string;
-  action: AuditAction;
-  performedBy: string;
-  companyId?: string | null;
-  sourceDocumentId?: string | null;
-  oldValues?: Record<string, unknown>;
-  newValues?: Record<string, unknown>;
-  metadata?: Record<string, unknown>;
-};
+export type { AuditAction, AuditEntityType, AuditLogParams } from '@/app/lib/atlas-audit-log-constants';
 
 /**
  * Append an immutable audit event.
@@ -59,7 +34,9 @@ export async function logAuditEvent(params: AuditLogParams): Promise<void> {
     });
     if (error) {
       console.error('[audit_log] insert error:', error.message);
+      return;
     }
+    void logActivityFromAudit(params);
   } catch (err) {
     console.error('[audit_log] unexpected error:', err instanceof Error ? err.message : err);
   }

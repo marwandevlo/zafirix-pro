@@ -8,6 +8,7 @@ import { RecoveryHashRedirectScript } from "@/app/components/auth/RecoveryHashRe
 import { AppSubscriptionProviders } from "@/app/components/subscription/AppSubscriptionProviders";
 import { FirstRunManager } from "@/app/components/onboarding/FirstRunManager";
 import { SoundEffectsGlobalChrome } from "@/app/components/sound/SoundEffectsGlobalChrome";
+import { UserPresencePing } from "@/app/components/activity/UserPresencePing";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -61,6 +62,7 @@ export default function RootLayout({
         <AppSubscriptionProviders>
           <SoundEffectsGlobalChrome>{children}</SoundEffectsGlobalChrome>
         </AppSubscriptionProviders>
+        <UserPresencePing />
         <FirstRunManager />
         {enableGlobalSearchOverlay ? <GlobalSearchOverlay /> : null}
         {enableAssistantOverlay ? <AssistantOverlay /> : null}

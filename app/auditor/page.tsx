@@ -4,6 +4,7 @@ import { KeyRound } from 'lucide-react';
 import { AppSidebar } from '@/app/components/shell/AppSidebar';
 import { BetaSurfaceBadge } from '@/app/components/safety/BetaSurfaceBadge';
 import { AuditorPassWidget } from '@/app/components/dashboard/AuditorPassWidget';
+import { ModuleGate } from '@/app/components/pricing/ModuleGate';
 
 export default function AuditorPassPage() {
   return (
@@ -20,7 +21,9 @@ export default function AuditorPassPage() {
             Créez des accès sécurisés à durée limitée pour experts-comptables et auditeurs externes.
           </p>
         </div>
-        <AuditorPassWidget />
+        <ModuleGate moduleId="auditor_pass" blockContent>
+          <AuditorPassWidget />
+        </ModuleGate>
       </main>
     </div>
   );

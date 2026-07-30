@@ -13,6 +13,7 @@ import {
 } from 'lucide-react';
 import { AppSidebar } from '@/app/components/shell/AppSidebar';
 import { BetaSurfaceBadge } from '@/app/components/safety/BetaSurfaceBadge';
+import { ModuleGate } from '@/app/components/pricing/ModuleGate';
 import { RowShareActionBar } from '@/app/components/share';
 import { getActiveCompanyDbRowId } from '@/app/lib/atlas-active-company';
 import { onCompanySwitched } from '@/app/lib/atlas-company-switch-event';
@@ -175,6 +176,7 @@ export default function RecouvrementPage() {
     <div className="flex h-screen bg-gray-50">
       <AppSidebar variant="module" />
       <main className="flex-1 overflow-y-auto p-4 lg:p-6">
+        <ModuleGate moduleId="debt_collection" blockContent>
         <div className="max-w-6xl mx-auto space-y-6">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div>
@@ -459,6 +461,7 @@ export default function RecouvrementPage() {
             </>
           )}
         </div>
+        </ModuleGate>
       </main>
     </div>
   );
