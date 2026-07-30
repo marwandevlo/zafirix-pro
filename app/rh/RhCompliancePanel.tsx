@@ -26,7 +26,6 @@ import type {
   AtlasEmployeeAttendance,
   AtlasHrComplianceItem,
   AttendanceStatus,
-  ComplianceStatus,
   ContractType,
   EmployeeDocumentType,
   HrComplianceDashboard,

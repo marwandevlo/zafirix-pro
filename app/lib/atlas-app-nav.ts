@@ -120,7 +120,7 @@ export const ATLAS_APP_NAV_ITEMS: AtlasAppNavItem[] = [
   { id: 'caisse', label: 'Caisse', labelAr: 'الصندوق', icon: Wallet, href: '/caisse' },
   { id: 'juridique', label: 'Juridique', labelAr: 'القانونية', icon: Scale, href: '/juridique' },
   { id: 'gouvernance', label: 'Gouvernance & CA', labelAr: 'الحوكمة', icon: ScrollText, href: '/gouvernance' },
-  { id: 'auditor-pass', label: 'Pass auditeur', labelAr: 'تصريح المدقق', icon: KeyRound, href: '/auditor/test-token' },
+  { id: 'auditor-pass', label: 'Pass auditeur', labelAr: 'تصريح المدقق', icon: KeyRound, href: '/auditor' },
   { id: 'contrats', label: 'Contrats', labelAr: 'العقود', icon: FileSignature, href: '/contrats' },
   { id: 'rh', label: 'Ressources humaines', labelAr: 'الموارد البشرية', icon: Users, href: '/rh' },
   { id: 'etude', label: 'Étude de projet', labelAr: 'دراسة الجدوى', icon: BarChart2, href: '/etude-projet' },
@@ -187,7 +187,7 @@ export function filterAtlasNavItemsForPath(pathname: string): AtlasAppNavItem[] 
 
 export function resolveActiveAtlasNavId(pathname: string, visible: AtlasAppNavItem[]): AtlasNavItemId {
   const p = pathname || '/';
-  if (p.startsWith('/auditor/') && visible.some((item) => item.id === 'auditor-pass')) {
+  if ((p === '/auditor' || p.startsWith('/auditor/')) && visible.some((item) => item.id === 'auditor-pass')) {
     return 'auditor-pass';
   }
   let best: { id: AtlasNavItemId; len: number } | null = null;
