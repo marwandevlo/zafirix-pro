@@ -72,7 +72,15 @@ export async function listAtlasInvoicesResult(
   opts?: ListAtlasInvoicesOptions,
 ): Promise<ListAtlasInvoicesResult> {
   if (!isAtlasSupabaseDataEnabled()) {
-    return { ok: true, invoices: readInvoicesFromLocalStorage() };
+    let companyId = opts?.companyId;
+    if (companyId === undefined) {
+      companyId = await getActiveCompanyDbRowId();
+    }
+    if (!companyId) return { ok: true, invoices: [] };
+    const invoices = readInvoicesFromLocalStorage().filter(
+      (inv) => (inv as AtlasInvoice & { companyId?: string }).companyId === companyId,
+    );
+    return { ok: true, invoices };
   }
 
   const auth = await requireSupabaseUser();

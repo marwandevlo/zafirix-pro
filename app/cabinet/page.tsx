@@ -10,6 +10,8 @@ import { CompanySwitcher } from '@/app/components/shell/CompanySwitcher';
 import type { CabinetClientRow, HealthBand } from '@/app/types/atlas-workspace';
 import { healthBandLabelFr } from '@/app/lib/atlas-company-health-engine';
 import { setActiveAtlasCompany } from '@/app/lib/atlas-companies-repository';
+import { getActiveCompanyDbRowId } from '@/app/lib/atlas-active-company';
+import { notifyCompanyWorkspaceSwitched } from '@/app/lib/atlas-company-switch-event';
 
 function bandBadge(band: HealthBand): string {
   switch (band) {
@@ -56,6 +58,7 @@ export default function CabinetPortfolioPage() {
   });
 
   const openClient = async (row: CabinetClientRow) => {
+    const prevId = await getActiveCompanyDbRowId();
     await setActiveAtlasCompany(row.companyId);
     await fetch('/api/companies/health', {
       method: 'POST',
@@ -63,6 +66,7 @@ export default function CabinetPortfolioPage() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ companyId: row.companyId }),
     });
+    notifyCompanyWorkspaceSwitched(row.companyId, prevId);
     router.push('/');
   };
 

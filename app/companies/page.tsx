@@ -26,6 +26,7 @@ import {
   upsertAtlasCompany,
 } from '@/app/lib/atlas-companies-repository';
 import { ATLAS_STORAGE_KEYS } from '@/app/lib/atlas-storage-keys';
+import { notifyCompanyWorkspaceSwitched } from '@/app/lib/atlas-company-switch-event';
 import { EmptyStateCta } from '@/app/components/ui/EmptyStateCta';
 import { trackOnboardingMilestoneOnce } from '@/app/lib/atlas-onboarding-milestones';
 import { CompanyLimitProUpsell } from '@/app/components/conversion/CompanyLimitProUpsell';
@@ -176,6 +177,7 @@ export default function CompaniesPage() {
   };
 
   const selectCompany = async (c: AtlasCompany) => {
+    const prevId = companies.find((row) => row.actif)?.dbRowId ?? null;
     if (isAtlasSupabaseDataEnabled()) {
       if (!c.dbRowId) return;
       setPersistError('');
@@ -185,11 +187,13 @@ export default function CompaniesPage() {
         return;
       }
       await reloadCompanies();
+      notifyCompanyWorkspaceSwitched(c.dbRowId, prevId);
       router.push('/');
       return;
     }
     const updated = companies.map((row) => ({ ...row, actif: row.id === c.id }));
     persistLocalCompanies(updated);
+    notifyCompanyWorkspaceSwitched(c.dbRowId ?? String(c.id), prevId);
     router.push('/');
   };
 

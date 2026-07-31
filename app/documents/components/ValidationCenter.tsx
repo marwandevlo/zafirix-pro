@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useCallback, useMemo } from 'react';
+import { useState, useCallback, useMemo, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import {
   CheckCircle,
@@ -43,6 +43,7 @@ import {
 } from '@/app/lib/atlas-document-routing';
 import { RoutingCompletenessAlert } from '@/app/components/validation/RoutingCompletenessAlert';
 import { TvaConsistencyAlert } from '@/app/components/validation/TvaConsistencyAlert';
+import { useCompanyWorkspaceReset } from '@/app/lib/use-company-workspace-reset';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -66,6 +67,7 @@ type DuplicateWarning = {
 
 type ValidationCenterProps = {
   document: AtlasDocument;
+  companyId?: string | null;
   onClose: () => void;
   onValidated: () => void;
   onRetryOcr: (documentId: string) => void;
@@ -242,7 +244,7 @@ type ValidationApiDetail = {
   error?: string;
 };
 
-export function ValidationCenter({ document, onClose, onValidated, onRetryOcr }: ValidationCenterProps) {
+export function ValidationCenter({ document, companyId, onClose, onValidated, onRetryOcr }: ValidationCenterProps) {
   const router = useRouter();
   const [correction, setCorrection] = useState<CorrectionState | null>(null);
   const [validating, setValidating] = useState(false);
@@ -259,6 +261,25 @@ export function ValidationCenter({ document, onClose, onValidated, onRetryOcr }:
   });
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
   const [showLineItems, setShowLineItems] = useState(false);
+
+  useCompanyWorkspaceReset(() => {
+    setCorrection(null);
+    setValidating(false);
+    setLocalValidationStatus(null);
+    setRouting(null);
+    setRoutingAll(false);
+    setRoutingResult(null);
+    setDuplicateWarning(null);
+    setRoutedModules([]);
+    setMessage(null);
+    setShowLineItems(false);
+    onClose();
+  });
+
+  useEffect(() => {
+    if (!companyId || !document.companyId) return;
+    if (document.companyId !== companyId) onClose();
+  }, [companyId, document.companyId, document.id, onClose]);
 
   const classification = classificationFromDocument(document);
   const extraction = structuredExtractionFromDocument(document);
@@ -315,6 +336,7 @@ export function ValidationCenter({ document, onClose, onValidated, onRetryOcr }:
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
+        cache: 'no-store',
         body: JSON.stringify({ action }),
       });
       const body = (await res.json().catch(() => ({}))) as {

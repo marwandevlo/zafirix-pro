@@ -63,7 +63,11 @@ import {
 import { refreshAtlasUsageState } from '@/app/lib/atlas-usage-limits';
 import { isAtlasSupabaseDataEnabled } from '@/app/lib/atlas-data-source';
 import type { AtlasAccountingEntry } from '@/app/types/atlas-accounting';
-import { onCompanySwitched } from '@/app/lib/atlas-company-switch-event';
+import {
+  getCompanyWorkspaceGeneration,
+  isCurrentCompanyWorkspaceGeneration,
+} from '@/app/lib/atlas-company-client-cache';
+import { useCompanyWorkspaceReset } from '@/app/lib/use-company-workspace-reset';
 
 type Ecriture = AtlasAccountingEntry;
 
@@ -103,15 +107,33 @@ export default function ComptabilitePage() {
   const [showForm, setShowForm] = useState(false);
   const [insight, setInsight] = useState<{ loading: boolean; text: string }>({ loading: false, text: '' });
 
+  const wipeAccountingState = useCallback(() => {
+    setInvoices([]);
+    setSupplierInvoices([]);
+    setPayments([]);
+    setEcritures([]);
+    setActiveCompanyId(null);
+    setSelectedSupplierIds([]);
+    setSelectedJournalIds([]);
+    setInsight({ loading: false, text: '' });
+  }, []);
+
   const reloadAccountingData = useCallback(async () => {
+    const scope = getCompanyWorkspaceGeneration();
     if (isAtlasSupabaseDataEnabled()) {
       await refreshAtlasUsageState();
     }
+    if (!isCurrentCompanyWorkspaceGeneration(scope)) return;
+
     const companyId = await getActiveCompanyDbRowId();
+    if (!isCurrentCompanyWorkspaceGeneration(scope)) return;
+
     setActiveCompanyId(companyId);
     setInvoices(companyId ? await listAtlasInvoices({ companyId }) : []);
     setPayments(await listAtlasPayments(companyId ? { companyId } : undefined));
     setEcritures(await listAtlasAccountingEntries(companyId ? { companyId } : undefined));
+    if (!isCurrentCompanyWorkspaceGeneration(scope)) return;
+
     if (companyId) {
       setSupplierInvoices(await listSupplierInvoices(companyId));
     } else {
@@ -119,13 +141,12 @@ export default function ComptabilitePage() {
     }
   }, []);
 
-  useEffect(() => {
+  useCompanyWorkspaceReset(wipeAccountingState, () => {
     void reloadAccountingData();
-  }, [reloadAccountingData]);
+  });
 
   useEffect(() => {
-    const off = onCompanySwitched(() => { void reloadAccountingData(); });
-    return off;
+    void reloadAccountingData();
   }, [reloadAccountingData]);
 
   useEffect(() => {

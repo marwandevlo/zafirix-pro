@@ -6,6 +6,7 @@ import { listAtlasCompanies, setActiveAtlasCompany } from '@/app/lib/atlas-compa
 import type { AtlasCompany } from '@/app/types/atlas-company';
 import { isAtlasSupabaseDataEnabled } from '@/app/lib/atlas-data-source';
 import { ATLAS_STORAGE_KEYS } from '@/app/lib/atlas-storage-keys';
+import { notifyCompanyWorkspaceSwitched } from '@/app/lib/atlas-company-switch-event';
 
 export type CompanySwitcherProps = {
   className?: string;
@@ -58,7 +59,7 @@ export function CompanySwitcher({ className = '', onSwitch }: CompanySwitcherPro
       await reload();
       onSwitch?.(company);
       setOpen(false);
-      window.dispatchEvent(new CustomEvent('atlas:company-switched', { detail: { companyId: company.dbRowId } }));
+      notifyCompanyWorkspaceSwitched(company.dbRowId, prevId);
     } finally {
       setLoading(false);
     }

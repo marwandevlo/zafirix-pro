@@ -18,7 +18,11 @@ import type { AtlasPayment } from '@/app/types/atlas-payment';
 import { listAtlasPayments, upsertAtlasPayment } from '@/app/lib/atlas-payments-repository';
 import { fetchAi } from '@/app/lib/fetch-ai';
 import { getActiveAtlasCompany, getActiveCompanyDbRowId, resolveClientIdByName } from '@/app/lib/atlas-active-company';
-import { onCompanySwitched } from '@/app/lib/atlas-company-switch-event';
+import {
+  getCompanyWorkspaceGeneration,
+  isCurrentCompanyWorkspaceGeneration,
+} from '@/app/lib/atlas-company-client-cache';
+import { useCompanyWorkspaceReset } from '@/app/lib/use-company-workspace-reset';
 import type { AtlasCompany } from '@/app/types/atlas-company';
 import { createInvoicePdfDoc, downloadInvoicePdf, invoicePdfFilename } from '@/app/lib/atlas-invoice-pdf';
 import {
@@ -124,12 +128,26 @@ export default function FacturesPage() {
     }
   }, [router, searchParams]);
 
+  const wipeInvoicePageState = useCallback(() => {
+    resetInvoiceUiState();
+    setInvoices([]);
+    setPayments([]);
+    setDeliveriesByInvoice({});
+    setActiveCompanyId(null);
+    setLoadError(null);
+    setSelectedInvoiceIds([]);
+  }, [resetInvoiceUiState]);
+
   const loadPageData = useCallback(async () => {
+    const scope = getCompanyWorkspaceGeneration();
     if (isAtlasSupabaseDataEnabled()) {
       await refreshAtlasUsageState();
     }
+    if (!isCurrentCompanyWorkspaceGeneration(scope)) return;
 
     const invResult = await listAtlasInvoicesResult();
+    if (!isCurrentCompanyWorkspaceGeneration(scope)) return;
+
     let list = invResult.ok ? invResult.invoices : [];
 
     if (!invResult.ok && invResult.error === 'auth_required') {
@@ -156,15 +174,20 @@ export default function FacturesPage() {
     syncInvoiceUsageCount(list.length);
 
     const pay = await listAtlasPayments();
+    if (!isCurrentCompanyWorkspaceGeneration(scope)) return;
+
     setPayments(pay);
 
     if (isAtlasSupabaseDataEnabled()) {
       const companyId = await getActiveCompanyDbRowId();
+      if (!isCurrentCompanyWorkspaceGeneration(scope)) return;
+
       setActiveCompanyId(companyId);
       if (companyId) {
         try {
           const res = await fetch(`/api/logistics/deliveries?companyId=${encodeURIComponent(companyId)}`, {
             credentials: 'include',
+            cache: 'no-store',
           });
           if (res.ok) {
             const body = (await res.json()) as { deliveries?: AtlasDelivery[] };
@@ -183,24 +206,15 @@ export default function FacturesPage() {
     }
   }, [searchParams, resetInvoiceUiState, clearUrlInvoiceId]);
 
+  useCompanyWorkspaceReset(wipeInvoicePageState, () => {
+    void loadPageData();
+  });
+
   useEffect(() => {
     queueMicrotask(() => {
       void loadPageData();
     });
   }, [loadPageData]);
-
-  useEffect(() => {
-    const off = onCompanySwitched(() => {
-      resetInvoiceUiState();
-      setInvoices([]);
-      setPayments([]);
-      setDeliveriesByInvoice({});
-      setActiveCompanyId(null);
-      setLoadError(null);
-      void loadPageData();
-    });
-    return off;
-  }, [loadPageData, resetInvoiceUiState]);
 
   const addFacture = async () => {
     if (!form.numero || !form.client || !form.montantHT) return;

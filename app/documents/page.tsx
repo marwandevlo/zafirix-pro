@@ -72,7 +72,12 @@ import { createAtlasLink } from '@/app/lib/atlas-links-repository';
 import { listAtlasCompanies } from '@/app/lib/atlas-companies-repository';
 import { listAtlasInvoices } from '@/app/lib/atlas-invoices-repository';
 import { getActiveCompanyDbRowId } from '@/app/lib/atlas-active-company';
-import { onCompanySwitched } from '@/app/lib/atlas-company-switch-event';
+import {
+  filterDocumentsForCompany,
+  getCompanyWorkspaceGeneration,
+  isCurrentCompanyWorkspaceGeneration,
+} from '@/app/lib/atlas-company-client-cache';
+import { useCompanyWorkspaceReset } from '@/app/lib/use-company-workspace-reset';
 import {
   ATLAS_DOCUMENT_MAX_FILES_PER_BATCH,
   documentUploadLimitExceededMessage,
@@ -292,6 +297,7 @@ async function fetchOcrProgressFromApi(
   try {
     const res = await fetch(`/api/documents/${documentId}/ocr/progress`, {
       credentials: 'include',
+      cache: 'no-store',
       signal,
     });
     if (!res.ok) return null;
@@ -312,6 +318,7 @@ export default function DocumentsPage() {
   const ocrPollInFlightRef = useRef(false);
   const ocrPollingIdsRef = useRef<Set<string>>(new Set());
   const ocrRetriggeredRef = useRef<Set<string>>(new Set());
+  const activeCompanyIdRef = useRef<string | null>(null);
   const [retryingOcrId, setRetryingOcrId] = useState<string | null>(null);
   const [validationDocId, setValidationDocId] = useState<string | null>(null);
   const uploadQueueRef = useRef(0);
@@ -345,6 +352,7 @@ export default function DocumentsPage() {
   const [linkStatus, setLinkStatus] = useState<string>('');
   const [companies, setCompanies] = useState<{ id: string; name: string }[]>([]);
   const [invoices, setInvoices] = useState<{ id: string; title: string }[]>([]);
+  const [workspaceMountKey, setWorkspaceMountKey] = useState(0);
 
   const supabaseMode = isAtlasSupabaseDataEnabled();
 
@@ -360,27 +368,78 @@ export default function DocumentsPage() {
 
   useEffect(() => () => stopOcrPoll(), [stopOcrPoll]);
 
+  const resetDocumentsWorkspaceState = useCallback((nextCompanyId?: string | null) => {
+    stopOcrPoll();
+    ocrPollingIdsRef.current.clear();
+    ocrRetriggeredRef.current.clear();
+    uploadQueueRef.current = 0;
+    if (fileRef.current) fileRef.current.value = '';
+    activeCompanyIdRef.current = nextCompanyId ?? null;
+
+    setOcrDocuments([]);
+    setLocalDocuments([]);
+    setLibrary([]);
+    setSupplierInvoiceKeys(new Set());
+    setActiveCompanyId(nextCompanyId ?? null);
+    setOcrError('');
+    setOcrPageInfo('');
+    setOcrProgress({ phase: 'idle' });
+    setOcrLoading(false);
+    setAnalyzing(false);
+    setDragging(false);
+    setSupplierTableMissing(false);
+    setCreatingSupplierInvoiceId(null);
+    setRetryingOcrId(null);
+    setValidationDocId(null);
+    setConfirmDeleteRow(null);
+    setHistoryDocId(null);
+    setEmailModalDocId(null);
+    setShareToast(null);
+    setDriveBackingUpId(null);
+    setDriveSyncByDocId({});
+    setSelectedId('');
+    setLinkCompanyId('');
+    setLinkInvoiceId('');
+    setLinkStatus('');
+    setInvoices([]);
+    setLibraryQuery('');
+    setLibraryType('');
+    setWorkspaceMountKey((k) => k + 1);
+  }, [stopOcrPoll]);
+
   const refreshOcr = useCallback(async () => {
+    const scope = getCompanyWorkspaceGeneration();
     setOcrError('');
     if (!isAtlasSupabaseDataEnabled()) return;
     setOcrLoading(true);
     try {
       const companyId = await getActiveCompanyDbRowId();
+      if (!isCurrentCompanyWorkspaceGeneration(scope)) return;
+
+      activeCompanyIdRef.current = companyId;
       setActiveCompanyId(companyId);
+
       if (!companyId) {
         setOcrDocuments([]);
+        setSupplierInvoiceKeys(new Set());
         setOcrError(atlasDocumentErrorMessage('company_required'));
         return;
       }
+
       const [list, supplierResult] = await Promise.all([
         listAtlasOcrDocuments(companyId),
         listSupplierInvoicesWithMeta(companyId),
       ]);
-      setOcrDocuments(list);
+
+      if (!isCurrentCompanyWorkspaceGeneration(scope)) return;
+
+      setOcrDocuments(filterDocumentsForCompany(list, companyId));
       setSupplierTableMissing(supplierResult.tableMissing);
       setSupplierInvoiceKeys(supplierInvoiceKeysFromList(supplierResult.invoices));
     } finally {
-      setOcrLoading(false);
+      if (isCurrentCompanyWorkspaceGeneration(scope)) {
+        setOcrLoading(false);
+      }
     }
   }, []);
 
@@ -391,6 +450,7 @@ export default function DocumentsPage() {
 
       const tick = async () => {
         if (ocrPollInFlightRef.current) return;
+        const scope = getCompanyWorkspaceGeneration();
         const ids = Array.from(ocrPollingIdsRef.current);
         if (ids.length === 0) {
           stopOcrPoll();
@@ -405,6 +465,12 @@ export default function DocumentsPage() {
         try {
           let needsRefresh = false;
           for (const id of ids) {
+            if (!isCurrentCompanyWorkspaceGeneration(scope)) {
+              ocrPollingIdsRef.current.clear();
+              stopOcrPoll();
+              return;
+            }
+
             const live = await fetchOcrProgressFromApi(id, controller.signal);
             if (!live?.ok) continue;
 
@@ -452,7 +518,7 @@ export default function DocumentsPage() {
 
           if (ocrPollingIdsRef.current.size > 0) needsRefresh = true;
 
-          if (needsRefresh) await refreshOcr();
+          if (needsRefresh && isCurrentCompanyWorkspaceGeneration(scope)) await refreshOcr();
           if (ocrPollingIdsRef.current.size === 0) stopOcrPoll();
         } finally {
           ocrPollInFlightRef.current = false;
@@ -465,45 +531,44 @@ export default function DocumentsPage() {
     [stopOcrPoll, refreshOcr, ocrDocuments],
   );
 
-  const refreshLibrary = async () => {
+  const refreshLibrary = useCallback(async () => {
+    const scope = getCompanyWorkspaceGeneration();
     const companyId = isAtlasSupabaseDataEnabled() ? await getActiveCompanyDbRowId() : undefined;
+    if (!isCurrentCompanyWorkspaceGeneration(scope)) return;
+
+    activeCompanyIdRef.current = companyId ?? null;
+    setActiveCompanyId(companyId ?? null);
+
     const [docs, cs, invs] = await Promise.all([
       getDocuments(companyId ? { companyId } : undefined),
       listAtlasCompanies(),
-      listAtlasInvoices(),
+      listAtlasInvoices(companyId ? { companyId } : undefined),
     ]);
-    setLibrary(docs);
+
+    if (!isCurrentCompanyWorkspaceGeneration(scope)) return;
+
+    const scopedDocs = filterDocumentsForCompany(docs, companyId);
+    setLibrary(scopedDocs);
     setCompanies(cs.map((c) => ({ id: String(c.dbRowId ?? c.id), name: c.raisonSociale })));
     setInvoices(invs.map((i) => ({ id: String(i.id), title: `${i.number} · ${i.clientName}` })));
-    if (!selectedId && docs[0]?.id) setSelectedId(String(docs[0].id));
-  };
+    setSelectedId((prev) => {
+      if (prev && scopedDocs.some((d) => String(d.id) === prev)) return prev;
+      return scopedDocs[0]?.id ? String(scopedDocs[0].id) : '';
+    });
+  }, []);
 
   useEffect(() => {
     if (tab !== 'ocr') return;
     if (supabaseMode) void refreshOcr();
   }, [tab, refreshOcr, supabaseMode]);
 
-  useEffect(() => {
-    const off = onCompanySwitched(() => {
-      stopOcrPoll();
-      ocrPollingIdsRef.current.clear();
-      ocrRetriggeredRef.current.clear();
-      setOcrDocuments([]);
-      setLibrary([]);
-      setSupplierInvoiceKeys(new Set());
-      setActiveCompanyId(null);
-      setOcrError('');
-      setSelectedId('');
-      setLinkCompanyId('');
-      setLinkInvoiceId('');
-      setValidationDocId(null);
-      setConfirmDeleteRow(null);
-      setLocalDocuments([]);
+  useCompanyWorkspaceReset(
+    (nextCompanyId) => resetDocumentsWorkspaceState(nextCompanyId),
+    () => {
       if (tab === 'ocr') void refreshOcr();
       else void refreshLibrary();
-    });
-    return off;
-  }, [stopOcrPoll, refreshOcr, refreshLibrary, tab]);
+    },
+  );
 
   useEffect(() => {
     if (!supabaseMode || tab !== 'ocr') return;
@@ -539,12 +604,17 @@ export default function DocumentsPage() {
   useEffect(() => {
     if (tab !== 'library') return;
     const t = window.setTimeout(async () => {
+      const scope = getCompanyWorkspaceGeneration();
       const companyId = supabaseMode ? await getActiveCompanyDbRowId() : undefined;
+      if (!isCurrentCompanyWorkspaceGeneration(scope)) return;
+
       const docs = await searchDocuments(libraryQuery, {
         type: libraryType || undefined,
         companyId: companyId ?? undefined,
       });
-      setLibrary(docs);
+
+      if (!isCurrentCompanyWorkspaceGeneration(scope)) return;
+      setLibrary(filterDocumentsForCompany(docs, companyId));
     }, 150);
     return () => window.clearTimeout(t);
   }, [libraryQuery, libraryType, tab, supabaseMode]);
@@ -818,13 +888,19 @@ export default function DocumentsPage() {
     setOcrPageInfo('');
     setOcrProgress({ phase: 'storage', isPdf });
     try {
-      const companyId = (await getActiveCompanyDbRowId()) ?? activeCompanyId;
+      const companyId = await getActiveCompanyDbRowId();
       if (!companyId) {
         setOcrProgress({ phase: 'idle' });
         setOcrError(atlasDocumentErrorMessage('company_required'));
         return;
       }
+      if (activeCompanyIdRef.current && activeCompanyIdRef.current !== companyId) {
+        return;
+      }
+      activeCompanyIdRef.current = companyId;
+      setActiveCompanyId(companyId);
 
+      const uploadScope = getCompanyWorkspaceGeneration();
       const uploadResult = await uploadDocumentForOcr(file, companyId, {
         onProgress: (p) => {
           if (p.phase === 'storage') {
@@ -842,6 +918,8 @@ export default function DocumentsPage() {
         setOcrError(formatDocumentsUploadError(uploadResult.status, uploadResult.body));
         return;
       }
+
+      if (!isCurrentCompanyWorkspaceGeneration(uploadScope)) return;
 
       const documentId = uploadResult.data.documentId ?? uploadResult.data.document.id;
       const mimeType = uploadResult.data.document.mimeType ?? mimeTypeGuess;
@@ -1001,7 +1079,10 @@ export default function DocumentsPage() {
         </button>
       </AppSidebar>
 
-      <main className="flex-1 flex overflow-hidden">
+      <main
+        key={`documents-workspace-${workspaceMountKey}-${activeCompanyId ?? 'none'}`}
+        className="flex-1 flex overflow-hidden"
+      >
         <div className="flex-1 flex flex-col overflow-hidden min-w-0">
         <header className="bg-white border-b border-gray-200 px-8 py-4">
           <div className="flex items-center gap-3">
@@ -1706,7 +1787,9 @@ export default function DocumentsPage() {
           return (
             <div className="w-[420px] shrink-0 overflow-y-auto border-l border-gray-200">
               <ValidationCenter
+                key={`validation-${workspaceMountKey}-${activeCompanyId ?? 'none'}-${validationDoc.id}`}
                 document={validationDoc}
+                companyId={activeCompanyId}
                 onClose={() => setValidationDocId(null)}
                 onValidated={() => { void refreshOcr(); }}
                 onRetryOcr={(docId) => {

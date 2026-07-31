@@ -122,16 +122,18 @@ export type ListAtlasDocumentsOptions = {
 };
 
 export async function listAtlasDocuments(opts?: ListAtlasDocumentsOptions): Promise<AtlasDocument[]> {
-  if (!isAtlasSupabaseDataEnabled()) return readDocumentsFromLocalStorage();
-
-  const auth = await requireSupabaseUser();
-  if (!auth.ok) return [];
-
   let companyId = opts?.companyId;
   if (companyId === undefined) {
     companyId = await getActiveCompanyDbRowId();
   }
   if (!companyId) return [];
+
+  if (!isAtlasSupabaseDataEnabled()) {
+    return readDocumentsFromLocalStorage().filter((d) => d.companyId === companyId);
+  }
+
+  const auth = await requireSupabaseUser();
+  if (!auth.ok) return [];
 
   const allowed = await canAccessCompany(supabase, auth.userId, companyId);
   if (!allowed) return [];
