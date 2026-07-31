@@ -453,7 +453,9 @@ function resolveSupplierIdentityFromSources(
   const indexed = sources.sourceInvoiceId
     ? supplierIndex.byInvoiceId.get(String(sources.sourceInvoiceId))
     : undefined;
-  const byName = lookupSupplierIdentityByName(supplierIndex, name);
+  const byName = sources.sourceInvoiceId
+    ? undefined
+    : lookupSupplierIdentityByName(supplierIndex, name);
 
   if (inv) {
     name = name || (inv.supplier_name ? String(inv.supplier_name).trim() : undefined);
@@ -462,20 +464,25 @@ function resolveSupplierIdentityFromSources(
   if (docHint?.name) name = name || docHint.name;
   if (byName?.nom) name = name || byName.nom;
 
-  const supplierIce = resolveDgiIce(
+  const iceSources: Array<string | null | undefined> = [
     sources.supplierIce,
     inv?.supplier_ice,
     indexed?.ice,
     docHint?.ice,
-    byName?.ice,
-  );
-  const supplierIf = resolveDgiIdentifiantFiscal(
+  ];
+  const ifSources: Array<string | null | undefined> = [
     sources.supplierIf,
     inv?.supplier_if,
     indexed?.ifFiscal,
     docHint?.ifFiscal,
-    byName?.ifFiscal,
-  );
+  ];
+  if (!sources.sourceInvoiceId) {
+    iceSources.push(byName?.ice);
+    ifSources.push(byName?.ifFiscal);
+  }
+
+  const supplierIce = resolveDgiIce(...iceSources);
+  const supplierIf = resolveDgiIdentifiantFiscal(...ifSources);
 
   return {
     supplierIce: supplierIce || undefined,

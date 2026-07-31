@@ -91,6 +91,13 @@ function mergeSupplierIdentity(
   existing: DgiReleveSupplierRef | undefined,
   incoming: DgiReleveSupplierRef,
 ): DgiReleveSupplierRef {
+  if (existing?.ice && incoming.ice && existing.ice !== incoming.ice) {
+    return incoming;
+  }
+  if (existing?.ifFiscal && incoming.ifFiscal && existing.ifFiscal !== incoming.ifFiscal) {
+    return incoming;
+  }
+
   return {
     nom: incoming.nom || existing?.nom || 'Fournisseur',
     ice: incoming.ice || existing?.ice || '',
@@ -143,42 +150,14 @@ export function buildSupplierIdentityIndexFromPeriod(record: AtlasTvaPeriodRecor
   );
 }
 
-/** Exact then partial supplier name lookup (historical invoices, fuzzy token match). */
+/** Exact supplier name lookup — no fuzzy/partial matching (prevents ICE/IF cross-contamination). */
 export function lookupSupplierIdentityByName(
   index: SupplierIdentityIndex,
   name: string | null | undefined,
 ): DgiReleveSupplierRef | undefined {
   const key = normalizeSupplierNameKey(name);
   if (!key) return undefined;
-
-  const exact = index.byNormalizedName.get(key);
-  if (exact && (exact.ice || exact.ifFiscal)) return exact;
-
-  let best: DgiReleveSupplierRef | undefined;
-  let bestScore = 0;
-
-  for (const [indexedKey, ref] of index.byNormalizedName) {
-    if (!ref.ice && !ref.ifFiscal) continue;
-
-    if (indexedKey.includes(key) || key.includes(indexedKey)) {
-      const score = Math.min(indexedKey.length, key.length) + 100;
-      if (score > bestScore) {
-        bestScore = score;
-        best = ref;
-      }
-      continue;
-    }
-
-    const tokens = key.split(/\s+/).filter((token) => token.length >= 3);
-    if (tokens.length === 0) continue;
-    const overlap = tokens.filter((token) => indexedKey.includes(token)).length;
-    if (overlap > bestScore) {
-      bestScore = overlap;
-      best = ref;
-    }
-  }
-
-  return bestScore > 0 ? best : exact;
+  return index.byNormalizedName.get(key);
 }
 
 /** Official DGI SIMPL-TVA relevé row (Cahier des charges EDI). */
@@ -593,7 +572,7 @@ export function isDeductiblePurchaseLine(line: AtlasTvaLineItem): boolean {
   return line.kind === 'purchase' && line.source !== 'accounting_entry';
 }
 
-/** Build sanitized supplier reference for DGI `<refF>` nodes. */
+/** Build sanitized supplier reference for DGI `<refF>` nodes (per-invoice ICE/IF — no cross-supplier fallback). */
 export function resolveDgiSupplierRef(
   sources: {
     counterparty?: string | null;
@@ -607,16 +586,16 @@ export function resolveDgiSupplierRef(
   const iceSources: Array<string | null | undefined> = [sources.supplierIce];
   const ifSources: Array<string | null | undefined> = [sources.supplierIf];
 
-  if (index) {
-    if (sources.sourceInvoiceId) {
-      const linked = index.byInvoiceId.get(String(sources.sourceInvoiceId));
-      if (linked) {
-        iceSources.push(linked.ice);
-        ifSources.push(linked.ifFiscal);
-        rawNom = rawNom || linked.nom || null;
-      }
-    }
+  const invoiceId = sources.sourceInvoiceId ? String(sources.sourceInvoiceId) : '';
 
+  if (index && invoiceId) {
+    const linked = index.byInvoiceId.get(invoiceId);
+    if (linked) {
+      iceSources.push(linked.ice);
+      ifSources.push(linked.ifFiscal);
+      rawNom = rawNom || linked.nom || null;
+    }
+  } else if (index) {
     const byName = lookupSupplierIdentityByName(index, rawNom);
     if (byName) {
       rawNom = rawNom || byName.nom || null;

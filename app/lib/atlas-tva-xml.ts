@@ -381,6 +381,8 @@ function buildRdXmlBlock(row: DgiReleveDeductionRow, ord: number): string {
 
 /**
  * Generate DGI SIMPL-TVA Relevé de déductions XML.
+ * Each `<rd>` block gets its own `<refF>` from that line's invoice id and stored ICE/IF
+ * (no fuzzy name fallback when a source invoice is linked).
  * Lines without valid supplier ICE/IF are omitted from XML (see warnings); no placeholder identifiers.
  */
 export function generateTvaDeclarationXml(
