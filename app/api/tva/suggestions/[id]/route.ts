@@ -1,13 +1,15 @@
 /**
  * PATCH /api/tva/suggestions/[id]
+ * Updates suggestion metadata only. ICE/IF route to atlas_supplier_invoices.
  */
 import { NextRequest, NextResponse } from 'next/server';
 import { documentUploadSessionUserId } from '@/app/lib/atlas-document-upload-auth';
 import { isValidMoroccoVatRate } from '@/app/lib/atlas-morocco-compliance';
 import {
   normalizeSupplierIceIf,
-  syncLinkedSupplierInvoiceIdentity,
-} from '@/app/lib/atlas-tva-suggestion-update';
+  resolveSupplierInvoiceIdForTvaLine,
+  updateSupplierInvoiceIdentity,
+} from '@/app/lib/atlas-tva-supplier-identity-update';
 import { getSupabaseServiceRoleClient } from '@/app/lib/supabase-admin';
 
 export const runtime = 'nodejs';
@@ -25,7 +27,7 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
 
   const { data: existing, error: loadError } = await admin
     .from('zafirix_tva_suggestions')
-    .select('id, source_invoice_id')
+    .select('id, source_invoice_id, source_document_id')
     .eq('id', id)
     .eq('user_id', userId)
     .maybeSingle();
@@ -44,8 +46,16 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
     patch.rate = Number(body.vatRate);
   }
 
-  let supplierIce: string | undefined;
-  let supplierIf: string | undefined;
+  const { data, error } = await admin
+    .from('zafirix_tva_suggestions')
+    .update(patch)
+    .eq('id', id)
+    .eq('user_id', userId)
+    .select('id, supplier_name, invoice_number, invoice_date, base_ht, amount, rate, source_invoice_id, source_document_id')
+    .maybeSingle();
+
+  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  if (!data) return NextResponse.json({ error: 'not_found' }, { status: 404 });
 
   if (body.supplierIce != null || body.supplierIf != null) {
     const normalized = normalizeSupplierIceIf({
@@ -58,33 +68,34 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
         { status: 400 },
       );
     }
-    supplierIce = normalized.supplierIce;
-    supplierIf = normalized.supplierIf;
-    patch.supplier_ice = supplierIce;
-    patch.supplier_if = supplierIf;
-  }
 
-  const { data, error } = await admin
-    .from('zafirix_tva_suggestions')
-    .update(patch)
-    .eq('id', id)
-    .eq('user_id', userId)
-    .select(
-      'id, supplier_name, invoice_number, invoice_date, base_ht, amount, rate, supplier_ice, supplier_if, source_invoice_id',
-    )
-    .maybeSingle();
+    const supplierInvoiceId = await resolveSupplierInvoiceIdForTvaLine(admin, userId, {
+      sourceInvoiceId: (existing as { source_invoice_id?: string | null }).source_invoice_id,
+      sourceDocumentId: (existing as { source_document_id?: string | null }).source_document_id,
+    });
 
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-  if (!data) return NextResponse.json({ error: 'not_found' }, { status: 404 });
+    if (!supplierInvoiceId) {
+      return NextResponse.json(
+        {
+          error: 'supplier_invoice_not_linked',
+          message: 'Aucune facture fournisseur liée — impossible d’enregistrer ICE/IF pour cette suggestion.',
+        },
+        { status: 422 },
+      );
+    }
 
-  if (supplierIce && supplierIf) {
-    await syncLinkedSupplierInvoiceIdentity(
-      admin,
-      userId,
-      (existing as { source_invoice_id?: string | null }).source_invoice_id,
-      supplierIce,
-      supplierIf,
-    );
+    try {
+      await updateSupplierInvoiceIdentity(
+        admin,
+        userId,
+        supplierInvoiceId,
+        normalized.supplierIce,
+        normalized.supplierIf,
+      );
+    } catch (identityErr) {
+      const message = identityErr instanceof Error ? identityErr.message : 'identity_update_failed';
+      return NextResponse.json({ error: message }, { status: 500 });
+    }
   }
 
   return NextResponse.json({ ok: true, suggestion: data });
