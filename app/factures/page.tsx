@@ -31,11 +31,10 @@ import { TrialLimitNudgeModal } from '@/app/components/trial/TrialLimitNudgeModa
 import { AppSidebar } from '@/app/components/shell/AppSidebar';
 import { EmptyStateCta } from '@/app/components/ui/EmptyStateCta';
 import { trackOnboardingMilestoneOnce } from '@/app/lib/atlas-onboarding-milestones';
-import { ExportMenu } from '@/app/components/ExportMenu';
 import type { ExportColumn } from '@/app/components/ExportMenu';
-import GlobalTable from '@/app/components/data-grid/GlobalTable';
 import type { GlobalTableColumn } from '@/app/components/data-grid/GlobalTable';
 import { exportTable } from '@/app/lib/atlas-table-export';
+import { FacturesTableSection } from '@/app/factures/FacturesTableSection';
 import { EntityAuditTable } from '@/app/components/history/EntityAuditTable';
 import { ModuleLoadErrorBanner } from '@/app/lib/use-enterprise-module-fetch';
 import { InvoiceShipmentPanel, type InvoiceShipmentTarget } from '@/app/components/logistics/InvoiceShipmentPanel';
@@ -999,15 +998,6 @@ export default function FacturesPage() {
                 </div>
               </div>
               <div className="flex items-center gap-2">
-                <ExportMenu
-                  data={filteredRows as unknown as Record<string, unknown>[]}
-                  columns={FACTURE_EXPORT_COLUMNS}
-                  filename="factures"
-                  title="Factures clients"
-                  filters={{ statut: filter }}
-                  selectedIds={selectedInvoiceIds.length > 0 ? new Set(selectedInvoiceIds) : undefined}
-                  size="xs"
-                />
                 <button onClick={() => setFilter('all')} className={`text-xs font-medium px-2.5 py-1 rounded-full border ${filter === 'all' ? 'bg-gray-900 text-white border-gray-900' : 'bg-white text-gray-600 border-gray-200 hover:bg-gray-50'}`}>
                   Toutes
                 </button>
@@ -1022,32 +1012,31 @@ export default function FacturesPage() {
                 </button>
               </div>
             </div>
-            {filteredRows.length === 0 ? (
-              <div className="px-4 py-8">
-                <EmptyStateCta
-                  lang="fr"
-                  title="Aucune facture"
-                  description="Créez votre première facture client pour suivre encaissements et relances."
-                  primaryLabelFr="Ajouter maintenant"
-                  primaryLabelAr="ابدأ الآن"
-                  onPrimary={() => setShowForm(true)}
-                />
-              </div>
-            ) : (
-              <div className="p-4">
-                <GlobalTable
-                  columns={facturesTableColumns}
-                  data={globalTableRows}
-                  selectedIds={selectedInvoiceIds}
-                  onSelectionChange={setSelectedInvoiceIds}
-                  onModify={handleBulkModify}
-                  onShare={handleBulkShare}
-                  onDownload={(ids) => void handleBulkDownload(ids)}
-                  onDelete={handleBulkDelete}
-                  hideRowActions
-                />
-              </div>
-            )}
+            <div className="p-4">
+              <FacturesTableSection
+                tableData={globalTableRows}
+                exportData={filteredRows as unknown as Record<string, unknown>[]}
+                columns={facturesTableColumns}
+                exportColumns={FACTURE_EXPORT_COLUMNS}
+                selectedIds={selectedInvoiceIds}
+                onSelectionChange={setSelectedInvoiceIds}
+                onModify={handleBulkModify}
+                onShare={handleBulkShare}
+                onDownload={handleBulkDownload}
+                onDelete={handleBulkDelete}
+                exportFilters={{ statut: filter }}
+                emptyState={
+                  <EmptyStateCta
+                    lang="fr"
+                    title="Aucune facture"
+                    description="Créez votre première facture client pour suivre encaissements et relances."
+                    primaryLabelFr="Ajouter maintenant"
+                    primaryLabelAr="ابدأ الآن"
+                    onPrimary={() => setShowForm(true)}
+                  />
+                }
+              />
+            </div>
           </div>
           </>
 
