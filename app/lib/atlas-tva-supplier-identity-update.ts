@@ -25,6 +25,18 @@ type SupplierInvoiceScopeRow = {
   user_id: string;
 };
 
+export type TvaSuggestionLinkRow = {
+  id: string;
+  source_invoice_id: string | null;
+  source_document_id: string;
+  supplier_name: string | null;
+  invoice_number: string | null;
+  invoice_date: string | null;
+  base_ht: number | string | null;
+  amount: number | string | null;
+  rate: number | string | null;
+};
+
 export async function assertSupplierInvoiceCompanyAccess(
   admin: SupabaseClient,
   userId: string,
@@ -77,6 +89,127 @@ async function filterSupplierInvoiceIdsForCompany(
     .map((row: SupplierInvoiceScopeRow) => String(row.id));
 }
 
+async function findSupplierInvoiceByDocumentHint(
+  admin: SupabaseClient,
+  companyId: string,
+  userId: string,
+  documentId: string,
+  invoiceNumber?: string | null,
+): Promise<string | null> {
+  const trimmedNumber = invoiceNumber?.trim() || null;
+
+  let query = admin
+    .from('atlas_supplier_invoices')
+    .select('id')
+    .eq('document_id', documentId)
+    .eq('company_id', companyId);
+  query = trimmedNumber ? query.eq('invoice_number', trimmedNumber) : query.is('invoice_number', null);
+
+  const { data, error } = await query.order('updated_at', { ascending: false }).limit(1).maybeSingle();
+  if (error) {
+    console.warn('[TVA] findSupplierInvoiceByDocumentHint failed', error.message);
+    return null;
+  }
+  if (data?.id) return String(data.id);
+
+  let legacyQuery = admin
+    .from('atlas_supplier_invoices')
+    .select('id')
+    .eq('document_id', documentId)
+    .is('company_id', null)
+    .eq('user_id', userId);
+  legacyQuery = trimmedNumber
+    ? legacyQuery.eq('invoice_number', trimmedNumber)
+    : legacyQuery.is('invoice_number', null);
+
+  const { data: legacy, error: legacyError } = await legacyQuery
+    .order('updated_at', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (legacyError) {
+    console.warn('[TVA] findSupplierInvoiceByDocumentHint legacy failed', legacyError.message);
+    return null;
+  }
+
+  return legacy?.id ? String(legacy.id) : null;
+}
+
+async function linkTvaSuggestionToSupplierInvoice(
+  admin: SupabaseClient,
+  companyId: string,
+  suggestionId: string,
+  supplierInvoiceId: string,
+  currentSourceInvoiceId?: string | null,
+): Promise<void> {
+  if (currentSourceInvoiceId && String(currentSourceInvoiceId) === supplierInvoiceId) return;
+
+  const { error } = await admin
+    .from('zafirix_tva_suggestions')
+    .update({
+      source_invoice_id: supplierInvoiceId,
+      updated_at: new Date().toISOString(),
+    })
+    .eq('id', suggestionId)
+    .eq('company_id', companyId);
+
+  if (error) throw new Error(error.message);
+}
+
+async function insertSupplierInvoiceFromTvaSuggestion(
+  admin: SupabaseClient,
+  companyId: string,
+  userId: string,
+  suggestion: TvaSuggestionLinkRow,
+  identity?: { supplierIce: string; supplierIf: string },
+): Promise<string> {
+  const amountHt = Number(suggestion.base_ht ?? 0);
+  const vatAmount = Number(suggestion.amount ?? 0);
+  const totalTtc = amountHt + vatAmount;
+
+  const payload = {
+    user_id: userId,
+    company_id: companyId,
+    document_id: suggestion.source_document_id,
+    source_document_id: suggestion.source_document_id,
+    supplier_name: String(suggestion.supplier_name ?? '').trim() || 'Fournisseur',
+    invoice_number: suggestion.invoice_number ? String(suggestion.invoice_number).trim() : null,
+    invoice_date: suggestion.invoice_date,
+    amount_ht: amountHt || null,
+    vat_amount: vatAmount || null,
+    amount_ttc: totalTtc || null,
+    vat_rate: suggestion.rate != null ? Number(suggestion.rate) : null,
+    supplier_ice: identity?.supplierIce ?? null,
+    supplier_if: identity?.supplierIf ?? null,
+    status: 'unpaid',
+    validation_status: 'draft',
+    generated_by: 'tva_identity_link',
+    metadata: {
+      linked_from_tva_suggestion_id: suggestion.id,
+      generated_at: new Date().toISOString(),
+    },
+  };
+
+  const { data, error } = await admin.from('atlas_supplier_invoices').insert(payload).select('id').single();
+
+  if (error?.code === '23505') {
+    const existingId = await findSupplierInvoiceByDocumentHint(
+      admin,
+      companyId,
+      userId,
+      suggestion.source_document_id,
+      suggestion.invoice_number,
+    );
+    if (existingId) return existingId;
+    throw new Error(error.message);
+  }
+
+  if (error) throw new Error(error.message);
+  if (!data?.id) throw new Error('supplier_invoice_create_failed');
+
+  return String(data.id);
+}
+
 /** Resolve atlas_supplier_invoices id from TVA line links (never zafirix_tva_suggestions). */
 export async function resolveSupplierInvoiceIdForTvaLine(
   admin: SupabaseClient,
@@ -85,6 +218,7 @@ export async function resolveSupplierInvoiceIdForTvaLine(
   opts: {
     sourceInvoiceId?: string | null;
     sourceDocumentId?: string | null;
+    invoiceNumber?: string | null;
   },
 ): Promise<string | null> {
   const linkedId = opts.sourceInvoiceId ? String(opts.sourceInvoiceId).trim() : '';
@@ -100,72 +234,97 @@ export async function resolveSupplierInvoiceIdForTvaLine(
   const documentId = opts.sourceDocumentId ? String(opts.sourceDocumentId).trim() : '';
   if (!documentId) return null;
 
-  const { data, error } = await admin
-    .from('atlas_supplier_invoices')
-    .select('id')
-    .eq('document_id', documentId)
-    .eq('company_id', companyId)
-    .order('updated_at', { ascending: false })
-    .limit(1)
-    .maybeSingle();
-
-  if (error) {
-    console.warn('[TVA] resolveSupplierInvoiceIdForTvaLine failed', error.message);
-    return null;
-  }
-
-  if (data?.id) return String(data.id);
-
-  const { data: legacy, error: legacyError } = await admin
-    .from('atlas_supplier_invoices')
-    .select('id')
-    .eq('document_id', documentId)
-    .is('company_id', null)
-    .eq('user_id', userId)
-    .order('updated_at', { ascending: false })
-    .limit(1)
-    .maybeSingle();
-
-  if (legacyError) {
-    console.warn('[TVA] resolveSupplierInvoiceIdForTvaLine legacy failed', legacyError.message);
-    return null;
-  }
-
-  return legacy?.id ? String(legacy.id) : null;
+  return findSupplierInvoiceByDocumentHint(admin, companyId, userId, documentId, opts.invoiceNumber);
 }
 
-export async function resolveSupplierInvoiceIdsFromTvaSuggestions(
+/**
+ * Ensure a suggestion has a linked atlas_supplier_invoices row.
+ * Creates a draft supplier invoice when none exists, then links source_invoice_id.
+ */
+export async function ensureSupplierInvoiceForTvaSuggestion(
+  admin: SupabaseClient,
+  companyId: string,
+  userId: string,
+  suggestion: TvaSuggestionLinkRow,
+): Promise<{ invoiceId: string; created: boolean }> {
+  const allowed = await canAccessCompany(admin, userId, companyId);
+  if (!allowed) throw new Error('company_not_found_or_forbidden');
+
+  const existingId = await resolveSupplierInvoiceIdForTvaLine(admin, companyId, userId, {
+    sourceInvoiceId: suggestion.source_invoice_id,
+    sourceDocumentId: suggestion.source_document_id,
+    invoiceNumber: suggestion.invoice_number,
+  });
+
+  if (existingId) {
+    await linkTvaSuggestionToSupplierInvoice(
+      admin,
+      companyId,
+      suggestion.id,
+      existingId,
+      suggestion.source_invoice_id,
+    );
+    return { invoiceId: existingId, created: false };
+  }
+
+  const invoiceId = await insertSupplierInvoiceFromTvaSuggestion(admin, companyId, userId, suggestion);
+  await linkTvaSuggestionToSupplierInvoice(admin, companyId, suggestion.id, invoiceId, suggestion.source_invoice_id);
+  return { invoiceId, created: true };
+}
+
+export async function ensureSupplierInvoiceIdsFromTvaSuggestions(
   admin: SupabaseClient,
   companyId: string,
   userId: string,
   suggestionIds: string[],
-): Promise<{ invoiceIds: string[]; unresolvedCount: number }> {
-  if (suggestionIds.length === 0) return { invoiceIds: [], unresolvedCount: 0 };
+): Promise<{ invoiceIds: string[]; createdCount: number; notFoundCount: number }> {
+  if (suggestionIds.length === 0) return { invoiceIds: [], createdCount: 0, notFoundCount: 0 };
 
   const allowed = await canAccessCompany(admin, userId, companyId);
   if (!allowed) throw new Error('company_not_found_or_forbidden');
 
   const { data, error } = await admin
     .from('zafirix_tva_suggestions')
-    .select('id, source_invoice_id, source_document_id')
+    .select(
+      'id, source_invoice_id, source_document_id, supplier_name, invoice_number, invoice_date, base_ht, amount, rate',
+    )
     .in('id', suggestionIds)
     .eq('company_id', companyId);
 
   if (error) throw new Error(error.message);
 
   const resolved = new Set<string>();
-  let unresolvedCount = suggestionIds.length - (data ?? []).length;
+  let createdCount = 0;
+  const notFoundCount = suggestionIds.length - (data ?? []).length;
 
-  for (const row of data ?? []) {
-    const invoiceId = await resolveSupplierInvoiceIdForTvaLine(admin, companyId, userId, {
-      sourceInvoiceId: (row as { source_invoice_id?: string | null }).source_invoice_id,
-      sourceDocumentId: (row as { source_document_id?: string | null }).source_document_id,
-    });
-    if (invoiceId) resolved.add(invoiceId);
-    else unresolvedCount += 1;
+  for (const row of (data ?? []) as TvaSuggestionLinkRow[]) {
+    const { invoiceId, created } = await ensureSupplierInvoiceForTvaSuggestion(
+      admin,
+      companyId,
+      userId,
+      row,
+    );
+    resolved.add(invoiceId);
+    if (created) createdCount += 1;
   }
 
-  return { invoiceIds: [...resolved], unresolvedCount };
+  return { invoiceIds: [...resolved], createdCount, notFoundCount };
+}
+
+/** @deprecated Use ensureSupplierInvoiceIdsFromTvaSuggestions — kept for callers expecting resolve-only semantics. */
+export async function resolveSupplierInvoiceIdsFromTvaSuggestions(
+  admin: SupabaseClient,
+  companyId: string,
+  userId: string,
+  suggestionIds: string[],
+): Promise<{ invoiceIds: string[]; unresolvedCount: number }> {
+  const { invoiceIds, notFoundCount } = await ensureSupplierInvoiceIdsFromTvaSuggestions(
+    admin,
+    companyId,
+    userId,
+    suggestionIds,
+  );
+  return { invoiceIds, unresolvedCount: notFoundCount };
 }
 
 export async function updateSupplierInvoiceIdentity(

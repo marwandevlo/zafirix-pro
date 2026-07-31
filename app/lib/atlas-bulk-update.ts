@@ -1,4 +1,4 @@
-import { showAtlasErrorToast, showAtlasSuccessToast, showAtlasWarningToast } from '@/app/lib/atlas-toast';
+import { showAtlasErrorToast, showAtlasSuccessToast } from '@/app/lib/atlas-toast';
 
 export function formatBulkUpdateError(err: unknown): string {
   const raw =
@@ -67,7 +67,7 @@ export async function postTvaSupplierIdentityUpdate(options: {
   tvaSuggestionIds: string[];
   supplierIce: string;
   supplierIf: string;
-}): Promise<{ updated: number; unresolvedSuggestions: number }> {
+}): Promise<{ updated: number; createdInvoices: number }> {
   const res = await fetch('/api/tva/update-supplier-identity', {
     method: 'POST',
     credentials: 'include',
@@ -79,7 +79,7 @@ export async function postTvaSupplierIdentityUpdate(options: {
   const data = (await res.json().catch(() => ({}))) as {
     ok?: boolean;
     updated?: number;
-    unresolvedSuggestions?: number;
+    createdInvoices?: number;
     error?: string;
     message?: string;
   };
@@ -90,7 +90,7 @@ export async function postTvaSupplierIdentityUpdate(options: {
 
   return {
     updated: typeof data.updated === 'number' ? data.updated : 0,
-    unresolvedSuggestions: typeof data.unresolvedSuggestions === 'number' ? data.unresolvedSuggestions : 0,
+    createdInvoices: typeof data.createdInvoices === 'number' ? data.createdInvoices : 0,
   };
 }
 
@@ -106,17 +106,16 @@ export async function runBulkTvaLineIdentityUpdate(options: {
   if (totalTargets === 0) return false;
 
   try {
-    const { updated, unresolvedSuggestions } = await postTvaSupplierIdentityUpdate(options);
+    const { updated, createdInvoices } = await postTvaSupplierIdentityUpdate(options);
     if (updated === 0) {
-      showAtlasErrorToast('Aucune facture fournisseur liée — ICE/IF non enregistrés.');
+      showAtlasErrorToast('Aucune ligne n’a pu être mise à jour (ICE / IF).');
       return false;
     }
-    showAtlasSuccessToast(`${updated} facture(s) fournisseur mise(s) à jour (ICE / IF).`);
-    if (unresolvedSuggestions > 0) {
-      showAtlasWarningToast(
-        `${unresolvedSuggestions} suggestion(s) sans facture fournisseur liée — ICE/IF non appliqués.`,
-      );
-    }
+    const createdNote =
+      createdInvoices > 0
+        ? ` (${createdInvoices} facture(s) fournisseur créée(s) automatiquement pour les suggestions)`
+        : '';
+    showAtlasSuccessToast(`${updated} facture(s) fournisseur mise(s) à jour (ICE / IF).${createdNote}`);
     await options.onSuccess?.();
     return true;
   } catch (err) {

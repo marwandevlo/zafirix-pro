@@ -7,8 +7,9 @@ import { requireApiCompanyAccess } from '@/app/lib/atlas-api-company-guard';
 import { documentUploadSessionUserId } from '@/app/lib/atlas-document-upload-auth';
 import { isValidMoroccoVatRate } from '@/app/lib/atlas-morocco-compliance';
 import {
+  ensureSupplierInvoiceForTvaSuggestion,
   normalizeSupplierIceIf,
-  resolveSupplierInvoiceIdForTvaLine,
+  type TvaSuggestionLinkRow,
   updateSupplierInvoiceIdentity,
 } from '@/app/lib/atlas-tva-supplier-identity-update';
 import { revalidateTvaSurfaces } from '@/app/lib/revalidate-tva-surfaces';
@@ -37,7 +38,9 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
 
   const { data: existing, error: loadError } = await admin
     .from('zafirix_tva_suggestions')
-    .select('id, company_id, source_invoice_id, source_document_id')
+    .select(
+      'id, company_id, source_invoice_id, source_document_id, supplier_name, invoice_number, invoice_date, base_ht, amount, rate',
+    )
     .eq('id', id)
     .maybeSingle();
 
@@ -97,26 +100,17 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
       );
     }
 
-    const supplierInvoiceId = await resolveSupplierInvoiceIdForTvaLine(admin, access.companyId, userId, {
-      sourceInvoiceId: (existing as { source_invoice_id?: string | null }).source_invoice_id,
-      sourceDocumentId: (existing as { source_document_id?: string | null }).source_document_id,
-    });
-
-    if (!supplierInvoiceId) {
-      return NextResponse.json(
-        {
-          error: 'supplier_invoice_not_linked',
-          message: 'Aucune facture fournisseur liée — impossible d’enregistrer ICE/IF pour cette suggestion.',
-        },
-        { status: 422, headers: NO_STORE_HEADERS },
-      );
-    }
-
     try {
+      const { invoiceId } = await ensureSupplierInvoiceForTvaSuggestion(
+        admin,
+        access.companyId,
+        userId,
+        existing as TvaSuggestionLinkRow,
+      );
       await updateSupplierInvoiceIdentity(
         admin,
         userId,
-        supplierInvoiceId,
+        invoiceId,
         normalized.supplierIce,
         normalized.supplierIf,
       );

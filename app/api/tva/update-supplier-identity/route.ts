@@ -16,8 +16,8 @@ import { documentUploadSessionUserId } from '@/app/lib/atlas-document-upload-aut
 import { prepareBulkDeleteIds } from '@/app/lib/atlas-bulk-delete-server';
 import {
   bulkUpdateSupplierInvoiceIdentity,
+  ensureSupplierInvoiceIdsFromTvaSuggestions,
   normalizeSupplierIceIf,
-  resolveSupplierInvoiceIdsFromTvaSuggestions,
 } from '@/app/lib/atlas-tva-supplier-identity-update';
 import { revalidateTvaSurfaces } from '@/app/lib/revalidate-tva-surfaces';
 import { getSupabaseServiceRoleClient } from '@/app/lib/supabase-admin';
@@ -76,27 +76,28 @@ export async function POST(request: NextRequest) {
 
   const targetIds = new Set<string>(directPrepared.ok ? directPrepared.uuidIds : []);
 
-  let unresolvedSuggestions = 0;
+  let createdInvoices = 0;
+  let skipped =
+    (directPrepared.ok ? directPrepared.skipped : 0) + (suggestionPrepared.ok ? suggestionPrepared.skipped : 0);
+
   if (suggestionPrepared.ok && suggestionPrepared.uuidIds.length > 0) {
-    const { invoiceIds, unresolvedCount } = await resolveSupplierInvoiceIdsFromTvaSuggestions(
+    const { invoiceIds, createdCount, notFoundCount } = await ensureSupplierInvoiceIdsFromTvaSuggestions(
       admin,
       access.companyId,
       userId,
       suggestionPrepared.uuidIds,
     );
-    unresolvedSuggestions = unresolvedCount;
+    createdInvoices = createdCount;
     for (const id of invoiceIds) targetIds.add(id);
+    skipped += notFoundCount;
   }
-
-  const skipped =
-    (directPrepared.ok ? directPrepared.skipped : 0) + (suggestionPrepared.ok ? suggestionPrepared.skipped : 0);
 
   if (targetIds.size === 0) {
     return NextResponse.json({
       ok: true,
       updated: 0,
       skipped,
-      unresolvedSuggestions,
+      createdInvoices,
     }, { headers: NO_STORE_HEADERS });
   }
 
@@ -116,7 +117,7 @@ export async function POST(request: NextRequest) {
       ok: true,
       updated,
       skipped,
-      unresolvedSuggestions,
+      createdInvoices,
     }, { headers: NO_STORE_HEADERS });
   } catch (err) {
     const message = err instanceof Error ? err.message : 'update_failed';
