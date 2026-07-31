@@ -21,6 +21,16 @@ import type { ExportColumn } from '@/app/components/ExportMenu';
 import { EntityAuditTable } from '@/app/components/history/EntityAuditTable';
 import { RowActions } from '@/app/components/actions';
 import { isValidIce } from '@/app/lib/atlas-morocco-compliance';
+import GlobalTable from '@/app/components/data-grid/GlobalTable';
+import type { GlobalTableColumn, GlobalTableRow } from '@/app/components/data-grid/GlobalTable';
+import {
+  filterRowsBySelectedIds,
+  normalizeGlobalTableRows,
+  pruneSelectedIds,
+} from '@/app/components/data-grid/global-table-id';
+import { exportTable } from '@/app/lib/atlas-table-export';
+import { openWhatsAppShare } from '@/app/lib/atlas-quick-share';
+import type { AtlasTvaLineItem } from '@/app/types/atlas-tva';
 
 const TVA_LINE_EXPORT_COLUMNS: ExportColumn[] = [
   { key: 'reference', label: 'Référence' },
@@ -154,6 +164,15 @@ async function updateTvaSourceLine(line: AtlasTvaPeriodRecord['lines'][number], 
   return false;
 }
 
+type TvaHistoryTableRow = GlobalTableRow & {
+  periodLabel: string;
+  tvaCollectee: number;
+  tvaDeductible: number;
+  tvaNette: number;
+  declarationDueDate: string;
+  status: string;
+};
+
 export default function TvaPageClient() {
   const [tab, setTab] = useState<Tab>('dashboard');
   const [companyId, setCompanyId] = useState<string | null>(null);
@@ -168,6 +187,7 @@ export default function TvaPageClient() {
   const [selectedQuarter, setSelectedQuarter] = useState<TvaQuarterSelection>(() => currentQuarter());
   const skipPeriodFetchRef = useRef(false);
   const initialDetectDoneRef = useRef(false);
+  const [selectedHistoryIds, setSelectedHistoryIds] = useState<string[]>([]);
 
   const supabaseEnabled = isAtlasSupabaseDataEnabled();
 
@@ -253,6 +273,26 @@ export default function TvaPageClient() {
     () => (current?.lines ?? []).filter((l) => l.kind === 'purchase'),
     [current],
   );
+
+  const historyTableRows = useMemo(
+    (): TvaHistoryTableRow[] =>
+      normalizeGlobalTableRows(
+        history.map((p) => ({
+          id: p.id,
+          periodLabel: p.periodLabel,
+          tvaCollectee: p.tvaCollectee,
+          tvaDeductible: p.tvaDeductible,
+          tvaNette: p.tvaNette,
+          declarationDueDate: p.declarationDueDate,
+          status: p.status,
+        })) as Record<string, unknown>[],
+      ) as TvaHistoryTableRow[],
+    [history],
+  );
+
+  useEffect(() => {
+    setSelectedHistoryIds((prev) => pruneSelectedIds(prev, historyTableRows));
+  }, [historyTableRows]);
 
   const downloadXml = () => {
     if (!current || !dashboard) return;
@@ -562,68 +602,12 @@ export default function TvaPageClient() {
           )}
 
           {!loading && tab === 'historique' && (
-            <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
-              <div className="px-5 py-4 border-b border-gray-100">
-                <h2 className="font-semibold text-gray-700">Historique TVA</h2>
-                <p className="text-xs text-gray-400 mt-0.5">
-                  Périodes trimestrielles et annuelles — {selectedYear}
-                </p>
-              </div>
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="text-left text-xs text-gray-400 border-b border-gray-100">
-                    <th className="px-4 py-3">Période</th>
-                    <th className="px-4 py-3 text-right">Collectée</th>
-                    <th className="px-4 py-3 text-right">Déductible</th>
-                    <th className="px-4 py-3 text-right">Nette</th>
-                    <th className="px-4 py-3">Échéance</th>
-                    <th className="px-4 py-3">Statut</th>
-                    <th className="px-4 py-3 text-right">Actions</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {history.length === 0 && (
-                    <tr>
-                      <td colSpan={7} className="px-4 py-8 text-center text-gray-400">
-                        Aucune période enregistrée.
-                      </td>
-                    </tr>
-                  )}
-                  {history.map((p) => (
-                    <tr key={p.id} className="border-b border-gray-50 hover:bg-gray-50">
-                      <td className="px-4 py-3 font-medium text-gray-700">{p.periodLabel}</td>
-                      <td className="px-4 py-3 text-right text-blue-600">{formatMad(p.tvaCollectee)}</td>
-                      <td className="px-4 py-3 text-right text-green-600">{formatMad(p.tvaDeductible)}</td>
-                      <td className="px-4 py-3 text-right font-medium">{formatMad(p.tvaNette)}</td>
-                      <td className="px-4 py-3 text-gray-600">{p.declarationDueDate}</td>
-                      <td className="px-4 py-3">{statusBadge(p.status)}</td>
-                      <td className="px-4 py-3 text-right">
-                        <div className="relative inline-flex justify-end">
-                          <RowActions
-                            entityId={p.id}
-                            entityLabel={p.periodLabel}
-                            entityType="période TVA"
-                            exportData={{
-                              id: p.id,
-                              periodLabel: p.periodLabel,
-                              tvaCollectee: p.tvaCollectee,
-                              tvaDeductible: p.tvaDeductible,
-                              tvaNette: p.tvaNette,
-                              declarationDueDate: p.declarationDueDate,
-                              status: p.status,
-                            }}
-                            exportColumns={TVA_HISTORY_EXPORT_COLUMNS}
-                            exportFilename="periode_tva"
-                            hideEdit
-                            hideDelete
-                          />
-                        </div>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+            <TvaHistoryTable
+              rows={historyTableRows}
+              history={history}
+              selectedIds={selectedHistoryIds}
+              onSelectionChange={setSelectedHistoryIds}
+            />
           )}
         </div>
       </main>
@@ -642,6 +626,117 @@ function InvoiceTable({
   counterpartyLabel: string;
   onRefresh?: () => void;
 }) {
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
+
+  const tableRows = useMemo(
+    () => normalizeGlobalTableRows(lines as unknown as Record<string, unknown>[]) as (AtlasTvaLineItem & GlobalTableRow)[],
+    [lines],
+  );
+
+  useEffect(() => {
+    setSelectedIds((prev) => pruneSelectedIds(prev, tableRows));
+  }, [tableRows]);
+
+  const lineById = useMemo(() => new Map(tableRows.map((row) => [row.id, row])), [tableRows]);
+
+  const columns = useMemo((): GlobalTableColumn<(typeof tableRows)[number]>[] => [
+    { header: 'Réf.', accessor: 'reference', render: (row) => row.reference || '—' },
+    { header: counterpartyLabel, accessor: 'counterparty' },
+    { header: 'Date', accessor: 'issueDate' },
+    { header: 'HT', accessor: 'amountHT', className: 'text-right', render: (row) => formatMad(row.amountHT) },
+    { header: 'TVA', accessor: 'vatAmount', className: 'text-right', render: (row) => formatMad(row.vatAmount) },
+    { header: 'TTC', accessor: 'totalTTC', className: 'text-right', render: (row) => formatMad(row.totalTTC) },
+    { header: 'Source', accessor: 'source', render: (row) => <span className="text-xs text-gray-400">{row.source}</span> },
+    {
+      header: 'Actions',
+      accessor: 'id',
+      className: 'text-right',
+      render: (row) => {
+        const f = lineById.get(row.id);
+        if (!f) return null;
+        return (
+          <div className="relative inline-flex justify-end">
+            <RowActions
+              entityId={f.id}
+              entityLabel={f.reference || f.counterparty}
+              entityType="ligne TVA"
+              exportData={{
+                id: f.id,
+                reference: f.reference,
+                counterparty: f.counterparty,
+                issueDate: f.issueDate,
+                amountHT: f.amountHT,
+                vatAmount: f.vatAmount,
+                totalTTC: f.totalTTC,
+                source: f.source,
+              }}
+              exportColumns={TVA_LINE_EXPORT_COLUMNS}
+              exportFilename="ligne_tva"
+              exportTitle={title}
+              hideEdit={f.source === 'tva_suggestion' || f.source === 'invoice'}
+              hideDelete={f.source === 'tva_suggestion'}
+              editFields={[
+                { key: 'reference', label: 'Référence', value: f.reference ?? '' },
+                { key: 'counterparty', label: counterpartyLabel, value: f.counterparty ?? '', required: true },
+                { key: 'issueDate', label: 'Date', type: 'date', value: f.issueDate ?? '' },
+                { key: 'amountHT', label: 'HT (MAD)', type: 'number', value: String(f.amountHT) },
+                { key: 'vatAmount', label: 'TVA (MAD)', type: 'number', value: String(f.vatAmount) },
+                { key: 'totalTTC', label: 'TTC (MAD)', type: 'number', value: String(f.totalTTC) },
+                ...(counterpartyLabel === 'Fournisseur'
+                  ? [{
+                      key: 'supplierIce',
+                      label: 'ICE',
+                      value: f.supplierIce ?? '',
+                      validate: (v: string) => (!v.trim() || isValidIce(v) ? null : 'ICE invalide (15 chiffres)'),
+                    }]
+                  : []),
+              ]}
+              onEditSave={async (values) => {
+                const ok = await updateTvaSourceLine(f, values);
+                if (ok) onRefresh?.();
+                return ok;
+              }}
+              onDelete={async () => {
+                const ok = await deleteTvaSourceLine(f);
+                if (ok) onRefresh?.();
+                return ok;
+              }}
+            />
+          </div>
+        );
+      },
+    },
+  ], [counterpartyLabel, lineById, onRefresh, title]);
+
+  const handleBulkShare = (ids: string[]) => {
+    const selected = filterRowsBySelectedIds(tableRows as unknown as Record<string, unknown>[], ids) as typeof tableRows;
+    const summary = selected
+      .map((row) => `- ${row.reference || row.counterparty}: ${formatMad(row.vatAmount)} TVA`)
+      .join('\n');
+    openWhatsAppShare(`${title} — sélection:\n${summary}`);
+  };
+
+  const handleBulkDownload = (ids: string[]) => {
+    const selected = filterRowsBySelectedIds(tableRows as unknown as Record<string, unknown>[], ids);
+    void exportTable(
+      'xlsx',
+      selected,
+      TVA_LINE_EXPORT_COLUMNS,
+      `tva_${counterpartyLabel.toLowerCase()}`,
+      { title },
+    );
+  };
+
+  const handleBulkDelete = async (ids: string[]) => {
+    if (!window.confirm(`Supprimer ${ids.length} ligne(s) TVA ?`)) return;
+    for (const id of ids) {
+      const line = lineById.get(id);
+      if (line) await deleteTvaSourceLine(line);
+    }
+    setSelectedIds([]);
+    onRefresh?.();
+  };
+
   return (
     <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
       <div className="px-5 py-4 border-b border-gray-100 flex items-center justify-between gap-3">
@@ -650,98 +745,133 @@ function InvoiceTable({
           <p className="text-xs text-gray-400 mt-0.5">{lines.length} ligne(s)</p>
         </div>
         <ExportMenu
-          data={lines as unknown as Record<string, unknown>[]}
+          data={tableRows as unknown as Record<string, unknown>[]}
           columns={TVA_LINE_EXPORT_COLUMNS}
           filename={`tva_${counterpartyLabel.toLowerCase()}`}
           title={title}
+          selectedIds={selectedIds.length > 0 ? new Set(selectedIds) : undefined}
           size="xs"
           align="right"
         />
       </div>
-      <table className="w-full text-sm">
-        <thead>
-          <tr className="text-left text-xs text-gray-400 border-b border-gray-100">
-            <th className="px-4 py-3">Réf.</th>
-            <th className="px-4 py-3">{counterpartyLabel}</th>
-            <th className="px-4 py-3">Date</th>
-            <th className="px-4 py-3 text-right">HT</th>
-            <th className="px-4 py-3 text-right">TVA</th>
-            <th className="px-4 py-3 text-right">TTC</th>
-            <th className="px-4 py-3">Source</th>
-            <th className="px-4 py-3 text-right">Actions</th>
-          </tr>
-        </thead>
-        <tbody>
-          {lines.length === 0 && (
-            <tr>
-              <td colSpan={8}>
-                <ModuleEmptyState module="tva" />
-              </td>
-            </tr>
-          )}
-          {lines.map((f) => (
-            <tr key={f.id} className="border-b border-gray-50 hover:bg-gray-50">
-              <td className="px-4 py-3 font-medium text-gray-700">{f.reference || '—'}</td>
-              <td className="px-4 py-3 text-gray-600">{f.counterparty}</td>
-              <td className="px-4 py-3 text-gray-500">{f.issueDate}</td>
-              <td className="px-4 py-3 text-right">{formatMad(f.amountHT)}</td>
-              <td className="px-4 py-3 text-right text-blue-600">{formatMad(f.vatAmount)}</td>
-              <td className="px-4 py-3 text-right font-medium">{formatMad(f.totalTTC)}</td>
-              <td className="px-4 py-3 text-xs text-gray-400">{f.source}</td>
-              <td className="px-4 py-3 text-right">
-                <div className="relative inline-flex justify-end">
-                  <RowActions
-                    entityId={f.id}
-                    entityLabel={f.reference || f.counterparty}
-                    entityType="ligne TVA"
-                    exportData={{
-                      id: f.id,
-                      reference: f.reference,
-                      counterparty: f.counterparty,
-                      issueDate: f.issueDate,
-                      amountHT: f.amountHT,
-                      vatAmount: f.vatAmount,
-                      totalTTC: f.totalTTC,
-                      source: f.source,
-                    }}
-                    exportColumns={TVA_LINE_EXPORT_COLUMNS}
-                    exportFilename="ligne_tva"
-                    exportTitle={title}
-                    hideEdit={f.source === 'tva_suggestion' || f.source === 'invoice'}
-                    hideDelete={f.source === 'tva_suggestion'}
-                    editFields={[
-                      { key: 'reference', label: 'Référence', value: f.reference ?? '' },
-                      { key: 'counterparty', label: counterpartyLabel, value: f.counterparty ?? '', required: true },
-                      { key: 'issueDate', label: 'Date', type: 'date', value: f.issueDate ?? '' },
-                      { key: 'amountHT', label: 'HT (MAD)', type: 'number', value: String(f.amountHT) },
-                      { key: 'vatAmount', label: 'TVA (MAD)', type: 'number', value: String(f.vatAmount) },
-                      { key: 'totalTTC', label: 'TTC (MAD)', type: 'number', value: String(f.totalTTC) },
-                      ...(counterpartyLabel === 'Fournisseur'
-                        ? [{
-                            key: 'supplierIce',
-                            label: 'ICE',
-                            value: f.supplierIce ?? '',
-                            validate: (v: string) => (!v.trim() || isValidIce(v) ? null : 'ICE invalide (15 chiffres)'),
-                          }]
-                        : []),
-                    ]}
-                    onEditSave={async (values) => {
-                      const ok = await updateTvaSourceLine(f, values);
-                      if (ok) onRefresh?.();
-                      return ok;
-                    }}
-                    onDelete={async () => {
-                      const ok = await deleteTvaSourceLine(f);
-                      if (ok) onRefresh?.();
-                      return ok;
-                    }}
-                  />
-                </div>
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
+
+      {lines.length === 0 ? (
+        <ModuleEmptyState module="tva" />
+      ) : (
+        <div className="p-4">
+          <GlobalTable
+            columns={columns}
+            data={tableRows}
+            selectedIds={selectedIds}
+            onSelectionChange={setSelectedIds}
+            onModify={(ids) => window.alert(`Modification groupée de ${ids.length} ligne(s) — bientôt disponible.`)}
+            onShare={handleBulkShare}
+            onDownload={handleBulkDownload}
+            onDelete={(ids) => void handleBulkDelete(ids)}
+            hideRowActions
+            clearSelectionOnDelete={false}
+          />
+        </div>
+      )}
+    </div>
+  );
+}
+
+function TvaHistoryTable({
+  rows,
+  history,
+  selectedIds,
+  onSelectionChange,
+}: {
+  rows: TvaHistoryTableRow[];
+  history: AtlasTvaPeriodRecord[];
+  selectedIds: string[];
+  onSelectionChange: (ids: string[]) => void;
+}) {
+  const periodById = useMemo(() => new Map(history.map((p) => [p.id, p])), [history]);
+
+  const columns = useMemo((): GlobalTableColumn<TvaHistoryTableRow>[] => [
+    { header: 'Période', accessor: 'periodLabel' },
+    { header: 'Collectée', accessor: 'tvaCollectee', className: 'text-right', render: (row) => <span className="text-blue-600">{formatMad(row.tvaCollectee)}</span> },
+    { header: 'Déductible', accessor: 'tvaDeductible', className: 'text-right', render: (row) => <span className="text-green-600">{formatMad(row.tvaDeductible)}</span> },
+    { header: 'Nette', accessor: 'tvaNette', className: 'text-right', render: (row) => formatMad(row.tvaNette) },
+    { header: 'Échéance', accessor: 'declarationDueDate' },
+    { header: 'Statut', accessor: 'status', render: (row) => statusBadge(row.status) },
+    {
+      header: 'Actions',
+      accessor: 'id',
+      className: 'text-right',
+      render: (row) => {
+        const p = periodById.get(row.id);
+        if (!p) return null;
+        return (
+          <div className="relative inline-flex justify-end">
+            <RowActions
+              entityId={p.id}
+              entityLabel={p.periodLabel}
+              entityType="période TVA"
+              exportData={{
+                id: p.id,
+                periodLabel: p.periodLabel,
+                tvaCollectee: p.tvaCollectee,
+                tvaDeductible: p.tvaDeductible,
+                tvaNette: p.tvaNette,
+                declarationDueDate: p.declarationDueDate,
+                status: p.status,
+              }}
+              exportColumns={TVA_HISTORY_EXPORT_COLUMNS}
+              exportFilename="periode_tva"
+              hideEdit
+              hideDelete
+            />
+          </div>
+        );
+      },
+    },
+  ], [periodById]);
+
+  const handleBulkDownload = (ids: string[]) => {
+    const selected = filterRowsBySelectedIds(rows as unknown as Record<string, unknown>[], ids);
+    void exportTable('xlsx', selected, TVA_HISTORY_EXPORT_COLUMNS, 'historique_tva', { title: 'Historique TVA' });
+  };
+
+  return (
+    <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
+      <div className="px-5 py-4 border-b border-gray-100 flex items-center justify-between gap-3">
+        <div>
+          <h2 className="font-semibold text-gray-700">Historique TVA</h2>
+          <p className="text-xs text-gray-400 mt-0.5">Périodes trimestrielles et annuelles</p>
+        </div>
+        <ExportMenu
+          data={rows as unknown as Record<string, unknown>[]}
+          columns={TVA_HISTORY_EXPORT_COLUMNS}
+          filename="historique_tva"
+          title="Historique TVA"
+          selectedIds={selectedIds.length > 0 ? new Set(selectedIds) : undefined}
+          size="xs"
+          align="right"
+        />
+      </div>
+
+      {rows.length === 0 ? (
+        <p className="px-4 py-8 text-center text-sm text-gray-400">Aucune période enregistrée.</p>
+      ) : (
+        <div className="p-4">
+          <GlobalTable
+            columns={columns}
+            data={rows}
+            selectedIds={selectedIds}
+            onSelectionChange={onSelectionChange}
+            onShare={(ids) => {
+              const selected = filterRowsBySelectedIds(rows as unknown as Record<string, unknown>[], ids) as TvaHistoryTableRow[];
+              const summary = selected.map((row) => `- ${row.periodLabel}: ${formatMad(row.tvaNette)} net`).join('\n');
+              openWhatsAppShare(`Historique TVA:\n${summary}`);
+            }}
+            onDownload={handleBulkDownload}
+            hideRowActions
+          />
+        </div>
+      )}
     </div>
   );
 }

@@ -2,6 +2,7 @@
 
 import { useMemo, useState, type ReactNode } from 'react';
 import { Download, Edit3, MoreVertical, Share2, Trash2 } from 'lucide-react';
+import { normalizeGlobalTableRows } from '@/app/components/data-grid/global-table-id';
 
 export type GlobalTableColumn<T extends GlobalTableRow = GlobalTableRow> = {
   header: string;
@@ -37,17 +38,22 @@ export type GlobalTableProps<T extends GlobalTableRow = GlobalTableRow> = {
 function useSelectionState(
   controlled: string[] | undefined,
   onChange: ((ids: string[]) => void) | undefined,
-  data: GlobalTableRow[],
+  rowIds: string[],
 ) {
   const [internal, setInternal] = useState<string[]>([]);
-  const selectedIds = controlled ?? internal;
+  const isControlled = controlled !== undefined;
+  const selectedIds = isControlled ? controlled : internal;
+
+  const commitSelection = (next: string[]) => {
+    const validIds = new Set(rowIds);
+    const filtered = next.filter((id) => validIds.has(id));
+    if (onChange) onChange(filtered);
+    if (!isControlled) setInternal(filtered);
+  };
 
   const setSelectedIds = (next: string[] | ((prev: string[]) => string[])) => {
     const resolved = typeof next === 'function' ? next(selectedIds) : next;
-    const validIds = new Set(data.map((item) => item.id));
-    const filtered = resolved.filter((id) => validIds.has(id));
-    if (onChange) onChange(filtered);
-    else setInternal(filtered);
+    commitSelection(resolved);
   };
 
   return [selectedIds, setSelectedIds] as const;
@@ -74,16 +80,29 @@ export default function GlobalTable<T extends GlobalTableRow = GlobalTableRow>({
   emptyLabel = 'Aucune donnée à afficher.',
   clearSelectionOnDelete = true,
 }: GlobalTableProps<T>) {
-  const [selectedIds, setSelectedIds] = useSelectionState(controlledSelectedIds, onSelectionChange, data);
+  const normalizedData = useMemo(
+    () => normalizeGlobalTableRows(data as Record<string, unknown>[]) as T[],
+    [data],
+  );
+  const rowIds = useMemo(() => normalizedData.map((row) => row.id), [normalizedData]);
+
+  const [selectedIds, setSelectedIds] = useSelectionState(
+    controlledSelectedIds,
+    onSelectionChange,
+    rowIds,
+  );
+
   const [openMenuId, setOpenMenuId] = useState<string | null>(null);
 
-  const isAllSelected = data.length > 0 && selectedIds.length === data.length;
+  const isAllSelected =
+    normalizedData.length > 0 &&
+    normalizedData.every((row) => selectedIds.includes(row.id));
 
   const selectedSet = useMemo(() => new Set(selectedIds), [selectedIds]);
 
   const handleSelectAll = (checked: boolean) => {
     if (checked) {
-      setSelectedIds(data.map((item) => item.id));
+      setSelectedIds(normalizedData.map((item) => item.id));
       return;
     }
     setSelectedIds([]);
@@ -159,7 +178,7 @@ export default function GlobalTable<T extends GlobalTableRow = GlobalTableRow>({
       ) : null}
 
       <div className="overflow-x-auto border border-slate-200 rounded-xl bg-white shadow-sm">
-        {data.length === 0 ? (
+        {normalizedData.length === 0 ? (
           <div className="px-6 py-10 text-center text-sm text-slate-500">{emptyLabel}</div>
         ) : (
           <table className="min-w-full text-right border-collapse">
@@ -188,7 +207,7 @@ export default function GlobalTable<T extends GlobalTableRow = GlobalTableRow>({
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100 text-sm">
-              {data.map((item) => {
+              {normalizedData.map((item) => {
                 const isSelected = selectedSet.has(item.id);
                 return (
                   <tr

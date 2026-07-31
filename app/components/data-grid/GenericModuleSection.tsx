@@ -1,9 +1,14 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import GlobalTable, { type GlobalTableColumn, type GlobalTableRow } from '@/app/components/data-grid/GlobalTable';
 import ExportMenu from '@/app/components/ExportMenu';
 import type { ExportColumn } from '@/app/components/ExportMenu';
+import {
+  filterRowsBySelectedIds,
+  normalizeGlobalTableRows,
+  pruneSelectedIds,
+} from '@/app/components/data-grid/global-table-id';
 import { exportTable } from '@/app/lib/atlas-table-export';
 import { openWhatsAppShare } from '@/app/lib/atlas-quick-share';
 
@@ -41,28 +46,44 @@ export default function GenericModuleSection<T extends GlobalTableRow>({
   onDelete,
 }: GenericModuleSectionProps<T>) {
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
-  const [data, setData] = useState<T[]>(initialData);
+  const [data, setData] = useState<T[]>(() =>
+    normalizeGlobalTableRows(initialData as Record<string, unknown>[]) as T[],
+  );
 
-  // Sync internal state when parent data changes
   useEffect(() => {
-    setData(initialData);
+    setData(normalizeGlobalTableRows(initialData as Record<string, unknown>[]) as T[]);
   }, [initialData]);
 
-  // Default or custom modify behavior
+  useEffect(() => {
+    setSelectedIds((prev) => pruneSelectedIds(prev, data));
+  }, [data]);
+
+  const exportRows = useMemo(
+    () => data as unknown as Record<string, unknown>[],
+    [data],
+  );
+
+  const rowsForIds = useCallback(
+    (ids: string[]) => filterRowsBySelectedIds(data as Record<string, unknown>[], ids) as T[],
+    [data],
+  );
+
+  const handleSelectionChange = useCallback((ids: string[]) => {
+    setSelectedIds(ids);
+  }, []);
+
   const handleModify = onModify || ((ids: string[]) => {
     alert(`تعديل جماعي لـ ${ids.length} عنصر في قسم ${moduleTitle}`);
   });
 
-  // Default or custom WhatsApp share behavior via openWhatsAppShare
   const handleShare = onShare || ((ids: string[]) => {
-    const selectedRows = data.filter((item) => ids.includes(item.id));
+    const selectedRows = rowsForIds(ids);
     const summary = selectedRows.map((i) => `- ${String(i[moduleNameKey])}`).join('\n');
     openWhatsAppShare(`ملخص العناصر المحددة (${moduleTitle}):\n${summary}`);
   });
 
-  // Default or custom download behavior via exportTable passing full ExportColumn[]
   const handleDownload = onDownload || ((ids: string[]) => {
-    const selectedRows = data.filter((item) => ids.includes(item.id));
+    const selectedRows = rowsForIds(ids);
     void exportTable(
       'xlsx',
       selectedRows as unknown as Record<string, unknown>[],
@@ -71,7 +92,6 @@ export default function GenericModuleSection<T extends GlobalTableRow>({
     );
   });
 
-  // Default or custom delete behavior
   const handleDelete = onDelete || ((ids: string[]) => {
     if (confirm(`هل أنت متأكد من حذف ${ids.length} عنصر من ${moduleTitle}؟`)) {
       setData((prev) => prev.filter((item) => !ids.includes(item.id)));
@@ -81,24 +101,22 @@ export default function GenericModuleSection<T extends GlobalTableRow>({
 
   return (
     <div className="p-6 space-y-6 w-full">
-      {/* Header with module title and ExportMenu scoped to selected rows */}
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-bold text-slate-900">{moduleTitle}</h1>
 
         <ExportMenu
-          data={data as unknown as Record<string, unknown>[]}
+          data={exportRows}
           columns={exportColumns as ExportColumn[]}
           selectedIds={selectedIds.length > 0 ? new Set(selectedIds) : undefined}
           filename={moduleTitle.toLowerCase()}
         />
       </div>
 
-      {/* GlobalTable with controlled selection and bulk action bar */}
       <GlobalTable
         columns={columns as GlobalTableColumn<T>[]}
         data={data}
         selectedIds={selectedIds}
-        onSelectionChange={setSelectedIds}
+        onSelectionChange={handleSelectionChange}
         onModify={handleModify}
         onShare={handleShare}
         onDownload={handleDownload}

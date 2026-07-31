@@ -3,6 +3,7 @@
 import { useMemo, useState } from 'react';
 import { Edit3, Mail, MoreVertical, Share2, Trash2 } from 'lucide-react';
 import { openMailtoShare, openWhatsAppShare } from '@/app/lib/atlas-quick-share';
+import { normalizeGlobalTableRows } from '@/app/components/data-grid/global-table-id';
 
 export type FlexibleDataGridRow = {
   id: string;
@@ -45,11 +46,18 @@ export default function FlexibleDataGrid({
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [openMenuId, setOpenMenuId] = useState<string | null>(null);
 
-  const allSelected = data.length > 0 && selectedIds.length === data.length;
+  const normalizedData = useMemo(
+    () => normalizeGlobalTableRows(data as Record<string, unknown>[]),
+    [data],
+  );
+
+  const allSelected =
+    normalizedData.length > 0 &&
+    normalizedData.every((row) => selectedIds.includes(row.id));
 
   const selectedItems = useMemo(
-    () => data.filter((item) => selectedIds.includes(item.id)),
-    [data, selectedIds],
+    () => normalizedData.filter((item) => selectedIds.includes(item.id)),
+    [normalizedData, selectedIds],
   );
 
   const handleToggleSelect = (id: string) => {
@@ -61,7 +69,7 @@ export default function FlexibleDataGrid({
       setSelectedIds([]);
       return;
     }
-    setSelectedIds(data.map((item) => item.id));
+    setSelectedIds(normalizedData.map((item) => item.id));
   };
 
   const handleShareWhatsApp = () => {
@@ -94,7 +102,7 @@ export default function FlexibleDataGrid({
       {selectedIds.length > 0 ? (
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 bg-blue-50 border border-blue-200 p-3 rounded-xl shadow-sm">
           <span className="text-sm font-medium text-blue-800">
-            تم تحديد <strong className="text-blue-600">{selectedIds.length}</strong> من أصل {data.length} عنصر
+            تم تحديد <strong className="text-blue-600">{selectedIds.length}</strong> من أصل {normalizedData.length} عنصر
           </span>
           <div className="flex flex-wrap items-center gap-2">
             <button
@@ -135,7 +143,7 @@ export default function FlexibleDataGrid({
         <button
           type="button"
           onClick={handleToggleSelectAll}
-          disabled={data.length === 0}
+          disabled={normalizedData.length === 0}
           className="text-xs font-medium text-blue-600 hover:text-blue-800 bg-blue-50 hover:bg-blue-100 disabled:opacity-50 px-3 py-1.5 rounded-lg transition flex items-center gap-1.5"
         >
           {allSelected ? <>إلغاء تحديد الكل</> : <>تحديد الكل (Tout sélectionner)</>}
@@ -144,7 +152,7 @@ export default function FlexibleDataGrid({
       </div>
 
       <div className="overflow-x-auto border border-gray-100 rounded-2xl bg-white shadow-sm">
-        {data.length === 0 ? (
+        {normalizedData.length === 0 ? (
           <div className="px-6 py-10 text-center text-sm text-gray-500">{emptyLabel}</div>
         ) : (
           <table className="min-w-full text-right border-collapse">
@@ -157,7 +165,7 @@ export default function FlexibleDataGrid({
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100 text-sm">
-              {data.map((item) => {
+              {normalizedData.map((item) => {
                 const isSelected = selectedIds.includes(item.id);
                 return (
                   <tr key={item.id} className={isSelected ? 'bg-blue-50/40' : 'hover:bg-gray-50'}>
@@ -167,11 +175,11 @@ export default function FlexibleDataGrid({
                         checked={isSelected}
                         onChange={() => handleToggleSelect(item.id)}
                         className="rounded border-gray-300 text-blue-600 focus:ring-blue-500 cursor-pointer w-4 h-4"
-                        aria-label={`Sélectionner ${rowLabel(item)}`}
+                        aria-label={`Sélectionner ${rowLabel(item as FlexibleDataGridRow)}`}
                       />
                     </td>
-                    <td className="p-3 font-medium text-gray-900">{rowLabel(item)}</td>
-                    <td className="p-3 text-gray-600">{rowAmount(item)}</td>
+                    <td className="p-3 font-medium text-gray-900">{rowLabel(item as FlexibleDataGridRow)}</td>
+                    <td className="p-3 text-gray-600">{rowAmount(item as FlexibleDataGridRow)}</td>
                     <td className="p-3 text-center relative">
                       {onRowAction ? (
                         <>

@@ -20,6 +20,15 @@ import type { ExportColumn } from '@/app/components/ExportMenu';
 import { EntityAuditTable } from '@/app/components/history/EntityAuditTable';
 import { RowActions } from '@/app/components/actions';
 import { isValidPcgeAccount } from '@/app/lib/atlas-morocco-compliance';
+import GlobalTable from '@/app/components/data-grid/GlobalTable';
+import type { GlobalTableColumn, GlobalTableRow } from '@/app/components/data-grid/GlobalTable';
+import {
+  filterRowsBySelectedIds,
+  normalizeGlobalTableRows,
+  pruneSelectedIds,
+} from '@/app/components/data-grid/global-table-id';
+import { exportTable } from '@/app/lib/atlas-table-export';
+import { openWhatsAppShare } from '@/app/lib/atlas-quick-share';
 
 const SUPPLIER_INVOICE_EXPORT_COLUMNS: ExportColumn[] = [
   { key: 'invoiceNumber', label: 'N° Facture' },
@@ -49,6 +58,26 @@ import { onCompanySwitched } from '@/app/lib/atlas-company-switch-event';
 
 type Ecriture = AtlasAccountingEntry;
 
+type SupplierTableRow = GlobalTableRow & {
+  invoiceNumber: string;
+  supplierName: string;
+  issueDate: string;
+  status: string;
+  totalTTC: number | null;
+};
+
+type JournalTableRow = GlobalTableRow & {
+  date: string;
+  libelle: string;
+  compte: string;
+  debit: number;
+  credit: number;
+  sourceDocumentId?: string | null;
+  sourceDocumentType?: string | null;
+  validationStatus?: string | null;
+  rowId?: string | null;
+};
+
 export default function ComptabilitePage() {
   const [activeTab, setActiveTab] = useState<'journal' | 'grandlivre' | 'bilan' | 'historique'>('journal');
   const [invoices, setInvoices] = useState<AtlasInvoice[]>([]);
@@ -56,6 +85,8 @@ export default function ComptabilitePage() {
   const [payments, setPayments] = useState<AtlasPayment[]>([]);
   const [ecritures, setEcritures] = useState<Ecriture[]>([]);
   const [activeCompanyId, setActiveCompanyId] = useState<string | null>(null);
+  const [selectedSupplierIds, setSelectedSupplierIds] = useState<string[]>([]);
+  const [selectedJournalIds, setSelectedJournalIds] = useState<string[]>([]);
 
   const [form, setForm] = useState({ date: '', libelle: '', compte: '', debit: '', credit: '' });
   const [showForm, setShowForm] = useState(false);
@@ -111,6 +142,49 @@ export default function ComptabilitePage() {
       })),
     [ecritures],
   );
+
+  const supplierTableRows = useMemo(
+    (): SupplierTableRow[] =>
+      normalizeGlobalTableRows(
+        supplierInvoices.slice(0, 10).map((inv) => ({
+          id: String(inv.id),
+          invoiceNumber: inv.invoiceNumber ?? '',
+          supplierName: inv.supplierName ?? '',
+          issueDate: inv.issueDate ?? '',
+          status: inv.status ?? '',
+          totalTTC: inv.totalTTC,
+          numero: inv.invoiceNumber,
+        })) as Record<string, unknown>[],
+      ) as SupplierTableRow[],
+    [supplierInvoices],
+  );
+
+  const journalTableRows = useMemo(
+    (): JournalTableRow[] =>
+      normalizeGlobalTableRows(
+        ecritures.map((e) => ({
+          id: e.rowId ?? String(e.id),
+          date: e.date,
+          libelle: e.libelle,
+          compte: e.compte,
+          debit: e.debit,
+          credit: e.credit,
+          sourceDocumentId: e.sourceDocumentId,
+          sourceDocumentType: e.sourceDocumentType,
+          validationStatus: e.validationStatus,
+          rowId: e.rowId,
+        })) as Record<string, unknown>[],
+      ) as JournalTableRow[],
+    [ecritures],
+  );
+
+  useEffect(() => {
+    setSelectedSupplierIds((prev) => pruneSelectedIds(prev, supplierTableRows));
+  }, [supplierTableRows]);
+
+  useEffect(() => {
+    setSelectedJournalIds((prev) => pruneSelectedIds(prev, journalTableRows));
+  }, [journalTableRows]);
 
   const accountingKpis = useMemo(() => {
     const totalFacture = invoices.reduce((sum, inv) => sum + (inv.totalTTC || 0), 0);
@@ -269,6 +343,157 @@ export default function ComptabilitePage() {
     return true;
   };
 
+  const supplierById = useMemo(
+    () => new Map(supplierInvoices.map((inv) => [String(inv.id), inv])),
+    [supplierInvoices],
+  );
+
+  const ecritureByRowId = useMemo(
+    () => new Map(ecritures.filter((e) => e.rowId).map((e) => [e.rowId!, e])),
+    [ecritures],
+  );
+
+  const supplierTableColumns = useMemo((): GlobalTableColumn<SupplierTableRow>[] => [
+    { header: 'N°', accessor: 'invoiceNumber', render: (row) => row.invoiceNumber || '—' },
+    { header: 'Fournisseur', accessor: 'supplierName' },
+    { header: 'Date', accessor: 'issueDate' },
+    {
+      header: 'Statut',
+      accessor: 'status',
+      render: (row) => (
+        <span className={`text-xs px-2 py-0.5 rounded-full ${
+          row.status === 'paid'
+            ? 'bg-green-100 text-green-700'
+            : row.status === 'needs_review'
+              ? 'bg-amber-100 text-amber-700'
+              : 'bg-blue-100 text-blue-700'
+        }`}>
+          {row.status === 'needs_review' ? 'À compléter' : row.status === 'paid' ? 'Payée' : 'À payer'}
+        </span>
+      ),
+    },
+    {
+      header: 'TTC',
+      accessor: 'totalTTC',
+      className: 'text-right',
+      render: (row) => (row.totalTTC != null ? formatMadAmountLabel(row.totalTTC) : '—'),
+    },
+    {
+      header: 'Actions',
+      accessor: 'id',
+      className: 'text-right',
+      render: (row) => {
+        const inv = supplierById.get(row.id);
+        if (!inv) return null;
+        return (
+          <div className="relative inline-flex justify-end">
+            <RowActions
+              entityId={String(inv.id)}
+              entityLabel={inv.invoiceNumber || inv.supplierName}
+              entityType="facture fournisseur"
+              exportData={{
+                id: inv.id,
+                invoiceNumber: inv.invoiceNumber,
+                supplierName: inv.supplierName,
+                issueDate: inv.issueDate,
+                status: inv.status,
+                totalTTC: inv.totalTTC,
+              }}
+              exportColumns={SUPPLIER_INVOICE_EXPORT_COLUMNS}
+              exportFilename="facture_fournisseur"
+              editFields={[
+                { key: 'invoiceNumber', label: 'N° Facture', value: inv.invoiceNumber ?? '' },
+                { key: 'supplierName', label: 'Fournisseur', value: inv.supplierName ?? '', required: true },
+                { key: 'issueDate', label: 'Date', type: 'date', value: inv.issueDate ?? '' },
+                { key: 'totalTTC', label: 'TTC (MAD)', type: 'number', value: String(inv.totalTTC ?? '') },
+              ]}
+              onEditSave={(values) => updateSupplierInvoiceRow(String(inv.id), values)}
+              onDelete={() => deleteSupplierInvoiceRow(String(inv.id))}
+            />
+          </div>
+        );
+      },
+    },
+  ], [supplierById]);
+
+  const journalTableColumns = useMemo((): GlobalTableColumn<JournalTableRow>[] => [
+    { header: 'Date', accessor: 'date' },
+    {
+      header: 'Libelle',
+      accessor: 'libelle',
+      render: (row) => (
+        <div className="flex items-center gap-2 flex-wrap">
+          <span>{row.libelle}</span>
+          {row.sourceDocumentId ? (
+            <SourceDocumentBadge sourceDocumentId={row.sourceDocumentId} sourceDocumentType={row.sourceDocumentType ?? undefined} variant="compact" />
+          ) : null}
+          {row.validationStatus && row.validationStatus !== 'draft' ? (
+            <ValidationStatusBadge status={row.validationStatus} size="xs" />
+          ) : null}
+        </div>
+      ),
+    },
+    { header: 'Compte', accessor: 'compte', render: (row) => <span className="font-mono">{row.compte}</span> },
+    {
+      header: 'Debit',
+      accessor: 'debit',
+      className: 'text-right',
+      render: (row) => <span className="text-blue-600">{row.debit > 0 ? formatMadAmountLabel(row.debit) : '-'}</span>,
+    },
+    {
+      header: 'Credit',
+      accessor: 'credit',
+      className: 'text-right',
+      render: (row) => <span className="text-green-600">{row.credit > 0 ? formatMadAmountLabel(row.credit) : '-'}</span>,
+    },
+    {
+      header: 'Actions',
+      accessor: 'id',
+      className: 'text-right',
+      render: (row) => {
+        const e = ecritureByRowId.get(row.id);
+        if (!e?.rowId) return null;
+        return (
+          <div className="relative inline-flex justify-end">
+            <RowActions
+              entityId={e.rowId}
+              entityLabel={e.libelle}
+              entityType="écriture comptable"
+              exportData={{
+                id: e.rowId,
+                date: e.date,
+                libelle: e.libelle,
+                compte: e.compte,
+                debit: e.debit,
+                credit: e.credit,
+                sourceDocumentId: e.sourceDocumentId,
+                validationStatus: e.validationStatus,
+              }}
+              exportColumns={ECRITURE_EXPORT_COLUMNS}
+              exportFilename="ecriture_comptable"
+              editFields={[
+                { key: 'date', label: 'Date', type: 'date', value: e.date },
+                { key: 'libelle', label: 'Libellé', value: e.libelle, required: true },
+                {
+                  key: 'compte',
+                  label: 'Compte PCGE',
+                  value: e.compte,
+                  required: true,
+                  validate: (v) => (isValidPcgeAccount(v) ? null : 'Compte PCGE invalide (3–8 chiffres)'),
+                },
+                { key: 'debit', label: 'Débit (MAD)', type: 'number', value: String(e.debit || '') },
+                { key: 'credit', label: 'Crédit (MAD)', type: 'number', value: String(e.credit || '') },
+              ]}
+              onEditSave={(values) => updateEcriture(e.rowId!, values)}
+              onDelete={() => deleteEcriture(e.rowId!)}
+              hideDelete={!!e.sourceDocumentId && e.validationStatus === 'validated'}
+            />
+          </div>
+        );
+      },
+    },
+  ], [ecritureByRowId]);
+
   return (
     <div className="flex h-screen bg-gray-50">
       <AppSidebar variant="module">
@@ -298,6 +523,7 @@ export default function ComptabilitePage() {
               filename="journal_comptable"
               title="Journal Comptable"
               idKey="id"
+              selectedIds={selectedJournalIds.length > 0 ? new Set(selectedJournalIds) : undefined}
               context={{
                 Société: activeCompanyId ?? '—',
                 'Total débit': formatMadAmountLabel(totalDebit),
@@ -343,72 +569,46 @@ export default function ComptabilitePage() {
 
           {supplierInvoices.length > 0 && (
             <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
-              <div className="px-6 py-4 border-b border-gray-100">
-                <h2 className="font-semibold text-gray-800 text-sm">Factures fournisseur (OCR)</h2>
-                <p className="text-xs text-gray-400 mt-0.5">Données enregistrées depuis Documents IA</p>
+              <div className="px-6 py-4 border-b border-gray-100 flex items-center justify-between gap-3">
+                <div>
+                  <h2 className="font-semibold text-gray-800 text-sm">Factures fournisseur (OCR)</h2>
+                  <p className="text-xs text-gray-400 mt-0.5">Données enregistrées depuis Documents IA</p>
+                </div>
+                <ExportMenu
+                  data={supplierTableRows as unknown as Record<string, unknown>[]}
+                  columns={SUPPLIER_INVOICE_EXPORT_COLUMNS}
+                  filename="factures_fournisseur"
+                  title="Factures fournisseur"
+                  selectedIds={selectedSupplierIds.length > 0 ? new Set(selectedSupplierIds) : undefined}
+                  size="xs"
+                />
               </div>
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="text-left text-xs text-gray-400 border-b border-gray-100 bg-gray-50">
-                    <th className="px-6 py-3">N°</th>
-                    <th className="px-6 py-3">Fournisseur</th>
-                    <th className="px-6 py-3">Date</th>
-                    <th className="px-6 py-3">Statut</th>
-                    <th className="px-6 py-3 text-right">TTC</th>
-                    <th className="px-6 py-3 text-right">Actions</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {supplierInvoices.slice(0, 10).map((inv) => (
-                    <tr key={String(inv.id)} className="border-b border-gray-50 hover:bg-gray-50">
-                      <td className="px-6 py-3 font-medium text-gray-700">{inv.invoiceNumber || '—'}</td>
-                      <td className="px-6 py-3 text-gray-600">{inv.supplierName}</td>
-                      <td className="px-6 py-3 text-gray-500">{inv.issueDate}</td>
-                      <td className="px-6 py-3">
-                        <span className={`text-xs px-2 py-0.5 rounded-full ${
-                          inv.status === 'paid'
-                            ? 'bg-green-100 text-green-700'
-                            : inv.status === 'needs_review'
-                              ? 'bg-amber-100 text-amber-700'
-                              : 'bg-blue-100 text-blue-700'
-                        }`}>
-                          {inv.status === 'needs_review' ? 'À compléter' : inv.status === 'paid' ? 'Payée' : 'À payer'}
-                        </span>
-                      </td>
-                      <td className="px-6 py-3 text-right font-medium text-gray-800">
-                        {inv.totalTTC != null ? formatMadAmountLabel(inv.totalTTC) : '—'}
-                      </td>
-                      <td className="px-6 py-3 text-right">
-                        <div className="relative inline-flex justify-end">
-                          <RowActions
-                            entityId={String(inv.id)}
-                            entityLabel={inv.invoiceNumber || inv.supplierName}
-                            entityType="facture fournisseur"
-                            exportData={{
-                              id: inv.id,
-                              invoiceNumber: inv.invoiceNumber,
-                              supplierName: inv.supplierName,
-                              issueDate: inv.issueDate,
-                              status: inv.status,
-                              totalTTC: inv.totalTTC,
-                            }}
-                            exportColumns={SUPPLIER_INVOICE_EXPORT_COLUMNS}
-                            exportFilename="facture_fournisseur"
-                            editFields={[
-                              { key: 'invoiceNumber', label: 'N° Facture', value: inv.invoiceNumber ?? '' },
-                              { key: 'supplierName', label: 'Fournisseur', value: inv.supplierName ?? '', required: true },
-                              { key: 'issueDate', label: 'Date', type: 'date', value: inv.issueDate ?? '' },
-                              { key: 'totalTTC', label: 'TTC (MAD)', type: 'number', value: String(inv.totalTTC ?? '') },
-                            ]}
-                            onEditSave={(values) => updateSupplierInvoiceRow(String(inv.id), values)}
-                            onDelete={() => deleteSupplierInvoiceRow(String(inv.id))}
-                          />
-                        </div>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+              <div className="p-4">
+                <GlobalTable
+                  columns={supplierTableColumns}
+                  data={supplierTableRows}
+                  selectedIds={selectedSupplierIds}
+                  onSelectionChange={setSelectedSupplierIds}
+                  onShare={(ids) => {
+                    const selected = filterRowsBySelectedIds(supplierTableRows as unknown as Record<string, unknown>[], ids) as SupplierTableRow[];
+                    const summary = selected.map((row) => `- ${row.invoiceNumber || row.supplierName}: ${row.totalTTC != null ? formatMadAmountLabel(row.totalTTC) : '—'}`).join('\n');
+                    openWhatsAppShare(`Factures fournisseur:\n${summary}`);
+                  }}
+                  onDownload={(ids) => {
+                    const selected = filterRowsBySelectedIds(supplierTableRows as unknown as Record<string, unknown>[], ids);
+                    void exportTable('xlsx', selected, SUPPLIER_INVOICE_EXPORT_COLUMNS, 'factures_fournisseur');
+                  }}
+                  onDelete={async (ids) => {
+                    if (!window.confirm(`Supprimer ${ids.length} facture(s) fournisseur ?`)) return;
+                    for (const id of ids) {
+                      await deleteSupplierInvoiceRow(id);
+                    }
+                    setSelectedSupplierIds([]);
+                  }}
+                  hideRowActions
+                  clearSelectionOnDelete={false}
+                />
+              </div>
             </div>
           )}
 
@@ -505,91 +705,43 @@ export default function ComptabilitePage() {
                 </button>
               ))}
             </div>
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="text-left text-xs text-gray-400 border-b border-gray-100 bg-gray-50">
-                  <th className="px-4 py-3">Date</th>
-                  <th className="px-4 py-3">Libelle</th>
-                  <th className="px-4 py-3">Compte</th>
-                  <th className="px-4 py-3 text-right">Debit</th>
-                  <th className="px-4 py-3 text-right">Credit</th>
-                  <th className="px-4 py-3 text-right">Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {ecritures.length === 0 ? (
-                  <tr>
-                    <td colSpan={6}>
-                      <ModuleEmptyState module="accounting" />
-                    </td>
-                  </tr>
-                ) : (
-                  ecritures.map(e => (
-                    <tr key={e.rowId ?? e.id} className={`border-b border-gray-50 hover:bg-gray-50 ${e.sourceDocumentId ? 'border-l-2 border-l-blue-200' : ''}`}>
-                      <td className="px-4 py-3 text-gray-500">{e.date}</td>
-                      <td className="px-4 py-3 text-gray-700">
-                        <div className="flex items-center gap-2 flex-wrap">
-                          <span>{e.libelle}</span>
-                          {e.sourceDocumentId && (
-                            <SourceDocumentBadge sourceDocumentId={e.sourceDocumentId} sourceDocumentType={e.sourceDocumentType} variant="compact" />
-                          )}
-                          {e.validationStatus && e.validationStatus !== 'draft' && (
-                            <ValidationStatusBadge status={e.validationStatus} size="xs" />
-                          )}
-                        </div>
-                      </td>
-                      <td className="px-4 py-3 font-mono text-gray-600">{e.compte}</td>
-                      <td className="px-4 py-3 text-right text-blue-600">{e.debit > 0 ? formatMadAmountLabel(e.debit) : '-'}</td>
-                      <td className="px-4 py-3 text-right text-green-600">{e.credit > 0 ? formatMadAmountLabel(e.credit) : '-'}</td>
-                      <td className="px-4 py-3 text-right">
-                        {e.rowId ? (
-                          <div className="relative inline-flex justify-end">
-                            <RowActions
-                              entityId={e.rowId}
-                              entityLabel={e.libelle}
-                              entityType="écriture comptable"
-                              exportData={{
-                                id: e.rowId,
-                                date: e.date,
-                                libelle: e.libelle,
-                                compte: e.compte,
-                                debit: e.debit,
-                                credit: e.credit,
-                                sourceDocumentId: e.sourceDocumentId,
-                                validationStatus: e.validationStatus,
-                              }}
-                              exportColumns={ECRITURE_EXPORT_COLUMNS}
-                              exportFilename="ecriture_comptable"
-                              editFields={[
-                                { key: 'date', label: 'Date', type: 'date', value: e.date },
-                                { key: 'libelle', label: 'Libellé', value: e.libelle, required: true },
-                                {
-                                  key: 'compte',
-                                  label: 'Compte PCGE',
-                                  value: e.compte,
-                                  required: true,
-                                  validate: (v) => (isValidPcgeAccount(v) ? null : 'Compte PCGE invalide (3–8 chiffres)'),
-                                },
-                                { key: 'debit', label: 'Débit (MAD)', type: 'number', value: String(e.debit || '') },
-                                { key: 'credit', label: 'Crédit (MAD)', type: 'number', value: String(e.credit || '') },
-                              ]}
-                              onEditSave={(values) => updateEcriture(e.rowId!, values)}
-                              onDelete={() => deleteEcriture(e.rowId!)}
-                              hideDelete={!!e.sourceDocumentId && e.validationStatus === 'validated'}
-                            />
-                          </div>
-                        ) : null}
-                      </td>
-                    </tr>
-                  ))
-                )}
-                <tr className="bg-gray-50 font-bold text-sm">
-                  <td colSpan={3} className="px-4 py-3 text-gray-600">TOTAL</td>
-                  <td className="px-4 py-3 text-right text-blue-700">{formatMadAmountLabel(totalDebit)}</td>
-                  <td className="px-4 py-3 text-right text-green-700">{formatMadAmountLabel(totalCredit)}</td>
-                </tr>
-              </tbody>
-            </table>
+            {ecritures.length === 0 ? (
+              <ModuleEmptyState module="accounting" />
+            ) : (
+              <>
+                <div className="p-4">
+                  <GlobalTable
+                    columns={journalTableColumns}
+                    data={journalTableRows}
+                    selectedIds={selectedJournalIds}
+                    onSelectionChange={setSelectedJournalIds}
+                    onShare={(ids) => {
+                      const selected = filterRowsBySelectedIds(journalTableRows as unknown as Record<string, unknown>[], ids) as JournalTableRow[];
+                      const summary = selected.map((row) => `- ${row.date} · ${row.libelle}: D ${row.debit} / C ${row.credit}`).join('\n');
+                      openWhatsAppShare(`Journal comptable:\n${summary}`);
+                    }}
+                    onDownload={(ids) => {
+                      const selected = filterRowsBySelectedIds(journalTableRows as unknown as Record<string, unknown>[], ids);
+                      void exportTable('xlsx', selected, ECRITURE_EXPORT_COLUMNS, 'journal_comptable', { title: 'Journal Comptable' });
+                    }}
+                    onDelete={async (ids) => {
+                      if (!window.confirm(`Supprimer ${ids.length} écriture(s) ?`)) return;
+                      for (const id of ids) {
+                        await deleteEcriture(id);
+                      }
+                      setSelectedJournalIds([]);
+                    }}
+                    hideRowActions
+                    clearSelectionOnDelete={false}
+                  />
+                </div>
+                <div className="grid grid-cols-[1fr_auto_auto] sm:grid-cols-[minmax(0,1fr)_8rem_8rem] items-center bg-gray-50 border-t border-gray-100 px-4 py-3 text-sm font-bold">
+                  <span className="text-gray-600">TOTAL</span>
+                  <span className="text-right text-blue-700">{formatMadAmountLabel(totalDebit)}</span>
+                  <span className="text-right text-green-700">{formatMadAmountLabel(totalCredit)}</span>
+                </div>
+              </>
+            )}
           </div>
         </div>
       </main>

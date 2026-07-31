@@ -7,6 +7,7 @@ import {
 } from 'lucide-react';
 import { exportTable, copyAsJSON } from '@/app/lib/atlas-table-export';
 import type { ExportColumn, ExportMeta } from '@/app/lib/atlas-table-export';
+import { resolveRowId } from '@/app/components/data-grid/global-table-id';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -96,7 +97,12 @@ export function ExportMenu({
   // Determine export dataset
   const exportData = useCallback((): Record<string, unknown>[] => {
     if (selectedIds && selectedIds.size > 0) {
-      return data.filter(row => selectedIds.has(String(row[idKey] ?? '')));
+      return data.filter((row, index) => {
+        const rowId = idKey === 'id'
+          ? resolveRowId(row, index)
+          : String(row[idKey] ?? resolveRowId(row, index));
+        return selectedIds.has(rowId);
+      });
     }
     return data;
   }, [data, selectedIds, idKey]);

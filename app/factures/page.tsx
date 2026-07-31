@@ -35,6 +35,7 @@ import type { ExportColumn } from '@/app/components/ExportMenu';
 import type { GlobalTableColumn } from '@/app/components/data-grid/GlobalTable';
 import { exportTable } from '@/app/lib/atlas-table-export';
 import { FacturesTableSection, FacturesExportMenu } from '@/app/factures/FacturesTableSection';
+import { filterRowsBySelectedIds, normalizeGlobalTableRows, pruneSelectedIds } from '@/app/components/data-grid/global-table-id';
 import { EntityAuditTable } from '@/app/components/history/EntityAuditTable';
 import { ModuleLoadErrorBanner } from '@/app/lib/use-enterprise-module-fetch';
 import { InvoiceShipmentPanel, type InvoiceShipmentTarget } from '@/app/components/logistics/InvoiceShipmentPanel';
@@ -69,6 +70,8 @@ type FactureRow = {
   statut: 'payée' | 'en attente' | 'en retard';
   sourceDocumentId?: string | null;
 };
+
+type FactureTableRow = FactureRow & { id: string };
 
 export default function FacturesPage() {
   const router = useRouter();
@@ -344,9 +347,14 @@ export default function FacturesPage() {
   }, [filter, rows]);
 
   const globalTableRows = useMemo(
-    () => filteredRows.map((r) => ({ ...r, id: String(r.id) })),
+    (): FactureTableRow[] =>
+      normalizeGlobalTableRows(filteredRows as Record<string, unknown>[]) as FactureTableRow[],
     [filteredRows],
   );
+
+  useEffect(() => {
+    setSelectedInvoiceIds((prev) => pruneSelectedIds(prev, globalTableRows));
+  }, [globalTableRows]);
 
   const copyInvoiceSecureLink = async (r: FactureRow) => {
     if (r.sourceDocumentId) {
@@ -605,7 +613,7 @@ export default function FacturesPage() {
     [filteredRows],
   );
 
-  const facturesTableColumns = useMemo((): GlobalTableColumn<(typeof globalTableRows)[number]>[] => [
+  const facturesTableColumns = useMemo((): GlobalTableColumn<FactureTableRow>[] => [
     { header: 'رقم الفاتورة / N°', accessor: 'numero' },
     { header: 'العميل / Client', accessor: 'client' },
     { header: 'Échéance', accessor: 'echeance' },
@@ -703,7 +711,7 @@ export default function FacturesPage() {
   }, [findFactureRow]);
 
   const handleBulkShare = useCallback((ids: string[]) => {
-    const selected = filteredRows.filter((r) => ids.includes(String(r.id)));
+    const selected = filterRowsBySelectedIds(filteredRows as Record<string, unknown>[], ids) as typeof filteredRows;
     const text = selected
       .map((r) => `- ${r.numero} · ${r.client}: ${Math.round(r.ttc).toLocaleString('fr-MA')} MAD (${r.statut})`)
       .join('\n');
@@ -711,7 +719,7 @@ export default function FacturesPage() {
   }, [filteredRows]);
 
   const handleBulkDownload = useCallback(async (ids: string[]) => {
-    const selected = filteredRows.filter((r) => ids.includes(String(r.id)));
+    const selected = filterRowsBySelectedIds(filteredRows as Record<string, unknown>[], ids);
     try {
       await exportTable(
         'xlsx',
