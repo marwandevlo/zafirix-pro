@@ -110,9 +110,11 @@ function parsePeriodKey(key: string): { year: number; quarter: TvaQuarterSelecti
 }
 
 async function tvaFetch<T>(path: string, init?: RequestInit): Promise<{ ok: boolean; data: T }> {
-  const res = await fetch(path, {
+  const separator = path.includes('?') ? '&' : '?';
+  const res = await fetch(`${path}${separator}_=${Date.now()}`, {
     ...init,
     credentials: 'include',
+    cache: 'no-store',
     headers: { 'Content-Type': 'application/json', ...init?.headers },
   });
   const data = (await res.json().catch(() => ({}))) as T;
@@ -427,6 +429,16 @@ export default function TvaPageClient() {
     setSelectedHistoryIds((prev) => pruneSelectedIds(prev, historyTableRows));
   }, [historyTableRows]);
 
+  const selectedPeriodKey = useMemo(
+    () => buildPeriodKey(selectedYear, selectedQuarter),
+    [selectedYear, selectedQuarter],
+  );
+
+  const periodReady =
+    !loading &&
+    Boolean(current) &&
+    (dashboard?.selectedPeriodKey === selectedPeriodKey || current?.periodKey === selectedPeriodKey);
+
   const notifyTvaExportWarnings = (warnings: string[] | undefined) => {
     if (!warnings?.length) return;
     showAtlasWarningToast(warnings.join(' '));
@@ -434,12 +446,19 @@ export default function TvaPageClient() {
 
   const downloadXml = async () => {
     if (!current || !companyId || !dashboard) return;
+    if (loading || !periodReady) {
+      showAtlasWarningToast('Chargement de la période en cours — patientez avant l\'export XML.');
+      return;
+    }
+
     const company = buildTvaExportCompanySources(companyExportInfo);
     const regime = dgiDeclarationRegime(dashboard.regimeTVA);
+    const periodKey = selectedPeriodKey;
     const validation = validateTvaDgiXmlExport(current, {
       company,
       regime,
       regimeTVA: dashboard.regimeTVA,
+      periodKey,
     });
     notifyTvaExportWarnings(validation.warnings);
     if (!validation.ok) {
@@ -451,9 +470,16 @@ export default function TvaPageClient() {
     setExportingXml(true);
     setError('');
     try {
-      const periodKey = buildPeriodKey(selectedYear, selectedQuarter);
-      const params = new URLSearchParams({ companyId, periodKey });
-      const res = await fetch(`/api/tva/export-xml?${params.toString()}`, { credentials: 'include' });
+      const params = new URLSearchParams({
+        companyId,
+        periodKey,
+        regime: String(regime),
+        _: String(Date.now()),
+      });
+      const res = await fetch(`/api/tva/export-xml?${params.toString()}`, {
+        credentials: 'include',
+        cache: 'no-store',
+      });
       const headerWarnings = res.headers.get('X-Tva-Export-Warnings');
       if (headerWarnings) {
         notifyTvaExportWarnings([decodeURIComponent(headerWarnings)]);
@@ -480,16 +506,28 @@ export default function TvaPageClient() {
 
   const downloadExcel = async () => {
     if (!current || !companyId) return;
+    if (loading || !periodReady) {
+      showAtlasWarningToast('Chargement de la période en cours — patientez avant l\'export Excel.');
+      return;
+    }
+
     const company = buildTvaExportCompanySources(companyExportInfo);
-    const validation = validateTvaDgiExport(current, { company });
+    const periodKey = selectedPeriodKey;
+    const validation = validateTvaDgiExport(current, { company, periodKey });
     notifyTvaExportWarnings(validation.warnings);
 
     setExportingExcel(true);
     setError('');
     try {
-      const periodKey = buildPeriodKey(selectedYear, selectedQuarter);
-      const params = new URLSearchParams({ companyId, periodKey });
-      const res = await fetch(`/api/tva/export?${params.toString()}`, { credentials: 'include' });
+      const params = new URLSearchParams({
+        companyId,
+        periodKey,
+        _: String(Date.now()),
+      });
+      const res = await fetch(`/api/tva/export?${params.toString()}`, {
+        credentials: 'include',
+        cache: 'no-store',
+      });
       const headerWarnings = res.headers.get('X-Tva-Export-Warnings');
       if (headerWarnings) {
         notifyTvaExportWarnings([decodeURIComponent(headerWarnings)]);
@@ -628,7 +666,7 @@ export default function TvaPageClient() {
             <button
               type="button"
               onClick={() => void downloadExcel()}
-              disabled={!current || !companyId || exportingExcel}
+              disabled={!periodReady || !companyId || exportingExcel}
               className="flex items-center gap-2 px-4 py-2 bg-[#1F497D] text-white rounded-lg text-sm hover:bg-[#16365c] transition-colors disabled:opacity-50"
             >
               {exportingExcel ? <Loader2 size={16} className="animate-spin" /> : <FileSpreadsheet size={16} />}
@@ -637,7 +675,7 @@ export default function TvaPageClient() {
             <button
               type="button"
               onClick={() => void downloadXml()}
-              disabled={!current || !companyId || exportingXml}
+              disabled={!periodReady || !companyId || exportingXml}
               className="flex items-center gap-2 px-4 py-2 bg-blue-500 text-white rounded-lg text-sm hover:bg-blue-600 transition-colors disabled:opacity-50"
             >
               {exportingXml ? <Loader2 size={16} className="animate-spin" /> : <FileCode size={16} />}

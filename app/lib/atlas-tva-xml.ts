@@ -70,6 +70,8 @@ export type TvaDgiExportValidationOptions = {
   supplierIndex?: SupplierIdentityIndex | null;
   regime?: number | null;
   regimeTVA?: string | null;
+  /** Explicit period key from UI/API — used for DGI header validation when set. */
+  periodKey?: string | null;
 };
 
 const PERIOD_ERROR_MESSAGES: Record<string, string> = {
@@ -163,12 +165,29 @@ function resolveDgiXmlSupplierRef(ref: DgiReleveDeductionRow['refF']): {
   };
 }
 
+function resolveTvaXmlExportPeriodKey(
+  record: AtlasTvaPeriodRecord,
+  explicitPeriodKey?: string | null,
+): string {
+  const key = explicitPeriodKey?.trim();
+  return key || record.periodKey;
+}
+
+function resolveTvaXmlExportPeriodMetadata(
+  record: AtlasTvaPeriodRecord,
+  explicitPeriodKey?: string | null,
+) {
+  const periodKey = resolveTvaXmlExportPeriodKey(record, explicitPeriodKey);
+  return { periodKey, meta: resolveDgiPeriodMetadata(periodKey, record.periodType) };
+}
+
 /** Advisory validation for Excel / preview — warnings only. */
 export function validateTvaDgiExport(
   record: AtlasTvaPeriodRecord,
   opts: TvaDgiExportValidationOptions,
 ): TvaDgiExportValidation {
-  const warnings: string[] = [];  const identifiantFiscal = resolveTvaDeclarationIdentifiantFiscal(opts.company, opts.identifiantFiscal);
+  const warnings: string[] = [];
+  const identifiantFiscal = resolveTvaDeclarationIdentifiantFiscal(opts.company, opts.identifiantFiscal);
   if (!identifiantFiscal) {
     warnings.push(
       "Identifiant Fiscal (IF) société absent du profil — requis pour un dépôt SIMPL-TVA conforme.",
@@ -179,9 +198,9 @@ export function validateTvaDgiExport(
     warnings.push('ICE société manquant ou invalide dans le profil entreprise.');
   }
 
-  const periodMeta = resolveDgiPeriodMetadata(record.periodKey, record.periodType);
+  const { periodKey, meta: periodMeta } = resolveTvaXmlExportPeriodMetadata(record, opts.periodKey);
   if (!periodMeta.valid) {
-    warnings.push(periodValidationMessage(periodMeta.error, record.periodKey));
+    warnings.push(periodValidationMessage(periodMeta.error, periodKey));
   }
 
   const supplierIndex = opts.supplierIndex ?? buildSupplierIdentityIndexFromPeriod(record);
@@ -206,7 +225,8 @@ export function validateTvaDgiExport(
 /**
  * SIMPL-TVA pre-flight for XML EDI export.
  * Blocks on invalid company IF, period/year, or regime; missing supplier IF/ICE emit XML fallbacks + warnings.
- */export function validateTvaDgiXmlExport(
+ */
+export function validateTvaDgiXmlExport(
   record: AtlasTvaPeriodRecord,
   opts: TvaDgiExportValidationOptions,
 ): TvaDgiExportValidation {
@@ -223,12 +243,12 @@ export function validateTvaDgiExport(
     };
   }
 
-  const periodMeta = resolveDgiPeriodMetadata(record.periodKey, record.periodType);
+  const { periodKey, meta: periodMeta } = resolveTvaXmlExportPeriodMetadata(record, opts.periodKey);
   if (!periodMeta.valid) {
     return {
       ok: false,
       error: periodMeta.error ?? 'invalid_period',
-      message: periodValidationMessage(periodMeta.error, record.periodKey),
+      message: periodValidationMessage(periodMeta.error, periodKey),
     };
   }
 
@@ -258,7 +278,8 @@ export function validateTvaDgiExport(
   }
 
   const genericNames = purchaseRows.filter((row) => !row.refF.nom || row.refF.nom === 'Fournisseur').length;
-  if (genericNames > 0) {    warnings.push(`${genericNames} ligne(s) avec nom fournisseur générique — vérifiez les libellés.`);
+  if (genericNames > 0) {
+    warnings.push(`${genericNames} ligne(s) avec nom fournisseur générique — vérifiez les libellés.`);
   }
 
   if (!resolveTvaDeclarationCompanyIce(opts.company, opts.companyIce)) {
@@ -360,12 +381,13 @@ export function generateTvaDeclarationXml(
     supplierIndex: opts.supplierIndex,
     regime: opts.regime,
     regimeTVA: opts.regimeTVA,
+    periodKey: opts.periodKey,
   });
   if (!preflight.ok) {
     throw new Error(preflight.error ?? 'dgi_preflight_failed');
   }
 
-  const periodMeta = resolveDgiPeriodMetadata(record.periodKey, record.periodType);
+  const { meta: periodMeta } = resolveTvaXmlExportPeriodMetadata(record, opts.periodKey);
   const regime = normalizeDgiRegimeCode(opts.regime, opts.regimeTVA);
   const identifiantFiscal = resolveTvaDeclarationIdentifiantFiscal(opts.company, opts.identifiantFiscal);
 
@@ -374,7 +396,8 @@ export function generateTvaDeclarationXml(
 
   const rdBlocks = rows.map((row, index) => buildRdXmlBlock(row, index + 1)).join('\n');
 
-  const lines = [    '<?xml version="1.0" encoding="UTF-8"?>',
+  const lines = [
+    '<?xml version="1.0" encoding="UTF-8"?>',
     '<DeclarationReleveDeduction>',
     `  <identifiantFiscal>${identifiantFiscal}</identifiantFiscal>`,
     `  <annee>${periodMeta.annee}</annee>`,

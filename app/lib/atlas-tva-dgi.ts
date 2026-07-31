@@ -63,6 +63,8 @@ export type DgiTvaXmlOptions = {
   supplierIndex?: SupplierIdentityIndex | null;
   /** DGI regime code — default 1 (Débit / Encaissement standard). */
   regime?: number;
+  /** Explicit period key from UI/API (e.g. 2025-Q2) — overrides record.periodKey for DGI header. */
+  periodKey?: string | null;
 };
 
 export type DgiReleveSupplierRef = {

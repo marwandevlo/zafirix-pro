@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { atlasDataBackend } from '@/app/lib/atlas-data-source';
 import { requireAgentsRouteDb } from '@/app/lib/atlas-agents-route-db';
-import { dgiDeclarationRegime } from '@/app/lib/atlas-tva-dgi';
+import { dgiDeclarationRegime, isValidDgiRegimeCode } from '@/app/lib/atlas-tva-dgi';
 import {
   getTvaDashboard,
   loadCompanySupplierIdentityIndex,
@@ -16,6 +16,7 @@ import {
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
+export const fetchCache = 'force-no-store';
 
 const NO_STORE_HEADERS = {
   'Cache-Control': 'no-store, max-age=0',
@@ -33,6 +34,7 @@ export async function GET(request: NextRequest) {
 
   const companyId = request.nextUrl.searchParams.get('companyId')?.trim();
   const periodKey = request.nextUrl.searchParams.get('periodKey')?.trim();
+  const regimeParam = request.nextUrl.searchParams.get('regime')?.trim();
   if (!companyId || !periodKey) {
     return NextResponse.json(
       { error: 'company_and_period_required' },
@@ -51,13 +53,19 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: 'company_not_found' }, { status: 404, headers: NO_STORE_HEADERS });
     }
 
-    const regime = dgiDeclarationRegime(dashboard.regimeTVA);
-    const validation = validateTvaDgiXmlExport(dashboard.current, {
+    const regimeFromCompany = dgiDeclarationRegime(dashboard.regimeTVA);
+    const regimeParsed = regimeParam != null && regimeParam !== '' ? Number(regimeParam) : NaN;
+    const regime = isValidDgiRegimeCode(regimeParsed) ? regimeParsed : regimeFromCompany;
+
+    const exportOpts = {
       company,
       supplierIndex,
       regime,
       regimeTVA: dashboard.regimeTVA,
-    });
+      periodKey,
+    };
+
+    const validation = validateTvaDgiXmlExport(dashboard.current, exportOpts);
 
     if (!validation.ok) {
       return NextResponse.json(
@@ -66,12 +74,7 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    const xml = generateTvaDeclarationXml(dashboard.current, {
-      company,
-      supplierIndex,
-      regime,
-      regimeTVA: dashboard.regimeTVA,
-    });
+    const xml = generateTvaDeclarationXml(dashboard.current, exportOpts);
     const filename = tvaDgiXmlFilename(periodKey);
     const headers: Record<string, string> = {
       ...NO_STORE_HEADERS,
