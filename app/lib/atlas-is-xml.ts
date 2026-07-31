@@ -4,6 +4,7 @@ import {
   escapeDgiXml,
   formatDgiAmount,
   formatDgiIdentifiantFiscal,
+  resolveDgiIdentifiantFiscal,
 } from '@/app/lib/atlas-tva-dgi';
 
 export type DgiIsXmlOptions = {
@@ -65,6 +66,27 @@ export function validateIsDraftForExport(draft: AtlasIsDraft): IsExportValidatio
   return { ok: true };
 }
 
+/** Validate IS export identifiers (IF required for DGI SIMPL-IS). */
+export function validateIsExportForDgi(
+  draft: AtlasIsDraft,
+  opts: { identifiantFiscal?: string | null },
+): IsExportValidation {
+  const base = validateIsDraftForExport(draft);
+  if (!base.ok) return base;
+
+  const ifFormatted = resolveDgiIdentifiantFiscal(opts.identifiantFiscal);
+  if (!ifFormatted) {
+    return {
+      ok: false,
+      error: 'missing_if',
+      message:
+        "Identifiant Fiscal (IF) manquant ou invalide. Complétez le profil société (Paramètres) avant l'export DGI.",
+    };
+  }
+
+  return { ok: true };
+}
+
 /**
  * Generate DGI SIMPL-IS declaration XML from a persisted IS draft.
  * Maps produits d'exploitation, charges, résultat fiscal, IS calculé, cotisation minimale, impôt dû.
@@ -73,12 +95,15 @@ export function generateIsDeclarationXml(
   draft: AtlasIsDraft,
   opts: DgiIsXmlOptions,
 ): string {
-  const validation = validateIsDraftForExport(draft);
+  const validation = validateIsExportForDgi(draft, opts);
   if (!validation.ok) {
     throw new Error(validation.error ?? 'export_invalid');
   }
 
   const identifiantFiscal = formatDgiIdentifiantFiscal(opts.identifiantFiscal);
+  if (!identifiantFiscal) {
+    throw new Error('missing_if');
+  }
   const raisonSociale = escapeDgiXml(String(opts.raisonSociale ?? '').trim());
   const chargesTotal = totalCharges(draft);
   const appliedRate =

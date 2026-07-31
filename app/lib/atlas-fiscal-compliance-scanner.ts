@@ -4,6 +4,7 @@ import type {
   FiscalComplianceScanResult,
 } from '@/app/types/atlas-fiscal-compliance';
 import { computeIsLiquidation } from '@/app/lib/atlas-payroll-calculations';
+import { formatDgiIce } from '@/app/lib/atlas-tva-dgi';
 
 const FORMULA_VERSION = 'ma-compliance-scan-v1';
 
@@ -132,7 +133,7 @@ export async function scanFiscalCompliance(
   }
 
   const missingIce = (supRes.data ?? []).filter(
-    (s) => !String((s as { supplier_ice: string | null }).supplier_ice ?? '').trim(),
+    (s) => !formatDgiIce((s as { supplier_ice: string | null }).supplier_ice),
   ).length;
   if (missingIce >= 3) {
     penalty += 10;
@@ -140,11 +141,11 @@ export async function scanFiscalCompliance(
       id: 'supplier_ice_missing',
       severity: 'warning',
       category: 'tva',
-      titleFr: 'Factures fournisseurs sans ICE',
-      titleAr: 'فواتير موردين بدون ICE',
-      descriptionFr: `${missingIce} facture(s) achat sans ICE renseigné.`,
-      descriptionAr: `${missingIce} فاتورة بدون ICE.`,
-      recommendationFr: 'Complétez l\'ICE fournisseur pour sécuriser la déductibilité TVA.',
+      titleFr: 'Factures fournisseurs sans ICE valide',
+      titleAr: 'فواتير موردين بدون ICE صالح',
+      descriptionFr: `${missingIce} facture(s) achat sans ICE fournisseur valide (vide, placeholder ou format incorrect).`,
+      descriptionAr: `${missingIce} فاتورة بدون ICE صالح.`,
+      recommendationFr: 'Complétez l\'ICE fournisseur (15 chiffres) pour sécuriser la déductibilité TVA et l\'export SIMPL-TVA.',
       recommendationAr: 'أكمل ICE المورد لتأمين خصم TVA.',
       href: '/tva',
     });

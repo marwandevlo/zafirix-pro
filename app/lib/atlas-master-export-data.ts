@@ -5,7 +5,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import type { AtlasIsDraft } from '@/app/types/atlas-payroll';
 import type { DgiReleveDeductionRow } from '@/app/lib/atlas-tva-dgi';
-import { buildDgiReleveRows } from '@/app/lib/atlas-tva-dgi';
+import { buildDgiReleveRows, formatDgiIce, resolveDgiCompanyIdentifiers } from '@/app/lib/atlas-tva-dgi';
 import {
   buildBankExportRows,
   type BankExportRow,
@@ -57,6 +57,8 @@ export type MasterExportKpis = {
 export type MasterExportData = {
   companyName: string;
   companyIce: string;
+  companyIf: string;
+  companyRc: string;
   fiscalYear: number;
   periodLabel: string;
   exportedAt: string;
@@ -199,7 +201,7 @@ export async function loadMasterExportData(
   const supplierInvoices: MasterSupplierInvoiceRow[] = (supplierRes.data ?? []).map(row => ({
     invoiceNumber: String(row.invoice_number ?? ''),
     supplierName: String(row.supplier_name ?? 'Fournisseur'),
-    supplierIce: String(row.supplier_ice ?? ''),
+    supplierIce: formatDgiIce(row.supplier_ice as string | null | undefined),
     invoiceDate: String(row.invoice_date ?? ''),
     amountHT: Number(row.amount_ht ?? 0),
     vatRate: Number(row.vat_rate ?? 0),
@@ -229,10 +231,18 @@ export async function loadMasterExportData(
 
   const tvaRecord = tvaDashboard?.current ?? null;
   const tvaRows = tvaRecord ? buildDgiReleveRows(tvaRecord) : [];
+  const companyIds = resolveDgiCompanyIdentifiers({
+    ice: companyTvaInfo?.ice,
+    if_fiscal: companyTvaInfo?.if_fiscal,
+    if_number: companyTvaInfo?.if_number,
+    rc: companyTvaInfo?.rc,
+  });
 
   return {
     companyName: dashboard.companyName,
-    companyIce: companyTvaInfo?.ice ?? '',
+    companyIce: companyIds.ice,
+    companyIf: companyIds.identifiantFiscal,
+    companyRc: companyIds.rc,
     fiscalYear,
     periodLabel: period.periodLabel,
     exportedAt: new Date().toISOString(),

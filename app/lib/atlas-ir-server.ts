@@ -3,6 +3,10 @@ import type { Etat9421Data, Etat9421EmployeeLine, Etat9421ExportValidation, Etat
 import { asRecord } from '@/app/lib/atlas-json';
 import { IR_FORMULA_VERSION } from '@/app/lib/atlas-payroll-calculations';
 import { listPayrollRuns, getPayrollRunWithSalaries } from '@/app/lib/atlas-payroll-server';
+import {
+  resolveDgiCompanyIdentifiers,
+  resolveDgiIdentifiantFiscal,
+} from '@/app/lib/atlas-tva-dgi';
 
 function roundMad(n: number): number {
   return Math.round(n * 100) / 100;
@@ -49,8 +53,13 @@ export function validateEtat9421ForExport(data: Etat9421Data): Etat9421ExportVal
   if (!data.fiscalYear || data.fiscalYear < 2000) {
     return { ok: false, error: 'invalid_fiscal_year', message: 'Exercice fiscal invalide.' };
   }
-  if (!data.identifiantFiscal.trim()) {
-    return { ok: false, error: 'missing_if', message: 'Identifiant Fiscal (IF) requis pour l\'État 9421.' };
+  const ifFormatted = resolveDgiIdentifiantFiscal(data.identifiantFiscal);
+  if (!ifFormatted) {
+    return {
+      ok: false,
+      error: 'missing_if',
+      message: "Identifiant Fiscal (IF) manquant ou invalide pour l'État 9421.",
+    };
   }
   if (!data.employees.length) {
     return {
@@ -155,12 +164,12 @@ export async function buildEtat9421Data(
 
   const raisonSociale =
     company.trade_name?.trim() || company.legal_name?.trim() || company.name?.trim() || '';
-  const identifiantFiscal = company.if_fiscal?.trim() || company.if_number?.trim() || '';
+  const ids = resolveDgiCompanyIdentifiers(company);
 
   return {
     fiscalYear,
-    identifiantFiscal,
-    ice: company.ice?.trim() ?? '',
+    identifiantFiscal: ids.identifiantFiscal,
+    ice: ids.ice,
     raisonSociale,
     cnssEmployeur: company.cnss_number?.trim(),
     periodeDu: `${fiscalYear}-01-01`,

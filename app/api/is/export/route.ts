@@ -4,7 +4,7 @@ import { requireAgentsRouteDb } from '@/app/lib/atlas-agents-route-db';
 import {
   generateIsDeclarationXml,
   isDeclarationXmlFilename,
-  validateIsDraftForExport,
+  validateIsExportForDgi,
 } from '@/app/lib/atlas-is-xml';
 import {
   computeAndSaveIsDraft,
@@ -12,6 +12,7 @@ import {
   getIsDraftForYear,
   loadCompanyIsExportInfo,
 } from '@/app/lib/atlas-is-server';
+import { resolveDgiIdentifiantFiscal } from '@/app/lib/atlas-tva-dgi';
 import { getSupabaseServiceRoleClient } from '@/app/lib/supabase-admin';
 
 export const runtime = 'nodejs';
@@ -68,14 +69,6 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    const validation = validateIsDraftForExport(draft);
-    if (!validation.ok) {
-      return NextResponse.json(
-        { error: validation.error, message: validation.message },
-        { status: 422, headers: NO_STORE_HEADERS },
-      );
-    }
-
     const resolvedCompanyId = companyId ?? draft.companyId;
 
     const { data: ownedCompany } = await admin
@@ -94,8 +87,15 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: 'company_not_found' }, { status: 404, headers: NO_STORE_HEADERS });
     }
 
-    const identifiantFiscal =
-      company.if_fiscal?.trim() || company.if_number?.trim() || '';
+    const identifiantFiscal = resolveDgiIdentifiantFiscal(company.if_fiscal, company.if_number);
+    const validation = validateIsExportForDgi(draft, { identifiantFiscal });
+    if (!validation.ok) {
+      return NextResponse.json(
+        { error: validation.error, message: validation.message },
+        { status: 422, headers: NO_STORE_HEADERS },
+      );
+    }
+
     const raisonSociale =
       company.trade_name?.trim() || company.legal_name?.trim() || company.name?.trim() || '';
 

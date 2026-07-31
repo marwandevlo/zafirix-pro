@@ -2,11 +2,13 @@ import ExcelJS from 'exceljs';
 import type { Etat9421Data } from '@/app/types/atlas-ir-export';
 import type { AtlasIrExportCompanyInfo } from '@/app/lib/atlas-ir-server';
 import { validateEtat9421ForExport } from '@/app/lib/atlas-ir-server';
+import { formatDgiIce, resolveDgiIdentifiantFiscal } from '@/app/lib/atlas-tva-dgi';
 
 const COLOR_HEADER = 'FF1B365D';
 const COLOR_SECTION = 'FF0F2C59';
 const FONT = 'Calibri';
 const CURRENCY_FMT = '#,##0.00';
+const TEXT_FMT = '@';
 
 function headerFill(): ExcelJS.Fill {
   return { type: 'pattern', pattern: 'solid', fgColor: { argb: COLOR_HEADER } };
@@ -43,10 +45,12 @@ export async function generateEtat9421ExcelBuffer(
 
   ws.getCell(4, 1).value = 'IF:';
   ws.getCell(4, 1).font = { bold: true, name: FONT, size: 10 };
-  ws.getCell(4, 2).value = data.identifiantFiscal;
+  ws.getCell(4, 2).value = resolveDgiIdentifiantFiscal(data.identifiantFiscal);
+  ws.getCell(4, 2).numFmt = TEXT_FMT;
   ws.getCell(4, 3).value = 'ICE:';
   ws.getCell(4, 3).font = { bold: true, name: FONT, size: 10 };
-  ws.getCell(4, 4).value = data.ice;
+  ws.getCell(4, 4).value = formatDgiIce(data.ice);
+  ws.getCell(4, 4).numFmt = TEXT_FMT;
 
   ws.getCell(5, 1).value = 'Exercice:';
   ws.getCell(5, 1).font = { bold: true, name: FONT, size: 10 };

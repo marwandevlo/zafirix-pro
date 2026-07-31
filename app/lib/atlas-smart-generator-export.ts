@@ -6,7 +6,11 @@ import ExcelJS from 'exceljs';
 import { jsPDF } from 'jspdf';
 import type { AtlasCompany } from '@/app/types/atlas-company';
 import type { SmartGeneratorDocument, SmartGeneratorParams, SmartGeneratorBrandingAssets } from '@/app/types/atlas-smart-generator';
-import { formatDgiIce, formatDgiIdentifiantFiscal } from '@/app/lib/atlas-tva-dgi';
+import {
+  formatDgiIce,
+  formatDgiRc,
+  resolveDgiIdentifiantFiscal,
+} from '@/app/lib/atlas-tva-dgi';
 import { renderPdfFirstPageToPng } from '@/app/lib/atlas-pdf-ocr-render';
 
 const COLOR_HEADER = 'FF1B365D';
@@ -92,8 +96,8 @@ export async function generateSmartGeneratorExcelBuffer(
   const meta: [string, string][] = [
     ['Société', companyDisplayName(company)],
     ['ICE', formatDgiIce(company.ice)],
-    ['IF', formatDgiIdentifiantFiscal(company.if_fiscal)],
-    ['RC', String(company.rc ?? '')],
+    ['IF', resolveDgiIdentifiantFiscal(company.if_fiscal, (company as { if_number?: string }).if_number)],
+    ['RC', formatDgiRc(company.rc)],
     ['Patente', companyPatent(company as ExtendedCompany)],
     ['CNSS', String(company.cnss ?? '')],
     ['Capital social', companyCapital(company as ExtendedCompany)],
@@ -246,10 +250,16 @@ export async function generateSmartGeneratorPdfBuffer(
       doc.text(companyDisplayName(company), nameX, 12);
       doc.setFontSize(8);
       doc.setFont('helvetica', 'normal');
+      const iceFormatted = formatDgiIce(company.ice);
+      const ifFormatted = resolveDgiIdentifiantFiscal(
+        company.if_fiscal,
+        (company as { if_number?: string }).if_number,
+      );
+      const rcFormatted = formatDgiRc(company.rc);
       const ids = [
-        company.ice ? `ICE: ${formatDgiIce(company.ice)}` : null,
-        company.if_fiscal ? `IF: ${formatDgiIdentifiantFiscal(company.if_fiscal)}` : null,
-        company.rc ? `RC: ${company.rc}` : null,
+        iceFormatted ? `ICE: ${iceFormatted}` : null,
+        ifFormatted ? `IF: ${ifFormatted}` : null,
+        rcFormatted ? `RC: ${rcFormatted}` : null,
         companyPatent(company) ? `Patente: ${companyPatent(company)}` : null,
         company.cnss ? `CNSS: ${company.cnss}` : null,
         companyCapital(company) ? `Capital: ${companyCapital(company)}` : null,

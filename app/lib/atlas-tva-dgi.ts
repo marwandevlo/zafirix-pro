@@ -90,9 +90,31 @@ export function sanitizeDgiNomFournisseur(text: string | null | undefined): stri
   return sanitizeDgiSingleLine(text, 255) || 'Fournisseur';
 }
 
+/** Reject empty, "0", and all-zero placeholder identifiers (rejected by DGI SIMPL). */
+export function isPlaceholderTaxIdentifier(id: string | null | undefined): boolean {
+  const trimmed = String(id ?? '').trim();
+  if (!trimmed || trimmed === '0') return true;
+
+  const digits = trimmed.split('.')[0].replace(/\D/g, '');
+  if (!digits || /^0+$/.test(digits)) return true;
+
+  return false;
+}
+
+/** Trim and drop placeholder tax IDs — never emit fake zeros for DGI export. */
+export function formatTaxIdentifier(id: string | null | undefined): string {
+  if (isPlaceholderTaxIdentifier(id)) return '';
+  return String(id ?? '').trim();
+}
+
 export function formatDgiIdentifiantFiscal(ifNumber: string | null | undefined): string {
+  if (isPlaceholderTaxIdentifier(ifNumber)) return '';
+
   const digits = String(ifNumber ?? '').replace(/\D/g, '');
-  return digits || '00000000';
+  if (!digits || /^0+$/.test(digits)) return '';
+  if (digits.length < 7 || digits.length > 8) return '';
+
+  return digits;
 }
 
 export function formatDgiAmount(value: number): string {
@@ -180,11 +202,75 @@ export function dgiPaymentModeLabel(paymentMode: string | null | undefined, code
 }
 
 export function formatDgiIce(ice: string | null | undefined): string {
+  if (isPlaceholderTaxIdentifier(ice)) return '';
+
   const digits = String(ice ?? '')
     .split('.')[0]
     .replace(/\D/g, '');
-  if (!digits) return '0'.repeat(15);
-  return digits.padStart(15, '0').slice(-15);
+  if (!digits || /^0+$/.test(digits)) return '';
+  // DGI ICE must be exactly 15 digits — never pad short values into fake identifiers.
+  if (digits.length !== 15) return '';
+
+  return digits;
+}
+
+/** Pick the first valid ICE from multiple sources (invoice line, client, supplier, etc.). */
+export function resolveDgiIce(...sources: Array<string | null | undefined>): string {
+  for (const source of sources) {
+    const formatted = formatDgiIce(source);
+    if (formatted) return formatted;
+  }
+  return '';
+}
+
+/** Pick the first valid IF from multiple sources (company profile fields). */
+export function resolveDgiIdentifiantFiscal(...sources: Array<string | null | undefined>): string {
+  for (const source of sources) {
+    const formatted = formatDgiIdentifiantFiscal(source);
+    if (formatted) return formatted;
+  }
+  return '';
+}
+
+/** Sanitize RC for export — blank when missing or placeholder digits only. */
+export function formatDgiRc(rc: string | null | undefined): string {
+  const trimmed = formatTaxIdentifier(rc);
+  if (!trimmed) return '';
+
+  const normalized = trimmed.replace(/\s+/g, '').toUpperCase();
+  const digitsOnly = normalized.replace(/\D/g, '');
+  if (digitsOnly && /^0+$/.test(digitsOnly) && !/[A-Z]/.test(normalized)) return '';
+
+  return trimmed;
+}
+
+/** Pick the first valid RC from multiple sources. */
+export function resolveDgiRc(...sources: Array<string | null | undefined>): string {
+  for (const source of sources) {
+    const formatted = formatDgiRc(source);
+    if (formatted) return formatted;
+  }
+  return '';
+}
+
+export type DgiCompanyIdentifiers = {
+  identifiantFiscal: string;
+  ice: string;
+  rc: string;
+};
+
+/** Resolve company ICE / IF / RC from profile fields for DGI exports. */
+export function resolveDgiCompanyIdentifiers(company: {
+  ice?: string | null;
+  if_fiscal?: string | null;
+  if_number?: string | null;
+  rc?: string | null;
+}): DgiCompanyIdentifiers {
+  return {
+    identifiantFiscal: resolveDgiIdentifiantFiscal(company.if_fiscal, company.if_number),
+    ice: formatDgiIce(company.ice),
+    rc: formatDgiRc(company.rc),
+  };
 }
 
 export function formatDgiVatRate(rate: number | null | undefined): number {
@@ -222,7 +308,7 @@ export function buildDgiReleveRows(record: AtlasTvaPeriodRecord): DgiReleveDeduc
       taux: formatDgiVatRate(line.vatRate),
       montantTVA: roundDgiAmount(line.vatAmount),
       montantTTC: roundDgiAmount(line.totalTTC),
-      iceFournisseur: formatDgiIce(line.supplierIce),
+      iceFournisseur: resolveDgiIce(line.supplierIce),
       nomFournisseur: sanitizeDgiNomFournisseur(line.counterparty),
       dateFacture: issueDate,
       modePaiement: dgiPaymentModeLabel(line.paymentMode, modePaiementCode),

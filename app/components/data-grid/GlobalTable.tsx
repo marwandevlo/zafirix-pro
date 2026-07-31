@@ -118,14 +118,18 @@ export default function GlobalTable<T extends GlobalTableRow = GlobalTableRow>({
     if (clearAfter) setSelectedIds([]);
   };
 
-  const hasBulkActions = Boolean(onModify || onShare || onDownload || onDelete);
+  const hasBulkToolbar =
+    selectedIds.length > 0 && Boolean(onModify || onShare || onDownload || onDelete);
+
+  /** Share / Download / Delete appear as a fixed trio whenever any bulk export action is configured. */
+  const showShareDownloadDeleteGroup = Boolean(onShare || onDownload || onDelete);
 
   const bulkToolbar =
-    selectedIds.length > 0 && hasBulkActions ? (
+    hasBulkToolbar ? (
       <div className="sticky bottom-4 z-50 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 bg-slate-900 text-white px-6 py-3 rounded-xl shadow-2xl border border-slate-700 animate-in fade-in slide-in-from-bottom-4 duration-200">
         <div className="flex items-center gap-3">
           <span className="bg-blue-600 text-white px-3 py-1 rounded-lg text-sm font-bold">
-            {selectedIds.length} عناصر محددة
+            {selectedIds.length} élément{selectedIds.length > 1 ? 's' : ''} sélectionné{selectedIds.length > 1 ? 's' : ''}
           </span>
         </div>
 
@@ -141,37 +145,41 @@ export default function GlobalTable<T extends GlobalTableRow = GlobalTableRow>({
             </button>
           ) : null}
 
-          {onShare ? (
-            <button
-              type="button"
-              onClick={() => runBulk(onShare)}
-              className="flex items-center gap-2 bg-slate-800 hover:bg-slate-700 text-slate-100 px-4 py-2 rounded-lg text-sm font-medium transition-all"
-            >
-              <Share2 size={16} className="text-blue-400" />
-              <span>Partager</span>
-            </button>
-          ) : null}
+          {showShareDownloadDeleteGroup ? (
+            <>
+              <button
+                type="button"
+                onClick={() => runBulk(onShare)}
+                disabled={!onShare}
+                title={!onShare ? 'Partage non disponible' : undefined}
+                className="flex items-center gap-2 bg-slate-800 hover:bg-slate-700 disabled:opacity-40 disabled:cursor-not-allowed text-slate-100 px-4 py-2 rounded-lg text-sm font-medium transition-all"
+              >
+                <Share2 size={16} className="text-blue-400" />
+                <span>Partager</span>
+              </button>
 
-          {onDownload ? (
-            <button
-              type="button"
-              onClick={() => runBulk(onDownload)}
-              className="flex items-center gap-2 bg-slate-800 hover:bg-slate-700 text-slate-100 px-4 py-2 rounded-lg text-sm font-medium transition-all"
-            >
-              <Download size={16} className="text-emerald-400" />
-              <span>Télécharger</span>
-            </button>
-          ) : null}
+              <button
+                type="button"
+                onClick={() => runBulk(onDownload)}
+                disabled={!onDownload}
+                title={!onDownload ? 'Téléchargement non disponible' : undefined}
+                className="flex items-center gap-2 bg-slate-800 hover:bg-slate-700 disabled:opacity-40 disabled:cursor-not-allowed text-slate-100 px-4 py-2 rounded-lg text-sm font-medium transition-all"
+              >
+                <Download size={16} className="text-emerald-400" />
+                <span>Télécharger</span>
+              </button>
 
-          {onDelete ? (
-            <button
-              type="button"
-              onClick={() => runBulk(onDelete, clearSelectionOnDelete)}
-              className="flex items-center gap-2 bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded-lg text-sm font-semibold transition-all shadow-lg"
-            >
-              <Trash2 size={16} />
-              <span>Supprimer</span>
-            </button>
+              <button
+                type="button"
+                onClick={() => runBulk(onDelete, clearSelectionOnDelete)}
+                disabled={!onDelete}
+                title={!onDelete ? 'Suppression non configurée pour cette vue' : undefined}
+                className="flex items-center gap-2 bg-red-600 hover:bg-red-700 disabled:opacity-40 disabled:cursor-not-allowed text-white px-4 py-2 rounded-lg text-sm font-semibold transition-all shadow-lg"
+              >
+                <Trash2 size={16} />
+                <span>Supprimer</span>
+              </button>
+            </>
           ) : null}
         </div>
       </div>

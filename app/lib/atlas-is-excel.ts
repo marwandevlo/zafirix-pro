@@ -1,7 +1,12 @@
 import ExcelJS from 'exceljs';
 import type { AtlasIsDraft } from '@/app/types/atlas-payroll';
 import type { AtlasIsExportCompanyInfo } from '@/app/lib/atlas-is-server';
-import { validateIsDraftForExport } from '@/app/lib/atlas-is-xml';
+import { validateIsExportForDgi } from '@/app/lib/atlas-is-xml';
+import {
+  formatDgiIce,
+  resolveDgiCompanyIdentifiers,
+  resolveDgiIdentifiantFiscal,
+} from '@/app/lib/atlas-tva-dgi';
 
 const COL_COUNT = 4;
 
@@ -129,7 +134,11 @@ function companyDisplayName(company: AtlasIsExportCompanyInfo): string {
 }
 
 function identifiantFiscal(company: AtlasIsExportCompanyInfo): string {
-  return company.if_fiscal?.trim() || company.if_number?.trim() || '';
+  return resolveDgiIdentifiantFiscal(company.if_fiscal, company.if_number);
+}
+
+function companyIce(company: AtlasIsExportCompanyInfo): string {
+  return formatDgiIce(company.ice);
 }
 
 function statusLabel(status: AtlasIsDraft['status']): string {
@@ -146,7 +155,8 @@ export async function generateIsDeclarationExcelBuffer(
   draft: AtlasIsDraft,
   company: AtlasIsExportCompanyInfo,
 ): Promise<Buffer> {
-  const validation = validateIsDraftForExport(draft);
+  const ids = resolveDgiCompanyIdentifiers(company);
+  const validation = validateIsExportForDgi(draft, { identifiantFiscal: ids.identifiantFiscal });
   if (!validation.ok) {
     throw new Error(validation.message ?? validation.error ?? 'export_invalid');
   }
@@ -184,7 +194,7 @@ export async function generateIsDeclarationExcelBuffer(
 
   ws.getCell(4, 3).value = 'ICE:';
   ws.getCell(4, 3).font = { name: FONT_CALIBRI, size: 10, bold: true };
-  setTextCell(ws.getCell(4, 4), company.ice?.trim() ?? '');
+  setTextCell(ws.getCell(4, 4), companyIce(company));
   ws.getCell(4, 4).font = { name: FONT_CALIBRI, size: 10 };
 
   ws.getCell(5, 1).value = 'Exercice fiscal:';

@@ -46,7 +46,12 @@ const TVA_LINE_EXPORT_COLUMNS: ExportColumn[] = [
 import { getActiveCompanyDbRowId } from '@/app/lib/atlas-active-company';
 import { readActiveCompanyFromLocalStorage } from '@/app/lib/atlas-companies-repository';
 import { isAtlasSupabaseDataEnabled } from '@/app/lib/atlas-data-source';
-import { dgiDeclarationRegime, generateTvaDeclarationXml } from '@/app/lib/atlas-tva-xml';
+import {
+  dgiDeclarationRegime,
+  generateTvaDeclarationXml,
+  resolveDgiIdentifiantFiscal,
+  validateTvaDgiExport,
+} from '@/app/lib/atlas-tva-xml';
 import type { AtlasTvaDashboard, AtlasTvaPeriodRecord } from '@/app/types/atlas-tva';
 
 type Tab = 'dashboard' | 'ventes' | 'achats' | 'historique' | 'audit';
@@ -295,13 +300,30 @@ export default function TvaPageClient() {
     setSelectedHistoryIds((prev) => pruneSelectedIds(prev, historyTableRows));
   }, [historyTableRows]);
 
+  const confirmTvaExportWarnings = (warnings: string[] | undefined): boolean => {
+    if (!warnings?.length) return true;
+    return window.confirm(
+      `Attention avant export DGI :\n\n${warnings.join('\n')}\n\nContinuer quand même ?`,
+    );
+  };
+
   const downloadXml = () => {
     if (!current || !dashboard) return;
     const activeCompany = readActiveCompanyFromLocalStorage();
-    const identifiantFiscal =
-      activeCompany?.if_fiscal?.trim() ||
-      (activeCompany as { if_number?: string } | null)?.if_number?.trim() ||
-      '';
+    const identifiantFiscal = resolveDgiIdentifiantFiscal(
+      activeCompany?.if_fiscal,
+      (activeCompany as { if_number?: string } | null)?.if_number,
+    );
+    const validation = validateTvaDgiExport(current, {
+      identifiantFiscal,
+      companyIce: activeCompany?.ice,
+    });
+    if (!validation.ok) {
+      setError(validation.message ?? 'Export XML impossible.');
+      return;
+    }
+    if (!confirmTvaExportWarnings(validation.warnings)) return;
+
     const xml = generateTvaDeclarationXml(current, {
       identifiantFiscal,
       regime: dgiDeclarationRegime(),
@@ -318,6 +340,21 @@ export default function TvaPageClient() {
 
   const downloadExcel = async () => {
     if (!current || !companyId) return;
+    const activeCompany = readActiveCompanyFromLocalStorage();
+    const identifiantFiscal = resolveDgiIdentifiantFiscal(
+      activeCompany?.if_fiscal,
+      (activeCompany as { if_number?: string } | null)?.if_number,
+    );
+    const validation = validateTvaDgiExport(current, {
+      identifiantFiscal,
+      companyIce: activeCompany?.ice,
+    });
+    if (!validation.ok) {
+      setError(validation.message ?? 'Export Excel impossible.');
+      return;
+    }
+    if (!confirmTvaExportWarnings(validation.warnings)) return;
+
     setExportingExcel(true);
     setError('');
     try {
@@ -608,6 +645,9 @@ export default function TvaPageClient() {
               history={history}
               selectedIds={selectedHistoryIds}
               onSelectionChange={setSelectedHistoryIds}
+              companyId={companyId}
+              onHistoryChange={setHistory}
+              onReload={() => void reload()}
             />
           )}
         </div>
@@ -803,11 +843,17 @@ function TvaHistoryTable({
   history,
   selectedIds,
   onSelectionChange,
+  companyId,
+  onHistoryChange,
+  onReload,
 }: {
   rows: TvaHistoryTableRow[];
   history: AtlasTvaPeriodRecord[];
   selectedIds: string[];
   onSelectionChange: (ids: string[]) => void;
+  companyId: string | null;
+  onHistoryChange: (periods: AtlasTvaPeriodRecord[]) => void;
+  onReload: () => void;
 }) {
   const periodById = useMemo(() => new Map(history.map((p) => [p.id, p])), [history]);
 
@@ -856,6 +902,28 @@ function TvaHistoryTable({
     void exportTable('xlsx', selected, TVA_HISTORY_EXPORT_COLUMNS, 'historique_tva', { title: 'Historique TVA' });
   };
 
+  const handleBulkDelete = (ids: string[]) => {
+    runOptimisticBulkDelete({
+      ids,
+      confirmMessage: `Supprimer ${ids.length} période(s) de l'historique TVA ?`,
+      onOptimistic: () => {
+        onHistoryChange(history.filter((period) => !ids.includes(period.id)));
+        onSelectionChange([]);
+      },
+      onPersist: async (deleteIds) => {
+        if (!companyId) throw new Error('company_required');
+        const { ok, data } = await tvaFetch<{ ok?: boolean; error?: string }>('/api/tva/history', {
+          method: 'DELETE',
+          body: JSON.stringify({ companyId, ids: deleteIds }),
+        });
+        if (!ok) throw new Error(data.error ?? 'delete_failed');
+      },
+      onPersistError: () => {
+        onReload();
+      },
+    });
+  };
+
   return (
     <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
       <div className="px-5 py-4 border-b border-gray-100 flex items-center justify-between gap-3">
@@ -889,7 +957,9 @@ function TvaHistoryTable({
               openWhatsAppShare(`Historique TVA:\n${summary}`);
             }}
             onDownload={handleBulkDownload}
+            onDelete={(ids) => void handleBulkDelete(ids)}
             hideRowActions
+            clearSelectionOnDelete={false}
           />
         </div>
       )}

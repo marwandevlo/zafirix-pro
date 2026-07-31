@@ -8,6 +8,7 @@ import type {
   AtlasTvaPeriodType,
 } from '@/app/types/atlas-tva';
 import { asRecord } from '@/app/lib/atlas-json';
+import { resolveDgiIce } from '@/app/lib/atlas-tva-dgi';
 
 const MONTH_NAMES = [
   'Janvier', 'Février', 'Mars', 'Avril', 'Mai', 'Juin',
@@ -407,7 +408,7 @@ export async function computeTvaPeriod(
       totalTTC,
       vatRate: row.vat_rate != null ? Number(row.vat_rate) : undefined,
       source: 'supplier_invoice',
-      supplierIce: row.supplier_ice ? String(row.supplier_ice) : undefined,
+      supplierIce: resolveDgiIce(row.supplier_ice) || undefined,
       designation: row.category ? String(row.category) : 'Achats / Services',
       paymentMode: row.payment_method ? String(row.payment_method) : undefined,
       paymentDate: issueDate,
@@ -606,6 +607,7 @@ export type AtlasTvaExportCompanyInfo = {
   ice: string | null;
   if_fiscal: string | null;
   if_number: string | null;
+  rc: string | null;
 };
 
 export async function loadCompanyTvaExportInfo(
@@ -614,7 +616,7 @@ export async function loadCompanyTvaExportInfo(
 ): Promise<AtlasTvaExportCompanyInfo | null> {
   const { data, error } = await db
     .from('atlas_companies')
-    .select('name, legal_name, trade_name, ice, if_fiscal, if_number, company_json')
+    .select('name, legal_name, trade_name, ice, if_fiscal, if_number, rc, company_json')
     .eq('id', companyId)
     .maybeSingle();
   if (error || !data) return null;
@@ -628,6 +630,7 @@ export async function loadCompanyTvaExportInfo(
     if_fiscal:
       row.if_fiscal == null ? (json?.if_fiscal == null ? null : String(json.if_fiscal)) : String(row.if_fiscal),
     if_number: row.if_number == null ? null : String(row.if_number),
+    rc: row.rc == null ? (json?.rc == null ? null : String(json.rc)) : String(row.rc),
   };
 }
 
@@ -805,6 +808,26 @@ export async function listTvaHistory(
     regimeTVA: regime,
     periods: (data ?? []).map((r) => rowToPeriodRecord(r as Record<string, unknown>)),
   };
+}
+
+export async function deleteTvaPeriodRecords(
+  db: SupabaseClient,
+  userId: string,
+  companyId: string,
+  periodIds: string[],
+): Promise<number> {
+  if (periodIds.length === 0) return 0;
+
+  const { data, error } = await db
+    .from('atlas_tva_periods')
+    .delete()
+    .eq('company_id', companyId)
+    .eq('user_id', userId)
+    .in('id', periodIds)
+    .select('id');
+
+  if (error) throw new Error(error.message);
+  return (data ?? []).length;
 }
 
 export async function markTvaPeriodDeclared(

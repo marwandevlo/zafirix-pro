@@ -107,29 +107,37 @@ function buildDashboardSheet(wb: ExcelJS.Workbook, data: MasterExportData): void
   ws.getCell(4, 1).font = { name: FONT, size: 10, bold: true };
   setTextCell(ws.getCell(4, 2), data.companyIce);
 
-  ws.getCell(4, 3).value = 'Exercice:';
+  ws.getCell(4, 3).value = 'IF:';
   ws.getCell(4, 3).font = { name: FONT, size: 10, bold: true };
-  ws.getCell(4, 4).value = data.periodLabel;
+  setTextCell(ws.getCell(4, 4), data.companyIf);
 
-  ws.mergeCells(6, 1, 6, 4);
-  ws.getCell(6, 1).value = 'Indicateurs clés';
-  ws.getCell(6, 1).font = { name: FONT, size: 11, bold: true, color: { argb: COLOR_WHITE } };
-  ws.getCell(6, 1).fill = headerFill(COLOR_SECTION);
+  ws.getCell(5, 1).value = 'RC:';
+  ws.getCell(5, 1).font = { name: FONT, size: 10, bold: true };
+  setTextCell(ws.getCell(5, 2), data.companyRc);
+
+  ws.getCell(5, 3).value = 'Exercice:';
+  ws.getCell(5, 3).font = { name: FONT, size: 10, bold: true };
+  ws.getCell(5, 4).value = data.periodLabel;
+
+  ws.mergeCells(7, 1, 7, 4);
+  ws.getCell(7, 1).value = 'Indicateurs clés';
+  ws.getCell(7, 1).font = { name: FONT, size: 11, bold: true, color: { argb: COLOR_WHITE } };
+  ws.getCell(7, 1).fill = headerFill(COLOR_SECTION);
 
   const k = data.kpis;
-  writeKpiRow(ws, 7, 'Solde global (trésorerie)', k.soldeGlobal, true);
-  writeKpiRow(ws, 8, 'Balance clients (impayés TTC)', k.balanceClients, true);
-  writeKpiRow(ws, 9, 'Balance fournisseurs (à payer TTC)', k.balanceFournisseurs, true);
-  writeKpiRow(ws, 10, 'Chiffre d\'affaires HT', k.chiffreAffairesHT, true);
-  writeKpiRow(ws, 11, 'Achats HT', k.achatsHT, true);
-  writeKpiRow(ws, 12, 'TVA nette', k.tvaNette, true);
-  writeKpiRow(ws, 13, 'Statut fiscal global', k.statutFiscal, false);
-  writeKpiRow(ws, 14, 'Opérations bancaires', k.transactionsCount, false);
-  writeKpiRow(ws, 15, 'Factures fournisseurs', k.supplierInvoicesCount, false);
-  writeKpiRow(ws, 16, 'Lignes journal comptable', k.journalLinesCount, false);
+  writeKpiRow(ws, 8, 'Solde global (trésorerie)', k.soldeGlobal, true);
+  writeKpiRow(ws, 9, 'Balance clients (impayés TTC)', k.balanceClients, true);
+  writeKpiRow(ws, 10, 'Balance fournisseurs (à payer TTC)', k.balanceFournisseurs, true);
+  writeKpiRow(ws, 11, 'Chiffre d\'affaires HT', k.chiffreAffairesHT, true);
+  writeKpiRow(ws, 12, 'Achats HT', k.achatsHT, true);
+  writeKpiRow(ws, 13, 'TVA nette', k.tvaNette, true);
+  writeKpiRow(ws, 14, 'Statut fiscal global', k.statutFiscal, false);
+  writeKpiRow(ws, 15, 'Opérations bancaires', k.transactionsCount, false);
+  writeKpiRow(ws, 16, 'Factures fournisseurs', k.supplierInvoicesCount, false);
+  writeKpiRow(ws, 17, 'Lignes journal comptable', k.journalLinesCount, false);
 
-  ws.getCell(18, 1).value = `Exporté le ${new Date(data.exportedAt).toLocaleString('fr-FR')}`;
-  ws.getCell(18, 1).font = { name: FONT, size: 9, italic: true, color: { argb: 'FF666666' } };
+  ws.getCell(19, 1).value = `Exporté le ${new Date(data.exportedAt).toLocaleString('fr-FR')}`;
+  ws.getCell(19, 1).font = { name: FONT, size: 9, italic: true, color: { argb: 'FF666666' } };
 
   autoFit(ws, 4);
 }

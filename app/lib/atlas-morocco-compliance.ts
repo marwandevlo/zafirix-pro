@@ -5,7 +5,9 @@
 import {
   formatDgiIce,
   formatDgiIdentifiantFiscal,
+  formatDgiRc,
   formatDgiVatRate,
+  isPlaceholderTaxIdentifier,
 } from '@/app/lib/atlas-tva-dgi';
 
 /** Standard DGI TVA rates (%). */
@@ -19,8 +21,9 @@ export function normalizeIce(raw: string | null | undefined): string {
 }
 
 export function isValidIce(raw: string | null | undefined): boolean {
+  if (isPlaceholderTaxIdentifier(raw)) return false;
   const digits = String(raw ?? '').replace(/\D/g, '');
-  return digits.length === 15;
+  return digits.length === 15 && !/^0+$/.test(digits);
 }
 
 /** IF — Identifiant Fiscal: 8 digits (DGI SIMPL). */
@@ -29,17 +32,22 @@ export function normalizeIf(raw: string | null | undefined): string {
 }
 
 export function isValidIf(raw: string | null | undefined): boolean {
+  if (isPlaceholderTaxIdentifier(raw)) return false;
   const digits = String(raw ?? '').replace(/\D/g, '');
-  return digits.length >= 7 && digits.length <= 8;
+  return digits.length >= 7 && digits.length <= 8 && !/^0+$/.test(digits);
 }
 
 /**
  * RC — Registre de Commerce (Morocco).
  * Accepts common formats: city prefix + digits, or plain 4–12 digit registration.
  */
+export function normalizeRc(raw: string | null | undefined): string {
+  return formatDgiRc(raw);
+}
+
 export function isValidRc(raw: string | null | undefined): boolean {
   const value = String(raw ?? '').trim();
-  if (!value) return false;
+  if (!value || isPlaceholderTaxIdentifier(value)) return false;
   const normalized = value.replace(/\s+/g, '').toUpperCase();
   if (/^[A-Z]{1,4}\d{3,10}$/.test(normalized)) return true;
   if (/^\d{4,12}$/.test(normalized.replace(/\D/g, ''))) return true;

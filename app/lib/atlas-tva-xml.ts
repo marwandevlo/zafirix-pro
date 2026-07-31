@@ -4,6 +4,7 @@ import {
   DGI_DECLARATION_REGIME_STANDARD,
   escapeDgiXml,
   formatDgiAmount,
+  formatDgiIce,
   formatDgiIdentifiantFiscal,
   isDeductiblePurchaseLine,
   parseDgiPeriodFromKey,
@@ -22,10 +23,55 @@ export {
   formatDgiIce,
   formatDgiIdentifiantFiscal,
   formatDgiVatRate,
+  formatDgiRc,
+  formatTaxIdentifier,
+  isPlaceholderTaxIdentifier,
   parseDgiPeriodFromKey,
+  resolveDgiCompanyIdentifiers,
+  resolveDgiIce,
+  resolveDgiIdentifiantFiscal,
+  resolveDgiRc,
   sanitizeDgiDesignation,
   sanitizeDgiNumFacture,
 } from '@/app/lib/atlas-tva-dgi';
+
+export type TvaDgiExportValidation = {
+  ok: boolean;
+  error?: string;
+  message?: string;
+  warnings?: string[];
+};
+
+/** Validate company IF/ICE and supplier ICE rows before SIMPL-TVA export. */
+export function validateTvaDgiExport(
+  record: AtlasTvaPeriodRecord,
+  opts: { identifiantFiscal?: string | null; companyIce?: string | null },
+): TvaDgiExportValidation {
+  const identifiantFiscal = formatDgiIdentifiantFiscal(opts.identifiantFiscal);
+  if (!identifiantFiscal) {
+    return {
+      ok: false,
+      error: 'missing_if',
+      message:
+        "Identifiant Fiscal (IF) manquant ou invalide. Complétez le profil société (Paramètres) avant l'export DGI.",
+    };
+  }
+
+  const warnings: string[] = [];
+  if (!formatDgiIce(opts.companyIce)) {
+    warnings.push("ICE société manquant ou invalide dans le profil entreprise.");
+  }
+
+  const rows = buildDgiReleveRows(record);
+  const missingSupplierIce = rows.filter((row) => !row.iceFournisseur).length;
+  if (missingSupplierIce > 0) {
+    warnings.push(
+      `${missingSupplierIce} ligne(s) d'achat sans ICE fournisseur valide — SIMPL-TVA peut rejeter le relevé.`,
+    );
+  }
+
+  return { ok: true, warnings: warnings.length > 0 ? warnings : undefined };
+}
 
 function buildRdXmlBlock(row: ReturnType<typeof buildDgiReleveRows>[number]): string {
   return [
@@ -57,6 +103,9 @@ export function generateTvaDeclarationXml(
   const { annee, periode } = parseDgiPeriodFromKey(record.periodKey);
   const regime = opts.regime ?? DGI_DECLARATION_REGIME_STANDARD;
   const identifiantFiscal = formatDgiIdentifiantFiscal(opts.identifiantFiscal);
+  if (!identifiantFiscal) {
+    throw new Error('missing_if');
+  }
   const rows = buildDgiReleveRows(record);
   const rdBlocks = rows.map(buildRdXmlBlock).join('\n');
 
