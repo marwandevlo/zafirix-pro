@@ -31,11 +31,15 @@ const PAYMENT_MODE_LABELS: Record<number, string> = {
   6: 'Compensation',
 };
 
-/** DGI declaration regime: 1 = Débit / Encaissement standard. */
-export const DGI_DECLARATION_REGIME_STANDARD = 1;
+/** DGI XML `<regime>`: 1 = déclaration mensuelle, 2 = déclaration trimestrielle (SIMPL-TVA EDI). */
+export const DGI_XML_REGIME_MONTHLY = 1;
+export const DGI_XML_REGIME_QUARTERLY = 2;
 
-/** SIMPL-TVA accepted regime codes for Relevé de déductions. */
-export const DGI_REGIME_CODES = [1, 2] as const;
+/** @deprecated Use DGI_XML_REGIME_MONTHLY — kept for backward compatibility. */
+export const DGI_DECLARATION_REGIME_STANDARD = DGI_XML_REGIME_MONTHLY;
+
+/** SIMPL-TVA accepted `<regime>` codes in Relevé de déductions XML headers. */
+export const DGI_REGIME_CODES = [DGI_XML_REGIME_MONTHLY, DGI_XML_REGIME_QUARTERLY] as const;
 
 export type DgiPeriodKind = 'monthly' | 'quarterly' | 'annual';
 
@@ -380,10 +384,62 @@ export function isValidDgiRegimeCode(regime: number): boolean {
   return Number.isInteger(regime) && (DGI_REGIME_CODES as readonly number[]).includes(regime);
 }
 
+function isTrimestrielRegimeTVA(regimeTVA?: string | null): boolean {
+  return String(regimeTVA ?? '').toLowerCase().includes('trim');
+}
+
+/** Company TVA cadence → default DGI XML regime when period metadata is unavailable. */
+export function dgiDeclarationRegime(regimeTVA?: string | null): number {
+  return isTrimestrielRegimeTVA(regimeTVA) ? DGI_XML_REGIME_QUARTERLY : DGI_XML_REGIME_MONTHLY;
+}
+
+/**
+ * Derive DGI XML `<regime>` from resolved period metadata.
+ * Period kind wins over company profile — prevents monthly code (1) with quarterly `<periode>`.
+ */
+export function resolveDgiXmlRegimeFromPeriod(
+  periodMeta: Pick<DgiPeriodMetadata, 'periodKind'>,
+  regimeTVA?: string | null,
+): number {
+  switch (periodMeta.periodKind) {
+    case 'monthly':
+      return DGI_XML_REGIME_MONTHLY;
+    case 'quarterly':
+    case 'annual':
+      return DGI_XML_REGIME_QUARTERLY;
+    default:
+      return dgiDeclarationRegime(regimeTVA);
+  }
+}
+
+/** True when `<regime>` and `<periode>` ranges match DGI SIMPL-TVA EDI rules. */
+export function isDgiRegimePeriodConsistent(
+  regime: number,
+  periodMeta: Pick<DgiPeriodMetadata, 'periodKind' | 'periode'>,
+): boolean {
+  if (regime === DGI_XML_REGIME_MONTHLY) {
+    return periodMeta.periodKind === 'monthly' && periodMeta.periode >= 1 && periodMeta.periode <= 12;
+  }
+  if (regime === DGI_XML_REGIME_QUARTERLY) {
+    if (periodMeta.periodKind === 'quarterly') {
+      return periodMeta.periode >= 1 && periodMeta.periode <= 4;
+    }
+    if (periodMeta.periodKind === 'annual') {
+      return periodMeta.periode === 4;
+    }
+    return false;
+  }
+  return false;
+}
+
 export function normalizeDgiRegimeCode(
   regime?: number | null,
   regimeTVA?: string | null,
+  periodMeta?: Pick<DgiPeriodMetadata, 'periodKind'> | null,
 ): number {
+  if (periodMeta) {
+    return resolveDgiXmlRegimeFromPeriod(periodMeta, regimeTVA);
+  }
   if (regime != null && isValidDgiRegimeCode(regime)) return regime;
   return dgiDeclarationRegime(regimeTVA);
 }
@@ -527,10 +583,6 @@ export function formatDgiVatRate(rate: number | null | undefined): number {
   return Math.round(value);
 }
 
-/** DGI XML `<regime>` — 1 = Débit / Encaissement standard (SIMPL-TVA). */
-export function dgiDeclarationRegime(_regimeTVA?: string | null): number {
-  return DGI_DECLARATION_REGIME_STANDARD;
-}
 
 /** @deprecated Use dgiDeclarationRegime — kept for backward compatibility. */
 export function dgiRegimeCode(regimeTVA: string | null | undefined): number {

@@ -49,7 +49,6 @@ const TVA_LINE_EXPORT_COLUMNS: ExportColumn[] = [
 import { getActiveCompanyDbRowId } from '@/app/lib/atlas-active-company';
 import { readActiveCompanyFromLocalStorage } from '@/app/lib/atlas-companies-repository';
 import { isAtlasSupabaseDataEnabled } from '@/app/lib/atlas-data-source';
-import { dgiDeclarationRegime } from '@/app/lib/atlas-tva-dgi';
 import {
   validateTvaDgiExport,
   validateTvaDgiXmlExport,
@@ -452,11 +451,9 @@ export default function TvaPageClient() {
     }
 
     const company = buildTvaExportCompanySources(companyExportInfo);
-    const regime = dgiDeclarationRegime(dashboard.regimeTVA);
     const periodKey = selectedPeriodKey;
     const validation = validateTvaDgiXmlExport(current, {
       company,
-      regime,
       regimeTVA: dashboard.regimeTVA,
       periodKey,
     });
@@ -473,7 +470,6 @@ export default function TvaPageClient() {
       const params = new URLSearchParams({
         companyId,
         periodKey,
-        regime: String(regime),
         _: String(Date.now()),
       });
       const res = await fetch(`/api/tva/export-xml?${params.toString()}`, {

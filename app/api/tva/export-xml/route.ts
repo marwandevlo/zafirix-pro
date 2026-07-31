@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { atlasDataBackend } from '@/app/lib/atlas-data-source';
 import { requireAgentsRouteDb } from '@/app/lib/atlas-agents-route-db';
-import { dgiDeclarationRegime, isValidDgiRegimeCode } from '@/app/lib/atlas-tva-dgi';
 import {
   getTvaDashboard,
   loadCompanySupplierIdentityIndex,
@@ -34,7 +33,6 @@ export async function GET(request: NextRequest) {
 
   const companyId = request.nextUrl.searchParams.get('companyId')?.trim();
   const periodKey = request.nextUrl.searchParams.get('periodKey')?.trim();
-  const regimeParam = request.nextUrl.searchParams.get('regime')?.trim();
   if (!companyId || !periodKey) {
     return NextResponse.json(
       { error: 'company_and_period_required' },
@@ -53,14 +51,9 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: 'company_not_found' }, { status: 404, headers: NO_STORE_HEADERS });
     }
 
-    const regimeFromCompany = dgiDeclarationRegime(dashboard.regimeTVA);
-    const regimeParsed = regimeParam != null && regimeParam !== '' ? Number(regimeParam) : NaN;
-    const regime = isValidDgiRegimeCode(regimeParsed) ? regimeParsed : regimeFromCompany;
-
     const exportOpts = {
       company,
       supplierIndex,
-      regime,
       regimeTVA: dashboard.regimeTVA,
       periodKey,
     };

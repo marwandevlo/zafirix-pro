@@ -2,16 +2,16 @@ import type { AtlasTvaPeriodRecord } from '@/app/types/atlas-tva';
 import {
   buildDgiReleveRows,
   buildSupplierIdentityIndexFromPeriod,
-  DGI_DECLARATION_REGIME_STANDARD,
   escapeDgiXml,
   formatDgiAmount,
   formatDgiIce,
   formatDgiIdentifiantFiscal,
   isDeductiblePurchaseLine,
+  isDgiRegimePeriodConsistent,
   isValidDgiDateYmd,
   isValidDgiRegimeCode,
-  normalizeDgiRegimeCode,
   resolveDgiPeriodMetadata,
+  resolveDgiXmlRegimeFromPeriod,
   resolveTvaDeclarationCompanyIce,
   resolveTvaDeclarationIdentifiantFiscal,
   sanitizeDgiNomFournisseur,
@@ -38,6 +38,7 @@ export {
   formatDgiRc,
   formatTaxIdentifier,
   isPlaceholderTaxIdentifier,
+  isDgiRegimePeriodConsistent,
   isValidDgiDateYmd,
   isValidDgiRegimeCode,
   lookupSupplierIdentityByName,
@@ -47,6 +48,7 @@ export {
   resolveDgiIce,
   resolveDgiIdentifiantFiscal,
   resolveDgiPeriodMetadata,
+  resolveDgiXmlRegimeFromPeriod,
   resolveDgiRc,
   resolveDgiSupplierRef,
   resolveTvaDeclarationCompanyIce,
@@ -181,6 +183,27 @@ function resolveTvaXmlExportPeriodMetadata(
   return { periodKey, meta: resolveDgiPeriodMetadata(periodKey, record.periodType) };
 }
 
+function resolveTvaXmlExportRegime(
+  periodMeta: ReturnType<typeof resolveDgiPeriodMetadata>,
+  opts: Pick<TvaDgiExportValidationOptions, 'regime' | 'regimeTVA'>,
+): number {
+  return resolveDgiXmlRegimeFromPeriod(periodMeta, opts.regimeTVA);
+}
+
+function appendRegimeAutoCorrectWarning(
+  warnings: string[],
+  periodMeta: ReturnType<typeof resolveDgiPeriodMetadata>,
+  opts: Pick<TvaDgiExportValidationOptions, 'regime' | 'regimeTVA'>,
+  resolvedRegime: number,
+): void {
+  if (opts.regime == null || !isValidDgiRegimeCode(opts.regime) || opts.regime === resolvedRegime) {
+    return;
+  }
+  warnings.push(
+    `Code régime XML corrigé automatiquement (${opts.regime} → ${resolvedRegime}) pour correspondre à ${periodMeta.periodLabel}.`,
+  );
+}
+
 /** Advisory validation for Excel / preview — warnings only. */
 export function validateTvaDgiExport(
   record: AtlasTvaPeriodRecord,
@@ -252,12 +275,16 @@ export function validateTvaDgiXmlExport(
     };
   }
 
-  const regime = normalizeDgiRegimeCode(opts.regime, opts.regimeTVA);
-  if (!isValidDgiRegimeCode(regime)) {
+  const regime = resolveTvaXmlExportRegime(periodMeta, opts);
+  appendRegimeAutoCorrectWarning(warnings, periodMeta, opts, regime);
+  if (!isDgiRegimePeriodConsistent(regime, periodMeta)) {
     return {
       ok: false,
-      error: 'invalid_regime',
-      message: 'Code régime TVA invalide — SIMPL-TVA attend 1 (Débit) ou 2 (Encaissement).',
+      error: 'regime_period_mismatch',
+      message:
+        `Incohérence régime/période — SIMPL-TVA attend régime ${regime} avec ` +
+        `${periodMeta.periodKind === 'monthly' ? 'un mois (1-12)' : 'un trimestre (1-4)'} ` +
+        `(période : ${periodKey}).`,
     };
   }
 
@@ -302,7 +329,8 @@ function buildRefFXml(ref: DgiReleveDeductionRow['refF']): string[] {
 }
 
 /** Post-generation guard — rejects legacy schema, placeholder IDs, malformed header/rows. */
-export function assertValidTvaDgiXmlOutput(xml: string): void {  if (/iceFournisseur|nomFournisseur|ifFournisseur|montantHT|numFacture|dateFacture/i.test(xml)) {
+export function assertValidTvaDgiXmlOutput(xml: string): void {
+  if (/iceFournisseur|nomFournisseur|ifFournisseur|montantHT|numFacture|dateFacture/i.test(xml)) {
     throw new Error('legacy_tva_xml_schema');
   }
 
@@ -323,8 +351,10 @@ export function assertValidTvaDgiXmlOutput(xml: string): void {  if (/iceFournis
   const regime = Number(regimeMatch[1]);
   const currentYear = new Date().getFullYear();
   if (annee < 2000 || annee > currentYear + 1) throw new Error('invalid_year');
-  if (periode < 1 || periode > 12) throw new Error('invalid_period');
   if (!isValidDgiRegimeCode(regime)) throw new Error('invalid_regime');
+
+  if (regime === 1 && (periode < 1 || periode > 12)) throw new Error('invalid_period');
+  if (regime === 2 && (periode < 1 || periode > 4)) throw new Error('invalid_period');
 
   if (/<ice>\s*0+\s*<\/ice>/i.test(xml)) {
     throw new Error('placeholder_supplier_ice');
@@ -336,12 +366,13 @@ export function assertValidTvaDgiXmlOutput(xml: string): void {  if (/iceFournis
     if (!iceMatch || iceMatch[1].length !== 15) {
       throw new Error('invalid_supplier_ice_in_xml');
     }
-    const ifMatch = block.match(/<if>(\d*)<\/if>/);
-    if (!ifMatch || ifMatch[1].length < 7 || ifMatch[1].length > 8) {
+    const blockIfMatch = block.match(/<if>(\d*)<\/if>/);
+    if (!blockIfMatch || blockIfMatch[1].length < 7 || blockIfMatch[1].length > 8) {
       throw new Error('invalid_supplier_if_in_xml');
     }
   }
 }
+
 export function tvaDgiXmlFilename(periodKey: string): string {
   return `TVA_${periodKey}_DGI.xml`;
 }
@@ -388,7 +419,7 @@ export function generateTvaDeclarationXml(
   }
 
   const { meta: periodMeta } = resolveTvaXmlExportPeriodMetadata(record, opts.periodKey);
-  const regime = normalizeDgiRegimeCode(opts.regime, opts.regimeTVA);
+  const regime = resolveTvaXmlExportRegime(periodMeta, opts);
   const identifiantFiscal = resolveTvaDeclarationIdentifiantFiscal(opts.company, opts.identifiantFiscal);
 
   const supplierIndex = opts.supplierIndex ?? buildSupplierIdentityIndexFromPeriod(record);
