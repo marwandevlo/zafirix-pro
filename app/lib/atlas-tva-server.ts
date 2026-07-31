@@ -11,6 +11,8 @@ import { asRecord } from '@/app/lib/atlas-json';
 import { filterPostgresUuids } from '@/app/lib/atlas-id-validation';
 import {
   buildSupplierIdentityIndex,
+  resolveDgiIce,
+  resolveDgiIdentifiantFiscal,
   sanitizeDgiNomFournisseur,
 } from '@/app/lib/atlas-tva-dgi';
 
@@ -398,8 +400,8 @@ function resolveSupplierIdentityFromSources(
   }
 
   return {
-    supplierIce: ice || undefined,
-    supplierIf: ifF || undefined,
+    supplierIce: resolveDgiIce(ice, docHint?.ice) || undefined,
+    supplierIf: resolveDgiIdentifiantFiscal(ifF, docHint?.ifFiscal) || undefined,
     counterparty: name,
   };
 }

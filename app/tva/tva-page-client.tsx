@@ -50,8 +50,6 @@ import { getActiveCompanyDbRowId } from '@/app/lib/atlas-active-company';
 import { readActiveCompanyFromLocalStorage } from '@/app/lib/atlas-companies-repository';
 import { isAtlasSupabaseDataEnabled } from '@/app/lib/atlas-data-source';
 import {
-  dgiDeclarationRegime,
-  generateTvaDeclarationXml,
   validateTvaDgiExport,
   type TvaDgiExportCompanySources,
 } from '@/app/lib/atlas-tva-xml';
@@ -310,6 +308,7 @@ export default function TvaPageClient() {
   const [declaring, setDeclaring] = useState(false);
   const [xmlDone, setXmlDone] = useState(false);
   const [exportingExcel, setExportingExcel] = useState(false);
+  const [exportingXml, setExportingXml] = useState(false);
   const [selectedYear, setSelectedYear] = useState(() => new Date().getFullYear());
   const [selectedQuarter, setSelectedQuarter] = useState<TvaQuarterSelection>(() => currentQuarter());
   const skipPeriodFetchRef = useRef(false);
@@ -433,8 +432,8 @@ export default function TvaPageClient() {
     );
   };
 
-  const downloadXml = () => {
-    if (!current || !dashboard) return;
+  const downloadXml = async () => {
+    if (!current || !companyId) return;
     const company = buildTvaExportCompanySources(companyExportInfo);
     const validation = validateTvaDgiExport(current, { company });
     if (!validation.ok) {
@@ -443,18 +442,30 @@ export default function TvaPageClient() {
     }
     if (!confirmTvaExportWarnings(validation.warnings)) return;
 
-    const xml = generateTvaDeclarationXml(current, {
-      company,
-      regime: dgiDeclarationRegime(),
-    });
-    const blob = new Blob([xml], { type: 'application/xml' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `TVA_${current.periodKey}_DGI.xml`;
-    a.click();
-    URL.revokeObjectURL(url);
-    setXmlDone(true);
+    setExportingXml(true);
+    setError('');
+    try {
+      const periodKey = buildPeriodKey(selectedYear, selectedQuarter);
+      const params = new URLSearchParams({ companyId, periodKey });
+      const res = await fetch(`/api/tva/export-xml?${params.toString()}`, { credentials: 'include' });
+      if (!res.ok) {
+        const body = (await res.json().catch(() => ({}))) as { error?: string; message?: string };
+        setError(body.message ?? body.error ?? 'Export XML impossible.');
+        return;
+      }
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `TVA_${periodKey}_DGI.xml`;
+      a.click();
+      URL.revokeObjectURL(url);
+      setXmlDone(true);
+    } catch {
+      setError('Erreur réseau lors de l\'export XML.');
+    } finally {
+      setExportingXml(false);
+    }
   };
 
   const downloadExcel = async () => {
@@ -615,11 +626,12 @@ export default function TvaPageClient() {
             </button>
             <button
               type="button"
-              onClick={downloadXml}
-              disabled={!current}
+              onClick={() => void downloadXml()}
+              disabled={!current || !companyId || exportingXml}
               className="flex items-center gap-2 px-4 py-2 bg-blue-500 text-white rounded-lg text-sm hover:bg-blue-600 transition-colors disabled:opacity-50"
             >
-              <FileCode size={16} /> Générer XML DGI
+              {exportingXml ? <Loader2 size={16} className="animate-spin" /> : <FileCode size={16} />}
+              Générer XML DGI
             </button>
             <button
               type="button"

@@ -111,6 +111,10 @@ function buildRefFXml(ref: DgiReleveDeductionRow['refF']): string[] {
   const ifFiscal = formatDgiIdentifiantFiscal(ref.ifFiscal);
   const nom = sanitizeDgiNomFournisseur(ref.nom);
 
+  if (!ice) {
+    throw new Error('invalid_supplier_ice_in_xml_row');
+  }
+
   return [
     '      <refF>',
     `        <if>${escapeDgiXml(ifFiscal)}</if>`,
@@ -118,6 +122,23 @@ function buildRefFXml(ref: DgiReleveDeductionRow['refF']): string[] {
     `        <ice>${escapeDgiXml(ice)}</ice>`,
     '      </refF>',
   ];
+}
+
+/** Reject legacy flat tags and placeholder ICE values in generated XML. */
+export function assertValidTvaDgiXmlOutput(xml: string): void {
+  if (/iceFournisseur|nomFournisseur|ifFournisseur|montantHT|numFacture|dateFacture/i.test(xml)) {
+    throw new Error('legacy_tva_xml_schema');
+  }
+  if (/<ice>\s*0+\s*<\/ice>/i.test(xml)) {
+    throw new Error('placeholder_supplier_ice');
+  }
+  if (!/<refF>[\s\S]*<ice>\d{15}<\/ice>[\s\S]*<\/refF>/.test(xml) && /<rd>/.test(xml)) {
+    throw new Error('missing_refF_supplier_block');
+  }
+}
+
+export function tvaDgiXmlFilename(periodKey: string): string {
+  return `TVA_${periodKey}_DGI.xml`;
 }
 
 /** Official DGI `<rd>` block — ord/num/des/mht/tva/ttc + refF + tx/mp/dpai/dfac. */
@@ -184,7 +205,9 @@ export function generateTvaDeclarationXml(
   if (rdBlocks) lines.push(rdBlocks);
   lines.push('  </releveDeductions>', '</DeclarationReleveDeduction>');
 
-  return lines.join('\n');
+  const xml = lines.join('\n');
+  assertValidTvaDgiXmlOutput(xml);
+  return xml;
 }
 
 export { isDeductiblePurchaseLine };
