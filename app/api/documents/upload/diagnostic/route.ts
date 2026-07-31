@@ -32,6 +32,7 @@ export async function POST(request: NextRequest) {
       httpStatus: body.httpStatus,
       errorCode: body.errorCode,
       attempt: body.attempt,
+      clientSessionUserId: typeof body.clientSessionUserId === 'string' ? body.clientSessionUserId : undefined,
       responseBody: body.responseBody,
     },
   );

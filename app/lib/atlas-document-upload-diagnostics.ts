@@ -15,6 +15,7 @@ export type UploadDiagnosticPayload = {
   errorCode?: string;
   errorMessage?: string;
   attempt?: number;
+  clientSessionUserId?: string;
   responseBody?: unknown;
 };
 

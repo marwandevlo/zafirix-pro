@@ -8,7 +8,7 @@ import {
 } from '@/app/lib/atlas-document-upload-auth';
 import { logUploadStep } from '@/app/lib/atlas-document-upload-core';
 import { registerStoredDocument, removeOrphanStorageObject } from '@/app/lib/atlas-document-upload-register';
-import { canAccessCompany } from '@/app/lib/atlas-permissions';
+import { canAccessCompany, resolveCompanyRole } from '@/app/lib/atlas-permissions';
 import { checkWorkspaceRateLimit, rateLimitResponse } from '@/app/lib/atlas-rate-limit';
 import { meterFeatureUsage } from '@/app/lib/atlas-usage-meter';
 import { ensureWorkspaceSubscription } from '@/app/lib/atlas-billing-server';
@@ -64,15 +64,6 @@ export async function POST(request: NextRequest) {
   const storagePath = String(body.storagePath ?? '').trim();
   const sha256Hash = body.sha256Hash ? String(body.sha256Hash).trim().toLowerCase() : undefined;
 
-  logUploadStep('register', 'info', 'upload_register_metadata', {
-    userId,
-    companyId,
-    documentId,
-    mimeType,
-    fileSize: sizeBytes,
-    storagePath,
-  });
-
   if (!documentId || !isUuid(documentId)) {
     return uploadErrorResponse(400, 'validation', 'document_required', 'Valid documentId required');
   }
@@ -91,6 +82,26 @@ export async function POST(request: NextRequest) {
   if (!allowed) {
     return uploadErrorResponse(403, 'auth', 'company_forbidden', 'Accès société refusé.');
   }
+
+  const roleContext = await resolveCompanyRole(adminDb, userId, companyId);
+  logUploadStep(
+    'register',
+    'info',
+    'upload_register_metadata',
+    {
+      userId,
+      companyId,
+      documentId,
+      mimeType,
+      fileSize: sizeBytes,
+      storagePath,
+    },
+    {
+      userRole: roleContext.role,
+      companyOwned: roleContext.owned,
+      workspaceId: roleContext.workspaceId,
+    },
+  );
 
   const { workspaceId } = await ensureWorkspaceSubscription(adminDb, userId);
   const wsRate = checkWorkspaceRateLimit(workspaceId, 'document_upload', userId);
@@ -119,15 +130,19 @@ export async function POST(request: NextRequest) {
   });
 
   if (!result.ok) {
-    logUploadStep('register_failed', 'error', result.message, { userId, documentId, companyId }, {
+    logUploadStep('register_failed', 'error', result.message, { userId, documentId, companyId, storagePath }, {
       code: result.code,
+      ...(result.debug ? { storagePathDebug: result.debug } : {}),
     });
 
     if (result.code === 'storage_object_missing') {
       await removeOrphanStorageObject(supabase, storagePath).catch(() => {});
     }
 
-    return uploadErrorResponse(result.httpStatus, 'register', result.code, result.message, { documentId });
+    return uploadErrorResponse(result.httpStatus, 'register', result.code, result.message, {
+      documentId,
+      ...(result.debug ? { debug: result.debug } : {}),
+    });
   }
 
   logUploadStep('register_complete', 'info', 'ocr_job_enqueued', {

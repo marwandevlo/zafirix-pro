@@ -485,6 +485,16 @@ export async function uploadDocumentForOcr(
     if (!sanitizeUploadUserMessage(regBody.message)) {
       regBody.message = frenchMessageForRegisterCode(regBody.code, regBody.message);
     }
+    const clientAuth = await supabase.auth.getUser().catch(() => ({ data: { user: null } }));
+    if (regBody.code === 'storage_path_forbidden') {
+      console.error('[atlas-documents/client] storage_path_forbidden', {
+        companyId,
+        documentId: prepareBody.documentId,
+        storagePath: prepareBody.storagePath,
+        clientSessionUserId: clientAuth.data.user?.id,
+        serverResponse: registerResult.body,
+      });
+    }
     logUploadDiagnostic({
       event: 'register_failed_after_storage',
       step: 'register',
@@ -495,6 +505,8 @@ export async function uploadDocumentForOcr(
       httpStatus: registerResult.status,
       errorCode: regBody.code,
       errorMessage: regBody.message,
+      clientSessionUserId: clientAuth.data.user?.id,
+      responseBody: registerResult.body,
     });
     return { ok: false, status: registerResult.status, body: regBody };
   }

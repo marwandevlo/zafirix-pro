@@ -71,6 +71,8 @@ export type StoragePathValidationExpected = {
   userId: string;
   companyId?: string | null;
   documentId?: string;
+  /** Caller verified company workspace access; path[0] may differ from session userId. */
+  allowWorkspaceCompanyPath?: boolean;
 };
 
 export type StoragePathValidationFailure = {
@@ -169,7 +171,7 @@ export function validateAtlasDocumentStoragePath(
     };
   }
 
-  if (!idsEqual(parsed.userId, expected.userId)) {
+  if (!idsEqual(parsed.userId, expected.userId) && !expected.allowWorkspaceCompanyPath) {
     return {
       ok: false,
       code: 'storage_path_forbidden',

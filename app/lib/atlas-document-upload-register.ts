@@ -16,15 +16,20 @@ import {
   buildAtlasDocumentWorkingStoragePath,
   documentUploadLimitExceededMessage,
   isPdfMimeType,
-  logStoragePathValidationFailure,
   maxUploadBytesForMime,
   normalizeAtlasDocumentStoragePath,
   parseAtlasDocumentStoragePath,
   sanitizeDocumentFilename,
-  storagePathOwnedByUser,
   validateAtlasDocumentStoragePath,
+  type StoragePathValidationFailure,
 } from '@/app/lib/atlas-document-storage';
-import { canAccessCompany } from '@/app/lib/atlas-permissions';
+import { canAccessCompany, resolveCompanyRole, type CompanyRoleContext } from '@/app/lib/atlas-permissions';
+import {
+  buildStoragePathForbiddenDiagnostic,
+  logStoragePathForbiddenDiagnostic,
+  logStoragePathValidationFailureDetailed,
+  type StoragePathForbiddenDiagnostic,
+} from '@/app/lib/atlas-document-storage-path-debug';
 
 export type RegisterStoredDocumentInput = {
   userId: string;
@@ -53,7 +58,7 @@ export type RegisterStoredDocumentResult =
       ocrAccepted: true;
       existingDocumentReused?: boolean;
     }
-  | { ok: false; code: string; message: string; httpStatus: number };
+  | { ok: false; code: string; message: string; httpStatus: number; debug?: StoragePathForbiddenDiagnostic };
 
 
 function registerFailure(
@@ -62,14 +67,19 @@ function registerFailure(
   httpStatus: number,
   ctx: UploadLogContext,
   step: string,
+  debug?: StoragePathForbiddenDiagnostic,
 ): RegisterStoredDocumentResult {
   const message = frenchMessageForRegisterCode(code, rawMessage);
   logUploadStep(step, 'error', message, ctx, {
     code,
     rawMessage: rawMessage?.slice(0, 500),
     bucket: ATLAS_DOCUMENTS_BUCKET,
+    ...(debug ? { storagePathDebug: debug } : {}),
   });
-  return { ok: false, code, message, httpStatus };
+  if (debug) {
+    logStoragePathForbiddenDiagnostic(debug);
+  }
+  return { ok: false, code, message, httpStatus, ...(debug ? { debug } : {}) };
 }
 
 function asPlainMetadata(meta: Record<string, unknown>): Record<string, unknown> {
@@ -92,39 +102,151 @@ export async function registerStoredDocument(
     storagePath: normalizedStoragePath,
   };
 
-  if (!storagePathOwnedByUser(normalizedStoragePath, userId)) {
-    const parsed = parseAtlasDocumentStoragePath(normalizedStoragePath);
-    logStoragePathValidationFailure({
+  let admin: SupabaseClient;
+  try {
+    admin = getSupabaseServiceRoleClient();
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : 'service_role_missing';
+    return registerFailure('server_misconfigured', msg, 503, ctx, 'register_admin');
+  }
+
+  let roleContext: CompanyRoleContext = { role: null, workspaceId: null, owned: false };
+  if (companyId) {
+    roleContext = await resolveCompanyRole(admin, userId, companyId);
+  }
+
+  const pathDiagBase = {
+    sessionUserId: userId,
+    storagePath,
+    companyId,
+    documentId,
+    roleContext,
+  };
+
+  const parsedEarly = parseAtlasDocumentStoragePath(normalizedStoragePath);
+  if (!parsedEarly) {
+    const failure: StoragePathValidationFailure = {
       ok: false,
       code: 'storage_path_forbidden',
-      reason: parsed ? 'user_id_mismatch' : 'parse_failed',
+      reason: 'parse_failed',
       expected: { userId, companyId, documentId },
       received: {
         storagePath,
         normalizedPath: normalizedStoragePath,
-        parsed,
+        parsed: null,
       },
+    };
+    const debug = buildStoragePathForbiddenDiagnostic({
+      trigger: 'register_path_ownership',
+      reason: 'parse_failed',
+      ...pathDiagBase,
     });
-    return registerFailure('storage_path_forbidden', undefined, 403, ctx, 'register_path');
+    logStoragePathValidationFailureDetailed(failure, debug);
+    return registerFailure('storage_path_forbidden', undefined, 403, ctx, 'register_path', debug);
+  }
+
+  const effectiveCompanyIdEarly = parsedEarly.companyId ?? companyId;
+  if (!effectiveCompanyIdEarly) {
+    const debug = buildStoragePathForbiddenDiagnostic({
+      trigger: 'register_path_validate',
+      reason: 'company_id_missing',
+      ...pathDiagBase,
+    });
+    return registerFailure('storage_path_forbidden', 'Company id missing from path', 403, ctx, 'register_path', debug);
+  }
+
+  const sessionCompanyAccess = await canAccessCompany(admin, userId, effectiveCompanyIdEarly);
+  if (!sessionCompanyAccess) {
+    return registerFailure(
+      'company_not_found_or_forbidden',
+      'Company access denied',
+      403,
+      { ...ctx, companyId: effectiveCompanyIdEarly },
+      'register_company',
+    );
+  }
+
+  const pathUserMatchesSession = parsedEarly.userId === userId.trim().toLowerCase();
+  let allowWorkspaceCompanyPath = pathUserMatchesSession;
+
+  if (!pathUserMatchesSession) {
+    const pathUserCompanyAccess = await canAccessCompany(admin, parsedEarly.userId, effectiveCompanyIdEarly);
+    const companyInPathMatches =
+      !parsedEarly.companyId ||
+      parsedEarly.companyId === effectiveCompanyIdEarly.trim().toLowerCase();
+
+    allowWorkspaceCompanyPath =
+      pathUserCompanyAccess && sessionCompanyAccess && companyInPathMatches;
+
+    if (!allowWorkspaceCompanyPath) {
+      const failure: StoragePathValidationFailure = {
+        ok: false,
+        code: 'storage_path_forbidden',
+        reason: 'user_id_mismatch',
+        expected: { userId, companyId, documentId },
+        received: {
+          storagePath,
+          normalizedPath: normalizedStoragePath,
+          parsed: parsedEarly,
+        },
+      };
+      const debug = buildStoragePathForbiddenDiagnostic({
+        trigger: 'register_path_ownership',
+        reason: 'user_id_mismatch',
+        ...pathDiagBase,
+        extra: {
+          pathUserId: parsedEarly.userId,
+          sessionUserId: userId,
+          pathUserCompanyAccess,
+          sessionCompanyAccess,
+          companyInPathMatches,
+          effectiveCompanyId: effectiveCompanyIdEarly,
+        },
+      });
+      logStoragePathValidationFailureDetailed(failure, debug);
+      return registerFailure('storage_path_forbidden', undefined, 403, ctx, 'register_path', debug);
+    }
+
+    logUploadStep('register_path', 'warn', 'workspace_storage_path_user_prefix_relaxed', ctx, {
+      pathUserId: parsedEarly.userId,
+      sessionUserId: userId,
+      effectiveCompanyId: effectiveCompanyIdEarly,
+      userRole: roleContext.role,
+    });
   }
 
   const pathValidation = validateAtlasDocumentStoragePath(normalizedStoragePath, {
     userId,
     companyId,
     documentId,
+    allowWorkspaceCompanyPath,
   });
   if (!pathValidation.ok) {
-    logStoragePathValidationFailure(pathValidation);
+    const debug = buildStoragePathForbiddenDiagnostic({
+      trigger: 'register_path_validate',
+      reason: pathValidation.reason,
+      ...pathDiagBase,
+      extra: {
+        expected: pathValidation.expected,
+        received: pathValidation.received,
+      },
+    });
+    logStoragePathValidationFailureDetailed(pathValidation, debug);
     return registerFailure(
       'storage_path_forbidden',
       `Path validation failed (${pathValidation.reason})`,
       403,
       ctx,
       'register_path',
+      debug,
     );
   }
 
   const effectiveCompanyId = pathValidation.parsed.companyId ?? companyId;
+  const pathUserId = pathValidation.parsed.userId;
+  roleContext = await resolveCompanyRole(admin, userId, effectiveCompanyId);
+  const pathDiagEffective = { ...pathDiagBase, companyId: effectiveCompanyId, roleContext };
+
   if (companyId && companyId !== effectiveCompanyId) {
     logUploadStep('register_path', 'warn', 'company_id_body_path_mismatch_using_path', ctx, {
       bodyCompanyId: companyId,
@@ -137,31 +259,21 @@ export async function registerStoredDocument(
     return registerFailure('file_too_large', documentUploadLimitExceededMessage(mimeType), 413, ctx, 'register_size');
   }
 
-  let admin: SupabaseClient;
-  try {
-    admin = getSupabaseServiceRoleClient();
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : 'service_role_missing';
-    return registerFailure('server_misconfigured', msg, 503, ctx, 'register_admin');
-  }
-
-  const allowed = await canAccessCompany(admin, userId, effectiveCompanyId);
-  if (!allowed) {
-    return registerFailure(
-      'company_not_found_or_forbidden',
-      'Company access denied',
-      403,
-      { ...ctx, companyId: effectiveCompanyId },
-      'register_company',
-    );
-  }
-
-  await ensureCompanyStorageNamespace(admin, userId, effectiveCompanyId);
+  await ensureCompanyStorageNamespace(admin, pathUserId, effectiveCompanyId);
 
   const verify = await verifyStorageObjectExists(admin, normalizedStoragePath);
   if (!verify.ok) {
-    const httpStatus = verify.code === 'storage_object_missing' ? 400 : 502;
-    return registerFailure(verify.code, verify.message, httpStatus, ctx, 'register_storage_verify');
+    const httpStatus =
+      verify.code === 'storage_object_missing' ? 400 : verify.code === 'storage_path_forbidden' ? 403 : 502;
+    const debug =
+      verify.code === 'storage_path_forbidden'
+        ? buildStoragePathForbiddenDiagnostic({
+            trigger: 'register_storage_verify_parse',
+            reason: verify.message,
+            ...pathDiagEffective,
+          })
+        : undefined;
+    return registerFailure(verify.code, verify.message, httpStatus, ctx, 'register_storage_verify', debug);
   }
 
   const safeName = sanitizeDocumentFilename(filename);
@@ -262,7 +374,7 @@ export async function registerStoredDocument(
       const bytes = Buffer.from(await fileBlob.arrayBuffer());
       const prepared = await prepareUploadedImageForOcr(bytes, mimeType);
       if (prepared.compressed) {
-        const workingPath = buildAtlasDocumentWorkingStoragePath(userId, effectiveCompanyId, documentId);
+        const workingPath = buildAtlasDocumentWorkingStoragePath(pathUserId, effectiveCompanyId, documentId);
         const { error: workingErr } = await admin.storage
           .from(ATLAS_DOCUMENTS_BUCKET)
           .upload(workingPath, prepared.ocrBuffer, {
