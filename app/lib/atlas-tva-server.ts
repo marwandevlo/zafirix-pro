@@ -8,6 +8,7 @@ import type {
   AtlasTvaPeriodType,
 } from '@/app/types/atlas-tva';
 import { asRecord } from '@/app/lib/atlas-json';
+import { filterPostgresUuids } from '@/app/lib/atlas-id-validation';
 import { resolveDgiIce, resolveDgiIdentifiantFiscal } from '@/app/lib/atlas-tva-dgi';
 
 const MONTH_NAMES = [
@@ -818,14 +819,15 @@ export async function deleteTvaPeriodRecords(
   companyId: string,
   periodIds: string[],
 ): Promise<number> {
-  if (periodIds.length === 0) return 0;
+  const { uuidIds } = filterPostgresUuids(periodIds);
+  if (uuidIds.length === 0) return 0;
 
   const { data, error } = await db
     .from('atlas_tva_periods')
     .delete()
     .eq('company_id', companyId)
     .eq('user_id', userId)
-    .in('id', periodIds)
+    .in('id', uuidIds)
     .select('id');
 
   if (error) throw new Error(error.message);

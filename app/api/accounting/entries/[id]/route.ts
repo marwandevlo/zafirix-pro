@@ -3,6 +3,7 @@
  */
 import { NextRequest, NextResponse } from 'next/server';
 import { documentUploadSessionUserId } from '@/app/lib/atlas-document-upload-auth';
+import { isPostgresUuid } from '@/app/lib/atlas-id-validation';
 import { getSupabaseServiceRoleClient } from '@/app/lib/supabase-admin';
 import { isValidPcgeAccount } from '@/app/lib/atlas-morocco-compliance';
 import type { AtlasAccountingEntry } from '@/app/types/atlas-accounting';
@@ -17,6 +18,9 @@ export async function DELETE(_request: NextRequest, { params }: RouteParams) {
   if (!userId) return NextResponse.json({ error: 'auth_required' }, { status: 401 });
 
   const { id } = await params;
+  if (!isPostgresUuid(id)) {
+    return NextResponse.json({ error: 'invalid_id' }, { status: 400 });
+  }
   const admin = getSupabaseServiceRoleClient();
 
   const { error } = await admin
@@ -34,6 +38,9 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
   if (!userId) return NextResponse.json({ error: 'auth_required' }, { status: 401 });
 
   const { id } = await params;
+  if (!isPostgresUuid(id)) {
+    return NextResponse.json({ error: 'invalid_id' }, { status: 400 });
+  }
   const body = (await request.json().catch(() => ({}))) as Record<string, unknown>;
   const admin = getSupabaseServiceRoleClient();
 

@@ -29,6 +29,7 @@ import {
   runOptimisticBulkDelete,
 } from '@/app/components/data-grid/global-table-id';
 import { postBulkDelete } from '@/app/lib/atlas-bulk-delete';
+import { partitionAccountingEntryDeleteIds } from '@/app/lib/atlas-id-validation';
 import { exportTable } from '@/app/lib/atlas-table-export';
 import { openWhatsAppShare } from '@/app/lib/atlas-quick-share';
 
@@ -50,6 +51,7 @@ const ECRITURE_EXPORT_COLUMNS: ExportColumn[] = [
   { key: 'validationStatus', label: 'Statut' },
 ];
 import {
+  deleteAtlasAccountingEntryBySelectionId,
   listAtlasAccountingEntries,
   upsertAtlasAccountingEntry,
 } from '@/app/lib/atlas-accounting-repository';
@@ -747,7 +749,24 @@ export default function ComptabilitePage() {
                           setEcritures((prev) => prev.filter((e) => !ids.includes(e.rowId ?? String(e.id))));
                         },
                         onPersist: async (deleteIds) => {
-                          await postBulkDelete('/api/accounting/entries/bulk-delete', deleteIds);
+                          const { uuidIds, localIds, skippedIds } = partitionAccountingEntryDeleteIds(deleteIds);
+
+                          if (uuidIds.length > 0 && isAtlasSupabaseDataEnabled()) {
+                            await postBulkDelete('/api/accounting/entries/bulk-delete', uuidIds);
+                          }
+
+                          for (const localId of localIds) {
+                            const result = await deleteAtlasAccountingEntryBySelectionId(localId);
+                            if (!result.ok) throw new Error(result.error);
+                          }
+
+                          if (uuidIds.length === 0 && localIds.length === 0) {
+                            throw new Error(
+                              skippedIds.length > 0
+                                ? 'Aucun identifiant valide à supprimer.'
+                                : 'ids_required',
+                            );
+                          }
                         },
                         onRollback: () => {
                           void reloadAccountingData();

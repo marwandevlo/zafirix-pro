@@ -4,16 +4,13 @@
  */
 import { NextRequest, NextResponse } from 'next/server';
 import { documentUploadSessionUserId } from '@/app/lib/atlas-document-upload-auth';
+import { bulkDeleteStatusForError, prepareBulkDeleteIds } from '@/app/lib/atlas-bulk-delete-server';
 import { getSupabaseServiceRoleClient } from '@/app/lib/supabase-admin';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
 const BATCH_SIZE = 50;
-
-function deleteStatusForError(message: string): number {
-  return /foreign key|23503|violates foreign key/i.test(message) ? 409 : 500;
-}
 
 export async function POST(request: NextRequest) {
   const userId = await documentUploadSessionUserId(request);
@@ -26,19 +23,21 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: 'invalid_body' }, { status: 400 });
   }
 
-  const ids = Array.isArray(body.ids)
-    ? [...new Set(body.ids.map((id) => String(id).trim()).filter(Boolean))]
-    : [];
+  const prepared = prepareBulkDeleteIds(body.ids);
+  if (!prepared.ok) {
+    return NextResponse.json({ error: prepared.error }, { status: prepared.status });
+  }
 
-  if (ids.length === 0) {
-    return NextResponse.json({ error: 'ids_required' }, { status: 400 });
+  const { uuidIds, skipped, skippedIds } = prepared;
+  if (uuidIds.length === 0) {
+    return NextResponse.json({ ok: true, deleted: 0, skipped, skippedIds });
   }
 
   const admin = getSupabaseServiceRoleClient();
   let deleted = 0;
 
-  for (let i = 0; i < ids.length; i += BATCH_SIZE) {
-    const batch = ids.slice(i, i + BATCH_SIZE);
+  for (let i = 0; i < uuidIds.length; i += BATCH_SIZE) {
+    const batch = uuidIds.slice(i, i + BATCH_SIZE);
     const { error, count } = await admin
       .from('atlas_supplier_invoices')
       .delete({ count: 'exact' })
@@ -46,11 +45,11 @@ export async function POST(request: NextRequest) {
       .eq('user_id', userId);
 
     if (error) {
-      return NextResponse.json({ error: error.message }, { status: deleteStatusForError(error.message) });
+      return NextResponse.json({ error: error.message }, { status: bulkDeleteStatusForError(error.message) });
     }
 
     deleted += count ?? batch.length;
   }
 
-  return NextResponse.json({ ok: true, deleted });
+  return NextResponse.json({ ok: true, deleted, skipped, skippedIds });
 }

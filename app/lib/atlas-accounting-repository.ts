@@ -1,4 +1,5 @@
 import type { AtlasAccountingEntry } from '@/app/types/atlas-accounting';
+import { isPostgresUuid } from '@/app/lib/atlas-id-validation';
 import { supabase } from '@/app/lib/supabase';
 import { ATLAS_STORAGE_KEYS } from '@/app/lib/atlas-storage-keys';
 import { isAtlasSupabaseDataEnabled } from '@/app/lib/atlas-data-source';
@@ -123,9 +124,27 @@ export async function updateAtlasAccountingEntryByRowId(
 export async function deleteAtlasAccountingEntryByRowId(
   rowId: string,
 ): Promise<{ ok: true } | { ok: false; error: string }> {
+  return deleteAtlasAccountingEntryBySelectionId(rowId);
+}
+
+/** Delete by grid selection id (UUID rowId or local numeric id). */
+export async function deleteAtlasAccountingEntryBySelectionId(
+  selectionId: string,
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  const id = selectionId.trim();
+  if (!id) return { ok: false, error: 'invalid_id' };
+
   if (!isAtlasSupabaseDataEnabled()) {
-    writeAccountingToLocalStorage(readAccountingFromLocalStorage().filter((e) => e.rowId !== rowId));
+    writeAccountingToLocalStorage(
+      readAccountingFromLocalStorage().filter(
+        (e) => e.rowId !== id && String(e.id) !== id,
+      ),
+    );
     return { ok: true };
+  }
+
+  if (!isPostgresUuid(id)) {
+    return { ok: false, error: 'invalid_id' };
   }
 
   const auth = await requireSupabaseUser();
@@ -134,7 +153,7 @@ export async function deleteAtlasAccountingEntryByRowId(
   const { error } = await supabase
     .from('atlas_accounting_entries')
     .delete()
-    .eq('id', rowId)
+    .eq('id', id)
     .eq('user_id', auth.userId);
 
   if (error) return { ok: false, error: error.message };

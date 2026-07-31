@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { atlasDataBackend } from '@/app/lib/atlas-data-source';
 import { requireAgentsRouteDb } from '@/app/lib/atlas-agents-route-db';
+import { filterPostgresUuids } from '@/app/lib/atlas-id-validation';
 import { listTvaHistory, deleteTvaPeriodRecords } from '@/app/lib/atlas-tva-server';
 
 export const dynamic = 'force-dynamic';
@@ -55,14 +56,26 @@ export async function DELETE(request: NextRequest) {
   }
 
   const companyId = body.companyId?.trim();
-  const ids = Array.isArray(body.ids) ? body.ids.map((id) => String(id).trim()).filter(Boolean) : [];
-  if (!companyId || ids.length === 0) {
+  const rawIds = Array.isArray(body.ids) ? body.ids.map((id) => String(id).trim()).filter(Boolean) : [];
+  const { uuidIds, skippedIds } = filterPostgresUuids(rawIds);
+
+  if (!companyId || (uuidIds.length === 0 && skippedIds.length === 0)) {
     return NextResponse.json({ error: 'company_and_ids_required' }, { status: 400, headers: NO_STORE_HEADERS });
   }
 
+  if (uuidIds.length === 0) {
+    return NextResponse.json(
+      { ok: true, deleted: 0, skipped: skippedIds.length, skippedIds },
+      { headers: NO_STORE_HEADERS },
+    );
+  }
+
   try {
-    const deleted = await deleteTvaPeriodRecords(ctx.db, ctx.userId, companyId, ids);
-    return NextResponse.json({ ok: true, deleted }, { headers: NO_STORE_HEADERS });
+    const deleted = await deleteTvaPeriodRecords(ctx.db, ctx.userId, companyId, uuidIds);
+    return NextResponse.json(
+      { ok: true, deleted, skipped: skippedIds.length, skippedIds },
+      { headers: NO_STORE_HEADERS },
+    );
   } catch (err) {
     const message = err instanceof Error ? err.message : 'delete_failed';
     return NextResponse.json({ error: message }, { status: 500, headers: NO_STORE_HEADERS });

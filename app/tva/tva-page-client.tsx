@@ -30,6 +30,7 @@ import {
   runOptimisticBulkDelete,
 } from '@/app/components/data-grid/global-table-id';
 import { postBulkDelete } from '@/app/lib/atlas-bulk-delete';
+import { resolveTvaLineBackendId } from '@/app/lib/atlas-id-validation';
 import { exportTable } from '@/app/lib/atlas-table-export';
 import { openWhatsAppShare } from '@/app/lib/atlas-quick-share';
 import type { AtlasTvaLineItem } from '@/app/types/atlas-tva';
@@ -127,10 +128,14 @@ const TVA_HISTORY_EXPORT_COLUMNS: ExportColumn[] = [
 
 async function deleteTvaSourceLine(line: AtlasTvaPeriodRecord['lines'][number]): Promise<boolean> {
   if (line.source === 'tva_suggestion') return false;
+
+  const backendId = resolveTvaLineBackendId(line);
+  if (!backendId) return false;
+
   const path =
-    line.source === 'supplier_invoice' ? `/api/supplier-invoices/${line.id}` :
-    line.source === 'invoice' ? `/api/invoices/${line.id}` :
-    line.source === 'accounting_entry' ? `/api/accounting/entries/${line.id}` :
+    line.source === 'supplier_invoice' ? `/api/supplier-invoices/${backendId}` :
+    line.source === 'invoice' ? `/api/invoices/${backendId}` :
+    line.source === 'accounting_entry' ? `/api/accounting/entries/${backendId}` :
     null;
   if (!path) return false;
   const res = await fetch(path, { method: 'DELETE', credentials: 'include' });
@@ -147,14 +152,18 @@ async function bulkDeleteTvaSourceLines(
 
   for (const id of deleteIds) {
     const line = lineById.get(id);
-    if (!line || line.source === 'tva_suggestion') continue;
-    if (line.source === 'supplier_invoice') supplierIds.push(line.id);
-    else if (line.source === 'invoice') invoiceIds.push(line.id);
-    else if (line.source === 'accounting_entry') entryIds.push(line.id);
+    if (!line) continue;
+
+    const backendId = resolveTvaLineBackendId(line);
+    if (!backendId) continue;
+
+    if (line.source === 'supplier_invoice') supplierIds.push(backendId);
+    else if (line.source === 'invoice') invoiceIds.push(backendId);
+    else if (line.source === 'accounting_entry') entryIds.push(backendId);
   }
 
   if (supplierIds.length === 0 && invoiceIds.length === 0 && entryIds.length === 0) {
-    throw new Error('Aucune ligne supprimable (suggestions TVA non modifiables).');
+    throw new Error('Aucune ligne supprimable (identifiants invalides ou suggestions TVA).');
   }
 
   if (supplierIds.length) await postBulkDelete('/api/supplier-invoices/bulk-delete', supplierIds);

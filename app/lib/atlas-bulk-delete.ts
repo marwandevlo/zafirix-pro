@@ -1,4 +1,5 @@
 import { showAtlasErrorToast, showAtlasSuccessToast, showAtlasWarningToast } from '@/app/lib/atlas-toast';
+import { isSyntheticTableRowId } from '@/app/lib/atlas-id-validation';
 
 const DEFAULT_BATCH_SIZE = 20;
 
@@ -26,6 +27,9 @@ export function formatBulkDeleteError(err: unknown): string {
   if (/company_required|company_and_ids_required/i.test(msg)) {
     return 'Sélectionnez une société active avant de supprimer.';
   }
+  if (/invalid input syntax for type uuid|22P02/i.test(msg)) {
+    return 'Identifiants invalides : seuls les enregistrements avec un UUID valide peuvent être supprimés en base.';
+  }
   if (/ids_required|invalid_body/i.test(msg)) {
     return 'Aucun identifiant valide à supprimer.';
   }
@@ -35,7 +39,9 @@ export function formatBulkDeleteError(err: unknown): string {
 
 /** Drop synthetic row ids produced when source rows lack stable ids. */
 export function filterPersistableIds(ids: string[]): string[] {
-  return ids.map((id) => String(id).trim()).filter((id) => id.length > 0 && !id.startsWith('__row-'));
+  return ids
+    .map((id) => String(id).trim())
+    .filter((id) => !isSyntheticTableRowId(id));
 }
 
 export async function runInBatches<T>(
@@ -99,7 +105,7 @@ export async function runOptimisticBulkDelete(options: OptimisticBulkDeleteOptio
   }
 
   if (skipped > 0) {
-    showAtlasWarningToast(`${skipped} ligne(s) ignorée(s) — identifiant manquant.`);
+    showAtlasWarningToast(`${skipped} ligne(s) ignorée(s) — identifiant synthétique ou invalide.`);
   }
 
   const message =
