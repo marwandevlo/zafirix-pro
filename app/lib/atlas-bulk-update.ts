@@ -33,12 +33,14 @@ export function formatBulkUpdateError(err: unknown): string {
 export async function postBulkSupplierInvoiceUpdate(
   ids: string[],
   fields: { supplierIce: string; supplierIf: string },
+  companyId: string,
 ): Promise<number> {
   const res = await fetch('/api/supplier-invoices/bulk-update', {
     method: 'POST',
     credentials: 'include',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
+      companyId,
       ids,
       supplierIce: fields.supplierIce,
       supplierIf: fields.supplierIf,
@@ -60,6 +62,7 @@ export async function postBulkSupplierInvoiceUpdate(
 }
 
 export async function postTvaSupplierIdentityUpdate(options: {
+  companyId: string;
   supplierInvoiceIds: string[];
   tvaSuggestionIds: string[];
   supplierIce: string;
@@ -69,6 +72,7 @@ export async function postTvaSupplierIdentityUpdate(options: {
     method: 'POST',
     credentials: 'include',
     headers: { 'Content-Type': 'application/json' },
+    cache: 'no-store',
     body: JSON.stringify(options),
   });
 
@@ -91,6 +95,7 @@ export async function postTvaSupplierIdentityUpdate(options: {
 }
 
 export async function runBulkTvaLineIdentityUpdate(options: {
+  companyId: string;
   supplierInvoiceIds: string[];
   tvaSuggestionIds: string[];
   supplierIce: string;
@@ -121,6 +126,7 @@ export async function runBulkTvaLineIdentityUpdate(options: {
 }
 
 export async function runBulkSupplierInvoiceIdentityUpdate(options: {
+  companyId: string;
   ids: string[];
   supplierIce: string;
   supplierIf: string;
@@ -130,7 +136,7 @@ export async function runBulkSupplierInvoiceIdentityUpdate(options: {
     const updated = await postBulkSupplierInvoiceUpdate(options.ids, {
       supplierIce: options.supplierIce,
       supplierIf: options.supplierIf,
-    });
+    }, options.companyId);
     showAtlasSuccessToast(`${updated} facture(s) fournisseur mise(s) à jour (ICE / IF).`);
     options.onSuccess?.();
     return true;

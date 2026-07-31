@@ -3,6 +3,7 @@
  * Updates suggestion metadata only. ICE/IF route to atlas_supplier_invoices.
  */
 import { NextRequest, NextResponse } from 'next/server';
+import { requireApiCompanyAccess } from '@/app/lib/atlas-api-company-guard';
 import { documentUploadSessionUserId } from '@/app/lib/atlas-document-upload-auth';
 import { isValidMoroccoVatRate } from '@/app/lib/atlas-morocco-compliance';
 import {
@@ -10,16 +11,25 @@ import {
   resolveSupplierInvoiceIdForTvaLine,
   updateSupplierInvoiceIdentity,
 } from '@/app/lib/atlas-tva-supplier-identity-update';
+import { revalidateTvaSurfaces } from '@/app/lib/revalidate-tva-surfaces';
 import { getSupabaseServiceRoleClient } from '@/app/lib/supabase-admin';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
+export const revalidate = 0;
+export const fetchCache = 'force-no-store';
+
+const NO_STORE_HEADERS = {
+  'Cache-Control': 'no-store, max-age=0',
+};
 
 type RouteParams = { params: Promise<{ id: string }> };
 
 export async function PATCH(request: NextRequest, { params }: RouteParams) {
   const userId = await documentUploadSessionUserId(request);
-  if (!userId) return NextResponse.json({ error: 'auth_required' }, { status: 401 });
+  if (!userId) {
+    return NextResponse.json({ error: 'auth_required' }, { status: 401, headers: NO_STORE_HEADERS });
+  }
 
   const { id } = await params;
   const body = (await request.json().catch(() => ({}))) as Record<string, unknown>;
@@ -27,13 +37,27 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
 
   const { data: existing, error: loadError } = await admin
     .from('zafirix_tva_suggestions')
-    .select('id, source_invoice_id, source_document_id')
+    .select('id, company_id, source_invoice_id, source_document_id')
     .eq('id', id)
-    .eq('user_id', userId)
     .maybeSingle();
 
-  if (loadError) return NextResponse.json({ error: loadError.message }, { status: 500 });
-  if (!existing) return NextResponse.json({ error: 'not_found' }, { status: 404 });
+  if (loadError) {
+    return NextResponse.json({ error: loadError.message }, { status: 500, headers: NO_STORE_HEADERS });
+  }
+  if (!existing) {
+    return NextResponse.json({ error: 'not_found' }, { status: 404, headers: NO_STORE_HEADERS });
+  }
+
+  const companyIdFromBody = body.companyId != null ? String(body.companyId).trim() : '';
+  const companyId = companyIdFromBody || String((existing as { company_id?: string }).company_id ?? '');
+  const access = await requireApiCompanyAccess(admin, userId, companyId);
+  if (!access.ok) {
+    return NextResponse.json({ error: access.error }, { status: access.error === 'company_id_required' ? 400 : 403, headers: NO_STORE_HEADERS });
+  }
+
+  if (String((existing as { company_id?: string }).company_id) !== access.companyId) {
+    return NextResponse.json({ error: 'not_found' }, { status: 404, headers: NO_STORE_HEADERS });
+  }
 
   const patch: Record<string, unknown> = { updated_at: new Date().toISOString() };
 
@@ -50,12 +74,16 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
     .from('zafirix_tva_suggestions')
     .update(patch)
     .eq('id', id)
-    .eq('user_id', userId)
+    .eq('company_id', access.companyId)
     .select('id, supplier_name, invoice_number, invoice_date, base_ht, amount, rate, source_invoice_id, source_document_id')
     .maybeSingle();
 
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-  if (!data) return NextResponse.json({ error: 'not_found' }, { status: 404 });
+  if (error) {
+    return NextResponse.json({ error: error.message }, { status: 500, headers: NO_STORE_HEADERS });
+  }
+  if (!data) {
+    return NextResponse.json({ error: 'not_found' }, { status: 404, headers: NO_STORE_HEADERS });
+  }
 
   if (body.supplierIce != null || body.supplierIf != null) {
     const normalized = normalizeSupplierIceIf({
@@ -65,11 +93,11 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
     if ('error' in normalized) {
       return NextResponse.json(
         { error: normalized.error, message: normalized.message },
-        { status: 400 },
+        { status: 400, headers: NO_STORE_HEADERS },
       );
     }
 
-    const supplierInvoiceId = await resolveSupplierInvoiceIdForTvaLine(admin, userId, {
+    const supplierInvoiceId = await resolveSupplierInvoiceIdForTvaLine(admin, access.companyId, userId, {
       sourceInvoiceId: (existing as { source_invoice_id?: string | null }).source_invoice_id,
       sourceDocumentId: (existing as { source_document_id?: string | null }).source_document_id,
     });
@@ -80,7 +108,7 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
           error: 'supplier_invoice_not_linked',
           message: 'Aucune facture fournisseur liée — impossible d’enregistrer ICE/IF pour cette suggestion.',
         },
-        { status: 422 },
+        { status: 422, headers: NO_STORE_HEADERS },
       );
     }
 
@@ -94,9 +122,12 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
       );
     } catch (identityErr) {
       const message = identityErr instanceof Error ? identityErr.message : 'identity_update_failed';
-      return NextResponse.json({ error: message }, { status: 500 });
+      const status = message === 'company_not_found_or_forbidden' ? 403 : 500;
+      return NextResponse.json({ error: message }, { status, headers: NO_STORE_HEADERS });
     }
   }
 
-  return NextResponse.json({ ok: true, suggestion: data });
+  revalidateTvaSurfaces(access.companyId);
+
+  return NextResponse.json({ ok: true, suggestion: data }, { headers: NO_STORE_HEADERS });
 }

@@ -355,13 +355,19 @@ function resolveBulkEditableIdentityTargets(
   return { supplierInvoiceIds, tvaSuggestionIds, skipped };
 }
 
-async function updateTvaSourceLine(line: AtlasTvaPeriodRecord['lines'][number], values: Record<string, string>): Promise<boolean> {
+async function updateTvaSourceLine(
+  line: AtlasTvaPeriodRecord['lines'][number],
+  values: Record<string, string>,
+  companyId: string,
+): Promise<boolean> {
   if (line.source === 'supplier_invoice') {
     const res = await fetch(`/api/supplier-invoices/${line.id}`, {
       method: 'PATCH',
       credentials: 'include',
       headers: { 'Content-Type': 'application/json' },
+      cache: 'no-store',
       body: JSON.stringify({
+        companyId,
         invoiceNumber: values.reference,
         supplierName: values.counterparty,
         issueDate: values.issueDate,
@@ -389,7 +395,9 @@ async function updateTvaSourceLine(line: AtlasTvaPeriodRecord['lines'][number], 
       method: 'PATCH',
       credentials: 'include',
       headers: { 'Content-Type': 'application/json' },
+      cache: 'no-store',
       body: JSON.stringify({
+        companyId,
         reference: values.reference,
         counterparty: values.counterparty,
         issueDate: values.issueDate,
@@ -944,11 +952,11 @@ export default function TvaPageClient() {
           )}
 
           {!loading && current && tab === 'ventes' && (
-            <InvoiceTable title="Factures ventes (TVA collectée)" lines={salesLines} counterpartyLabel="Client" onRefresh={reload} />
+            <InvoiceTable title="Factures ventes (TVA collectée)" lines={salesLines} counterpartyLabel="Client" companyId={companyId} onRefresh={reload} />
           )}
 
           {!loading && current && tab === 'achats' && (
-            <InvoiceTable title="Factures achats (TVA déductible)" lines={purchaseLines} counterpartyLabel="Fournisseur" onRefresh={reload} />
+            <InvoiceTable title="Factures achats (TVA déductible)" lines={purchaseLines} counterpartyLabel="Fournisseur" companyId={companyId} onRefresh={reload} />
           )}
 
           {!loading && tab === 'audit' && (
@@ -976,11 +984,13 @@ function InvoiceTable({
   title,
   lines,
   counterpartyLabel,
+  companyId,
   onRefresh,
 }: {
   title: string;
   lines: AtlasTvaPeriodRecord['lines'];
   counterpartyLabel: string;
+  companyId: string | null;
   onRefresh?: (opts?: TvaReloadOptions) => Promise<void>;
 }) {
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
@@ -1129,7 +1139,11 @@ function InvoiceTable({
                   : []),
               ]}
               onEditSave={async (values) => {
-                const ok = await updateTvaSourceLine(f, values);
+                if (!companyId) {
+                  showAtlasErrorToast('Sélectionnez une entreprise pour enregistrer les modifications.');
+                  return false;
+                }
+                const ok = await updateTvaSourceLine(f, values, companyId);
                 if (ok) {
                   if (isSupplierTable && values.supplierIce && values.supplierIf) {
                     setIdentityPatches((prev) => {
@@ -1213,7 +1227,12 @@ function InvoiceTable({
   };
 
   const handleBulkEditSave = async (values: Record<string, string>): Promise<boolean> => {
+    if (!companyId) {
+      showAtlasErrorToast('Sélectionnez une entreprise pour enregistrer les modifications.');
+      return false;
+    }
     const ok = await runBulkTvaLineIdentityUpdate({
+      companyId,
       supplierInvoiceIds: bulkEditTargets.supplierInvoiceIds,
       tvaSuggestionIds: bulkEditTargets.tvaSuggestionIds,
       supplierIce: values.supplierIce,

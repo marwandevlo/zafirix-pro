@@ -274,7 +274,7 @@ type TvaSuggestionRow = {
   updated_at?: string | null;
 };
 
-/** Match active company OR legacy rows; merge with all user rows when userId is known. */
+/** All rows for the company; legacy null-company rows scoped to userId when provided. */
 async function fetchCompanyScopedRows<T>(
   db: SupabaseClient,
   table: string,
@@ -282,34 +282,32 @@ async function fetchCompanyScopedRows<T>(
   companyId: string,
   userId?: string,
 ): Promise<T[]> {
-  const runQuery = async (scope: 'company_or_null' | 'user_only'): Promise<T[]> => {
-    let query = db.from(table).select(select);
-    if (userId) query = query.eq('user_id', userId);
-    if (scope === 'company_or_null') {
-      query = query.or(`company_id.eq.${companyId},company_id.is.null`);
-    }
-    const { data, error } = await query;
+  const { data: companyRows, error: companyError } = await db
+    .from(table)
+    .select(select)
+    .eq('company_id', companyId);
+  if (companyError) throw new Error(`${table}: ${companyError.message}`);
+
+  let legacyRows: T[] = [];
+  if (userId) {
+    const { data, error } = await db
+      .from(table)
+      .select(select)
+      .is('company_id', null)
+      .eq('user_id', userId);
     if (error) throw new Error(`${table}: ${error.message}`);
-    return (data ?? []) as T[];
-  };
+    legacyRows = (data ?? []) as T[];
+  }
 
-  const scoped = await runQuery('company_or_null');
-  if (!userId) return scoped;
-
-  const userWide = await runQuery('user_only');
   const seen = new Set<string>();
   const merged: T[] = [];
-
-  const pushRow = (row: T, index: number) => {
+  for (const row of [...(companyRows ?? []), ...legacyRows] as T[]) {
     const id = (row as { id?: string }).id;
-    const key = id ? String(id) : `${table}:${index}`;
-    if (seen.has(key)) return;
+    const key = id ? String(id) : `${table}:${merged.length}`;
+    if (seen.has(key)) continue;
     seen.add(key);
     merged.push(row);
-  };
-
-  scoped.forEach((row, index) => pushRow(row, index));
-  userWide.forEach((row, index) => pushRow(row, scoped.length + index));
+  }
   return merged;
 }
 
@@ -364,15 +362,12 @@ async function enrichSupplierIdentityIndexFromDocuments(
   userId: string | undefined,
   index: SupplierIdentityIndex,
 ): Promise<SupplierIdentityIndex> {
-  let query = db
+  const { data, error } = await db
     .from('atlas_documents')
     .select('extraction_json')
     .eq('company_id', companyId)
     .order('created_at', { ascending: false })
     .limit(500);
-  if (userId) query = query.eq('user_id', userId);
-
-  const { data, error } = await query;
   if (error) {
     console.warn('[TVA Server] document supplier index enrichment failed', error.message);
     return index;
@@ -1003,7 +998,6 @@ export async function listTvaHistory(
       .from('atlas_tva_periods')
       .select('*')
       .eq('company_id', companyId)
-      .eq('user_id', userId)
       .in('period_key', keys)
       .order('period_end', { ascending: false });
 
@@ -1038,7 +1032,6 @@ export async function listTvaHistory(
     .from('atlas_tva_periods')
     .select('*')
     .eq('company_id', companyId)
-    .eq('user_id', userId)
     .eq('period_type', periodType)
     .order('period_end', { ascending: false })
     .limit(limit);
@@ -1063,7 +1056,6 @@ export async function deleteTvaPeriodRecords(
     .from('atlas_tva_periods')
     .delete()
     .eq('company_id', companyId)
-    .eq('user_id', userId)
     .in('id', uuidIds)
     .select('id');
 
@@ -1086,7 +1078,6 @@ export async function markTvaPeriodDeclared(
     .from('atlas_tva_periods')
     .update({ status: 'declared', declared_at: now, updated_at: now })
     .eq('company_id', companyId)
-    .eq('user_id', userId)
     .eq('period_type', periodType)
     .eq('period_key', periodKey)
     .select('*')
