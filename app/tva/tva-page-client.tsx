@@ -20,6 +20,8 @@ import { ExportMenu } from '@/app/components/ExportMenu';
 import type { ExportColumn } from '@/app/components/ExportMenu';
 import { EntityAuditTable } from '@/app/components/history/EntityAuditTable';
 import { RowActions } from '@/app/components/actions';
+import { EditRecordModal } from '@/app/components/actions/EditRecordModal';
+import { runBulkSupplierInvoiceIdentityUpdate } from '@/app/lib/atlas-bulk-update';
 import { isValidIce, isValidIf } from '@/app/lib/atlas-morocco-compliance';
 import GlobalTable from '@/app/components/data-grid/GlobalTable';
 import type { GlobalTableColumn, GlobalTableRow } from '@/app/components/data-grid/GlobalTable';
@@ -255,6 +257,34 @@ async function bulkDeleteTvaSourceLines(
   if (notFound + notDeletable > 0) {
     showAtlasWarningToast(`${notFound + notDeletable} ligne(s) ignorée(s) (introuvable ou non supprimable).`);
   }
+}
+
+function resolveBulkSupplierInvoiceIds(
+  selectionIds: string[],
+  lineById: Map<string, AtlasTvaPeriodRecord['lines'][number]>,
+): { supplierIds: string[]; skipped: number } {
+  const supplierIds: string[] = [];
+  const seen = new Set<string>();
+  let skipped = 0;
+
+  for (const id of selectionIds) {
+    const line = resolveTvaLineFromSelection(id, lineById);
+    if (!line || line.source !== 'supplier_invoice') {
+      skipped += 1;
+      continue;
+    }
+
+    const backendId = resolveTvaLineBackendId(line);
+    if (!backendId || seen.has(backendId)) {
+      skipped += 1;
+      continue;
+    }
+
+    seen.add(backendId);
+    supplierIds.push(backendId);
+  }
+
+  return { supplierIds, skipped };
 }
 
 async function updateTvaSourceLine(line: AtlasTvaPeriodRecord['lines'][number], values: Record<string, string>): Promise<boolean> {
@@ -855,6 +885,9 @@ function InvoiceTable({
 }) {
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [hiddenIds, setHiddenIds] = useState<Set<string>>(() => new Set());
+  const [bulkEditOpen, setBulkEditOpen] = useState(false);
+  const [bulkEditIds, setBulkEditIds] = useState<string[]>([]);
+  const isSupplierTable = counterpartyLabel === 'Fournisseur';
 
   useEffect(() => {
     setHiddenIds(new Set());
@@ -1005,6 +1038,41 @@ function InvoiceTable({
     );
   };
 
+  const handleBulkModify = (ids: string[]) => {
+    if (!isSupplierTable) return;
+
+    const { supplierIds, skipped } = resolveBulkSupplierInvoiceIds(ids, lineById);
+    if (supplierIds.length === 0) {
+      showAtlasWarningToast(
+        skipped > 0
+          ? 'Seules les factures fournisseur peuvent être modifiées en masse (ICE / IF).'
+          : 'Aucune facture fournisseur sélectionnée.',
+      );
+      return;
+    }
+
+    if (skipped > 0) {
+      showAtlasWarningToast(`${skipped} ligne(s) ignorée(s) — seules les factures fournisseur sont modifiables.`);
+    }
+
+    setBulkEditIds(supplierIds);
+    setBulkEditOpen(true);
+  };
+
+  const handleBulkEditSave = async (values: Record<string, string>): Promise<boolean> => {
+    const ok = await runBulkSupplierInvoiceIdentityUpdate({
+      ids: bulkEditIds,
+      supplierIce: values.supplierIce,
+      supplierIf: values.supplierIf,
+      onSuccess: () => {
+        setSelectedIds([]);
+        onRefresh?.();
+      },
+    });
+    if (ok) setBulkEditIds([]);
+    return ok;
+  };
+
   const handleBulkDelete = (ids: string[]) => {
     void runOptimisticBulkDelete({
       ids,
@@ -1063,7 +1131,7 @@ function InvoiceTable({
             data={tableRows}
             selectedIds={selectedIds}
             onSelectionChange={setSelectedIds}
-            onModify={(ids) => window.alert(`Modification groupée de ${ids.length} ligne(s) — bientôt disponible.`)}
+            onModify={isSupplierTable ? handleBulkModify : undefined}
             onShare={handleBulkShare}
             onDownload={handleBulkDownload}
             onDelete={(ids) => void handleBulkDelete(ids)}
@@ -1071,6 +1139,36 @@ function InvoiceTable({
             clearSelectionOnDelete={false}
           />
         </div>
+      )}
+
+      {isSupplierTable && (
+        <EditRecordModal
+          open={bulkEditOpen}
+          title={`Modifier ICE / IF — ${bulkEditIds.length} facture(s) fournisseur`}
+          fields={[
+            {
+              key: 'supplierIce',
+              label: 'ICE fournisseur *',
+              value: '',
+              placeholder: '15 chiffres — appliqué à toutes les lignes sélectionnées',
+              required: true,
+              validate: (v) => (isValidIce(v) ? null : 'ICE obligatoire (15 chiffres)'),
+            },
+            {
+              key: 'supplierIf',
+              label: 'IF fournisseur *',
+              value: '',
+              placeholder: '7-8 chiffres — appliqué à toutes les lignes sélectionnées',
+              required: true,
+              validate: (v) => (isValidIf(v) ? null : 'IF obligatoire (7-8 chiffres)'),
+            },
+          ]}
+          onSave={handleBulkEditSave}
+          onClose={() => {
+            setBulkEditOpen(false);
+            setBulkEditIds([]);
+          }}
+        />
       )}
     </div>
   );
