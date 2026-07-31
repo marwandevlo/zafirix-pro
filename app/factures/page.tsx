@@ -1,12 +1,11 @@
 'use client';
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Plus, Trash2, Download, Send, ReceiptText, CheckCircle2, Wallet, AlertTriangle, Archive, History, Eye, Share2, Edit3, Truck } from 'lucide-react';
+import { Plus, Trash2, Download, Send, ReceiptText, CheckCircle2, Wallet, AlertTriangle, Archive, History, Truck } from 'lucide-react';
 import { EntityActionMenu, ConfirmDeleteDialog, EntityHistoryDrawer } from '@/app/components/actions';
 import type { ActionItem } from '@/app/components/actions';
-import { RowShareActionBar } from '@/app/components/share';
 import { invoiceShareMessage, createDocumentShareLink, createFeedbackShareLink, buildFeedbackShareMessage, openWhatsAppShare } from '@/app/lib/atlas-quick-share';
 import { copyTextToClipboard } from '@/app/lib/copy-to-clipboard';
-import { exportInvoiceFormat, INVOICE_EXPORT_FORMATS } from '@/app/lib/atlas-invoice-export';
+import { exportInvoiceFormat } from '@/app/lib/atlas-invoice-export';
 import type { ExportFormat } from '@/app/lib/atlas-export-engine';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { addDaysYmd, isOverdue, todayYmd } from '@/app/lib/atlas-dates';
@@ -32,13 +31,14 @@ import { TrialLimitNudgeModal } from '@/app/components/trial/TrialLimitNudgeModa
 import { AppSidebar } from '@/app/components/shell/AppSidebar';
 import { EmptyStateCta } from '@/app/components/ui/EmptyStateCta';
 import { trackOnboardingMilestoneOnce } from '@/app/lib/atlas-onboarding-milestones';
-import { SourceDocumentBadge } from '@/app/components/SourceDocumentBadge';
 import { ExportMenu } from '@/app/components/ExportMenu';
 import type { ExportColumn } from '@/app/components/ExportMenu';
+import GlobalTable from '@/app/components/data-grid/GlobalTable';
+import type { GlobalTableColumn } from '@/app/components/data-grid/GlobalTable';
+import { exportTable } from '@/app/lib/atlas-table-export';
 import { EntityAuditTable } from '@/app/components/history/EntityAuditTable';
 import { ModuleLoadErrorBanner } from '@/app/lib/use-enterprise-module-fetch';
 import { InvoiceShipmentPanel, type InvoiceShipmentTarget } from '@/app/components/logistics/InvoiceShipmentPanel';
-import { ShipmentStatusBadge } from '@/app/components/logistics/ShipmentStatusBadge';
 import type { AtlasDelivery } from '@/app/types/atlas-enterprise-modules';
 
 const FACTURE_EXPORT_COLUMNS: ExportColumn[] = [
@@ -102,6 +102,7 @@ export default function FacturesPage() {
   const [deliveriesByInvoice, setDeliveriesByInvoice] = useState<Record<string, AtlasDelivery>>({});
   const [shipmentModal, setShipmentModal] = useState<InvoiceShipmentTarget | null>(null);
   const [activeCompanyId, setActiveCompanyId] = useState<string | null>(null);
+  const [selectedInvoiceIds, setSelectedInvoiceIds] = useState<string[]>([]);
 
   const resetInvoiceUiState = useCallback(() => {
     setShowForm(false);
@@ -342,6 +343,11 @@ export default function FacturesPage() {
     if (filter === 'overdue') return rows.filter((r) => r.statut === 'en retard');
     return rows;
   }, [filter, rows]);
+
+  const globalTableRows = useMemo(
+    () => filteredRows.map((r) => ({ ...r, id: String(r.id) })),
+    [filteredRows],
+  );
 
   const copyInvoiceSecureLink = async (r: FactureRow) => {
     if (r.sourceDocumentId) {
@@ -594,6 +600,137 @@ export default function FacturesPage() {
       syncInvoiceUsageCount(Math.max(0, invoices.length - 1));
     }
   };
+
+  const findFactureRow = useCallback(
+    (id: string) => filteredRows.find((r) => String(r.id) === id),
+    [filteredRows],
+  );
+
+  const facturesTableColumns = useMemo((): GlobalTableColumn<(typeof globalTableRows)[number]>[] => [
+    { header: 'رقم الفاتورة / N°', accessor: 'numero' },
+    { header: 'العميل / Client', accessor: 'client' },
+    { header: 'Échéance', accessor: 'echeance' },
+    {
+      header: 'المبلغ / TTC',
+      accessor: 'ttc',
+      render: (row) => `${row.ttc.toLocaleString('fr-MA')} MAD`,
+    },
+    {
+      header: 'الحالة / Statut',
+      accessor: 'statut',
+      render: (row) => (
+        <span className={`px-2 py-1 rounded-full text-xs font-medium ${statutColor(row.statut)}`}>
+          {row.statut === 'en retard' ? 'En retard' : row.statut}
+        </span>
+      ),
+    },
+    {
+      header: 'Actions',
+      accessor: 'id',
+      className: 'text-left',
+      render: (row) => {
+        const f = findFactureRow(row.id);
+        if (!f) return null;
+        return (
+          <EntityActionMenu
+            entityLabel={`Facture ${f.numero} · ${f.client}`}
+            actions={[
+              {
+                id: 'download',
+                label: 'Télécharger PDF',
+                Icon: Download,
+                onClick: () => void downloadPdf(f),
+                dividerAfter: true,
+              },
+              {
+                id: 'send',
+                label: 'Envoyer par email',
+                Icon: Send,
+                onClick: () => void sendInvoiceEmail(f),
+              },
+              {
+                id: 'shipment',
+                label: deliveriesByInvoice[String(f.id)] ? 'Suivi livraison & COD' : 'Créer expédition COD',
+                Icon: Truck,
+                onClick: () => setShipmentModal({
+                  id: String(f.id),
+                  number: f.numero,
+                  clientName: f.client,
+                  totalTTC: f.ttc,
+                  reste: f.reste,
+                }),
+                hidden: !isAtlasSupabaseDataEnabled() || !activeCompanyId,
+                dividerAfter: true,
+              },
+              {
+                id: 'history',
+                label: 'Historique',
+                Icon: History,
+                onClick: () => setHistoryInvoiceId(String(f.id)),
+                hidden: !isAtlasSupabaseDataEnabled(),
+                dividerAfter: true,
+              },
+              {
+                id: 'archive',
+                label: 'Archiver',
+                Icon: Archive,
+                onClick: () => void archiveInvoice(f.id),
+                variant: 'warning',
+                hidden: !isAtlasSupabaseDataEnabled(),
+              },
+              {
+                id: 'delete',
+                label: 'Supprimer',
+                Icon: Trash2,
+                onClick: () => setConfirmDeleteId(f.id),
+                variant: 'danger',
+              },
+            ] satisfies ActionItem[]}
+          />
+        );
+      },
+    },
+  ], [activeCompanyId, deliveriesByInvoice, findFactureRow]);
+
+  const handleBulkModify = useCallback((ids: string[]) => {
+    if (ids.length === 1) {
+      const row = findFactureRow(ids[0]!);
+      if (row && row.reste > 0) {
+        setPaymentForm({ openFor: row.id, amount: String(Math.round(row.reste)), paidAt: todayYmd() });
+        return;
+      }
+    }
+    window.alert(`${ids.length} facture(s) — modification groupée bientôt disponible.`);
+  }, [findFactureRow]);
+
+  const handleBulkShare = useCallback((ids: string[]) => {
+    const selected = filteredRows.filter((r) => ids.includes(String(r.id)));
+    const text = selected
+      .map((r) => `- ${r.numero} · ${r.client}: ${Math.round(r.ttc).toLocaleString('fr-MA')} MAD (${r.statut})`)
+      .join('\n');
+    openWhatsAppShare(`Factures sélectionnées — Zafirix Pro:\n${text}`);
+  }, [filteredRows]);
+
+  const handleBulkDownload = useCallback(async (ids: string[]) => {
+    const selected = filteredRows.filter((r) => ids.includes(String(r.id)));
+    try {
+      await exportTable(
+        'xlsx',
+        selected as unknown as Record<string, unknown>[],
+        FACTURE_EXPORT_COLUMNS,
+        'factures-selection',
+        { title: 'Factures sélectionnées', selectedRows: selected.length },
+      );
+    } catch (err) {
+      window.alert(err instanceof Error ? err.message : 'Export impossible');
+    }
+  }, [filteredRows]);
+
+  const handleBulkDelete = useCallback((ids: string[]) => {
+    if (!window.confirm(`Supprimer ${ids.length} facture(s) ?`)) return;
+    for (const id of ids) removeInvoice(id as AtlasInvoice['id']);
+    setSelectedInvoiceIds([]);
+  }, [removeInvoice]);
 
   return (
     <div className="flex h-screen bg-gray-50">
@@ -868,6 +1005,7 @@ export default function FacturesPage() {
                   filename="factures"
                   title="Factures clients"
                   filters={{ statut: filter }}
+                  selectedIds={selectedInvoiceIds.length > 0 ? new Set(selectedInvoiceIds) : undefined}
                   size="xs"
                 />
                 <button onClick={() => setFilter('all')} className={`text-xs font-medium px-2.5 py-1 rounded-full border ${filter === 'all' ? 'bg-gray-900 text-white border-gray-900' : 'bg-white text-gray-600 border-gray-200 hover:bg-gray-50'}`}>
@@ -884,208 +1022,32 @@ export default function FacturesPage() {
                 </button>
               </div>
             </div>
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="text-left text-xs text-gray-400 border-b border-gray-100 bg-gray-50">
-                  <th className="px-4 py-3">Numéro</th>
-                  <th className="px-4 py-3">Client</th>
-                  <th className="px-4 py-3">Date émission</th>
-                  <th className="px-4 py-3">Délai</th>
-                  <th className="px-4 py-3">Échéance</th>
-                  <th className="px-4 py-3 text-right">Montant HT</th>
-                  <th className="px-4 py-3 text-right">TVA</th>
-                  <th className="px-4 py-3 text-right">TTC</th>
-                  <th className="px-4 py-3 text-right">Payé</th>
-                  <th className="px-4 py-3 text-right">Reste</th>
-                  <th className="px-4 py-3">Statut</th>
-                  <th className="px-4 py-3"></th>
-                </tr>
-              </thead>
-              <tbody>
-                {filteredRows.length === 0 ? (
-                  <tr>
-                    <td colSpan={12} className="px-4 py-8">
-                      <EmptyStateCta
-                        lang="fr"
-                        title="Aucune facture"
-                        description="Créez votre première facture client pour suivre encaissements et relances."
-                        primaryLabelFr="Ajouter maintenant"
-                        primaryLabelAr="ابدأ الآن"
-                        onPrimary={() => setShowForm(true)}
-                      />
-                    </td>
-                  </tr>
-                ) : (
-                filteredRows.map(f => (
-                  <tr key={f.id} className={`border-b border-gray-50 hover:bg-gray-50 ${f.statut === 'en retard' ? 'bg-red-50/30' : ''}`}>
-                    <td className="px-4 py-3 font-medium text-gray-700">
-                      <div className="flex items-center gap-2 flex-wrap">
-                        <span>{f.numero}</span>
-                        {f.statut === 'en retard' && (
-                          <span className="text-[10px] uppercase tracking-wide bg-red-100 text-red-700 border border-red-200 px-2 py-0.5 rounded-full font-semibold">
-                            Action requise
-                          </span>
-                        )}
-                        {f.sourceDocumentId && (
-                          <SourceDocumentBadge sourceDocumentId={f.sourceDocumentId} sourceDocumentType="sales_invoice" variant="compact" />
-                        )}
-                        <ShipmentStatusBadge delivery={deliveriesByInvoice[String(f.id)]} compact />
-                      </div>
-                    </td>
-                    <td className="px-4 py-3 text-gray-600">{f.client}</td>
-                    <td className="px-4 py-3 text-gray-500">{f.date}</td>
-                    <td className="px-4 py-3 text-gray-500">{f.delai}</td>
-                    <td className={`px-4 py-3 ${f.statut === 'en retard' ? 'text-red-700 font-medium' : 'text-gray-500'}`}>{f.echeance}</td>
-                    <td className="px-4 py-3 text-right text-gray-700">{f.montantHT.toLocaleString()} MAD</td>
-                    <td className="px-4 py-3 text-right text-blue-600">{f.tva.toLocaleString()} MAD</td>
-                    <td className="px-4 py-3 text-right font-medium">{f.ttc.toLocaleString()} MAD</td>
-                    <td className="px-4 py-3 text-right text-green-700">{Math.round(f.paye).toLocaleString()} MAD</td>
-                    <td className={`px-4 py-3 text-right font-medium ${f.reste > 0 ? 'text-amber-700' : 'text-gray-500'}`}>{Math.round(f.reste).toLocaleString()} MAD</td>
-                    <td className="px-4 py-3">
-                      <span className={`px-2 py-1 rounded-full text-xs font-medium ${statutColor(f.statut)}`}>
-                        {f.statut === 'en retard' ? 'En retard' : f.statut}
-                      </span>
-                    </td>
-                    <td className="px-4 py-3">
-                      <div className="flex items-center gap-1.5 justify-end flex-wrap min-w-0">
-                        <RowShareActionBar
-                        entityLabel={`Facture ${f.numero}`}
-                        whatsAppMessage={invoiceShareMessage(f.numero, f.client, f.ttc)}
-                        exportFormats={INVOICE_EXPORT_FORMATS}
-                        onExport={(fmt) => void exportInvoice(f, fmt)}
-                        onSendEmail={() => void sendInvoiceEmail(f)}
-                        onSendReminder={() => sendInvoiceNotificationReminder(f)}
-                        onSendFeedbackRequest={
-                          isAtlasSupabaseDataEnabled() && activeCompanyId && f.statut === 'payée'
-                            ? () => sendInvoiceFeedbackRequest(f)
-                            : undefined
-                        }
-                        onCopySecureLink={() => copyInvoiceSecureLink(f)}
-                        mailto={{
-                          subject: `Facture ${f.numero}`,
-                          body: `Bonjour,\n\nVeuillez trouver ci-joint la facture ${f.numero} — ${Math.round(f.ttc).toLocaleString('fr-MA')} MAD.\n\nCordialement.`,
-                        }}
-                      >
-                        {f.reste > 0 && (
-                          <button
-                            onClick={() => setPaymentForm({ openFor: f.id, amount: String(Math.round(f.reste)), paidAt: todayYmd() })}
-                            className="text-gray-300 hover:text-emerald-600 transition-colors text-xs font-medium"
-                          >
-                            + Paiement
-                          </button>
-                        )}
-                        {isAtlasSupabaseDataEnabled() && activeCompanyId && (
-                          <button
-                            type="button"
-                            onClick={() => setShipmentModal({
-                              id: String(f.id),
-                              number: f.numero,
-                              clientName: f.client,
-                              totalTTC: f.ttc,
-                              reste: f.reste,
-                            })}
-                            className="text-gray-300 hover:text-blue-600 transition-colors text-xs font-medium inline-flex items-center gap-0.5"
-                            title="Livraison & COD"
-                          >
-                            <Truck size={12} /> Livraison
-                          </button>
-                        )}
-                        {f.statut === 'en retard' && (
-                          <button
-                            onClick={() => sendReminder(f)}
-                            className="text-gray-300 hover:text-red-600 transition-colors text-xs font-medium"
-                          >
-                            Relancer
-                          </button>
-                        )}
-                      </RowShareActionBar>
-                        <EntityActionMenu
-                          entityLabel={`Facture ${f.numero} · ${f.client}`}
-                          actions={[
-                            {
-                              id: 'view',
-                              label: 'Consulter',
-                              Icon: Eye,
-                              onClick: () => {},
-                              disabled: true,
-                              disabledReason: 'Aperçu bientôt disponible',
-                            },
-                            {
-                              id: 'edit',
-                              label: 'Modifier',
-                              Icon: Edit3,
-                              onClick: () => {},
-                              disabled: true,
-                              disabledReason: 'Modification bientôt disponible',
-                            },
-                            {
-                              id: 'download',
-                              label: 'Télécharger PDF',
-                              Icon: Download,
-                              onClick: () => downloadPdf(f),
-                              dividerAfter: true,
-                            },
-                            {
-                              id: 'send',
-                              label: 'Envoyer par email',
-                              Icon: Send,
-                              onClick: () => void sendInvoiceEmail(f),
-                            },
-                            {
-                              id: 'shipment',
-                              label: deliveriesByInvoice[String(f.id)] ? 'Suivi livraison & COD' : 'Créer expédition COD',
-                              Icon: Truck,
-                              onClick: () => setShipmentModal({
-                                id: String(f.id),
-                                number: f.numero,
-                                clientName: f.client,
-                                totalTTC: f.ttc,
-                                reste: f.reste,
-                              }),
-                              hidden: !isAtlasSupabaseDataEnabled() || !activeCompanyId,
-                              dividerAfter: true,
-                            },
-                            {
-                              id: 'share',
-                              label: 'Partager',
-                              Icon: Share2,
-                              onClick: () => {},
-                              disabled: true,
-                              disabledReason: 'Partage bientôt disponible',
-                              dividerAfter: true,
-                            },
-                            {
-                              id: 'history',
-                              label: 'Historique',
-                              Icon: History,
-                              onClick: () => setHistoryInvoiceId(String(f.id)),
-                              hidden: !isAtlasSupabaseDataEnabled(),
-                              dividerAfter: true,
-                            },
-                            {
-                              id: 'archive',
-                              label: 'Archiver',
-                              Icon: Archive,
-                              onClick: () => void archiveInvoice(f.id),
-                              variant: 'warning',
-                              hidden: !isAtlasSupabaseDataEnabled(),
-                            },
-                            {
-                              id: 'delete',
-                              label: 'Supprimer',
-                              Icon: Trash2,
-                              onClick: () => setConfirmDeleteId(f.id),
-                              variant: 'danger',
-                            },
-                          ] satisfies ActionItem[]}
-                        />
-                      </div>
-                    </td>
-                  </tr>
-                ))
-                )}
-              </tbody>
-            </table>
+            {filteredRows.length === 0 ? (
+              <div className="px-4 py-8">
+                <EmptyStateCta
+                  lang="fr"
+                  title="Aucune facture"
+                  description="Créez votre première facture client pour suivre encaissements et relances."
+                  primaryLabelFr="Ajouter maintenant"
+                  primaryLabelAr="ابدأ الآن"
+                  onPrimary={() => setShowForm(true)}
+                />
+              </div>
+            ) : (
+              <div className="p-4">
+                <GlobalTable
+                  columns={facturesTableColumns}
+                  data={globalTableRows}
+                  selectedIds={selectedInvoiceIds}
+                  onSelectionChange={setSelectedInvoiceIds}
+                  onModify={handleBulkModify}
+                  onShare={handleBulkShare}
+                  onDownload={(ids) => void handleBulkDownload(ids)}
+                  onDelete={handleBulkDelete}
+                  hideRowActions
+                />
+              </div>
+            )}
           </div>
           </>
 
