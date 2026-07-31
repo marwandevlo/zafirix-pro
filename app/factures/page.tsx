@@ -34,7 +34,7 @@ import { trackOnboardingMilestoneOnce } from '@/app/lib/atlas-onboarding-milesto
 import type { ExportColumn } from '@/app/components/ExportMenu';
 import type { GlobalTableColumn } from '@/app/components/data-grid/GlobalTable';
 import { exportTable } from '@/app/lib/atlas-table-export';
-import { FacturesTableSection } from '@/app/factures/FacturesTableSection';
+import { FacturesTableSection, FacturesExportMenu } from '@/app/factures/FacturesTableSection';
 import { EntityAuditTable } from '@/app/components/history/EntityAuditTable';
 import { ModuleLoadErrorBanner } from '@/app/lib/use-enterprise-module-fetch';
 import { InvoiceShipmentPanel, type InvoiceShipmentTarget } from '@/app/components/logistics/InvoiceShipmentPanel';
@@ -998,6 +998,12 @@ export default function FacturesPage() {
                 </div>
               </div>
               <div className="flex items-center gap-2">
+                <FacturesExportMenu
+                  data={filteredRows as unknown as Record<string, unknown>[]}
+                  columns={FACTURE_EXPORT_COLUMNS}
+                  selectedIds={selectedInvoiceIds}
+                  filters={{ statut: filter }}
+                />
                 <button onClick={() => setFilter('all')} className={`text-xs font-medium px-2.5 py-1 rounded-full border ${filter === 'all' ? 'bg-gray-900 text-white border-gray-900' : 'bg-white text-gray-600 border-gray-200 hover:bg-gray-50'}`}>
                   Toutes
                 </button>
@@ -1025,6 +1031,7 @@ export default function FacturesPage() {
                 onDownload={handleBulkDownload}
                 onDelete={handleBulkDelete}
                 exportFilters={{ statut: filter }}
+                showExportMenu={false}
                 emptyState={
                   <EmptyStateCta
                     lang="fr"

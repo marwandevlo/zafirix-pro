@@ -23,9 +23,33 @@ export type FacturesTableSectionProps<T extends GlobalTableRow = GlobalTableRow>
   exportFilename?: string;
   exportTitle?: string;
   exportFilters?: Record<string, unknown>;
+  /** Render ExportMenu inside this section (default false — place in page header) */
+  showExportMenu?: boolean;
   emptyState?: ReactNode;
   hideRowActions?: boolean;
 };
+
+/** Header ExportMenu wired to facture selection (use once per page). */
+export function FacturesExportMenu(props: {
+  data: Record<string, unknown>[];
+  columns: ExportColumn[];
+  selectedIds: string[];
+  filters?: Record<string, unknown>;
+  filename?: string;
+  title?: string;
+}) {
+  return (
+    <ExportMenu
+      data={props.data}
+      columns={props.columns}
+      filename={props.filename ?? 'factures'}
+      title={props.title ?? 'Factures clients'}
+      filters={props.filters}
+      selectedIds={props.selectedIds.length > 0 ? new Set(props.selectedIds) : undefined}
+      size="xs"
+    />
+  );
+}
 
 /**
  * Factures list: GlobalTable bulk selection + ExportMenu linked to selected rows.
@@ -45,6 +69,7 @@ export function FacturesTableSection<T extends GlobalTableRow = GlobalTableRow>(
   exportFilename = 'factures',
   exportTitle = 'Factures clients',
   exportFilters,
+  showExportMenu = false,
   emptyState,
   hideRowActions = true,
 }: FacturesTableSectionProps<T>) {
@@ -54,17 +79,18 @@ export function FacturesTableSection<T extends GlobalTableRow = GlobalTableRow>(
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-end">
-        <ExportMenu
-          data={exportData}
-          columns={exportColumns}
-          filename={exportFilename}
-          title={exportTitle}
-          filters={exportFilters}
-          selectedIds={selectedIds.length > 0 ? new Set(selectedIds) : undefined}
-          size="xs"
-        />
-      </div>
+      {showExportMenu ? (
+        <div className="flex items-center justify-end">
+          <FacturesExportMenu
+            data={exportData}
+            columns={exportColumns}
+            selectedIds={selectedIds}
+            filters={exportFilters}
+            filename={exportFilename}
+            title={exportTitle}
+          />
+        </div>
+      ) : null}
 
       <GlobalTable
         columns={columns}
