@@ -98,9 +98,9 @@ export default function GenericModuleSection<T extends GlobalTableRow>({
   });
 
   const handleDelete = useCallback((ids: string[]) => {
-    runOptimisticBulkDelete({
+    void runOptimisticBulkDelete({
       ids,
-      confirmMessage: `هل أنت متأكد من حذف ${ids.length} عنصر من ${moduleTitle}؟`,
+      skipConfirm: true,
       onOptimistic: () => {
         setData((prevData) => filterRowsNotInIds(prevData as Record<string, unknown>[], ids) as T[]);
         setSelectedIds([]);
@@ -108,7 +108,7 @@ export default function GenericModuleSection<T extends GlobalTableRow>({
       onPersist: onDelete,
       onPersistError: onDeleteError,
     });
-  }, [moduleTitle, onDelete, onDeleteError]);
+  }, [onDelete, onDeleteError]);
 
   return (
     <div className="p-6 space-y-6 w-full">

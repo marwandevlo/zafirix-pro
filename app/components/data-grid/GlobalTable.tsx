@@ -2,6 +2,7 @@
 
 import { useMemo, useState, type ReactNode } from 'react';
 import { Download, Edit3, MoreVertical, Share2, Trash2 } from 'lucide-react';
+import { ConfirmDeleteDialog } from '@/app/components/actions/ConfirmDeleteDialog';
 import { normalizeGlobalTableRows } from '@/app/components/data-grid/global-table-id';
 
 export type GlobalTableColumn<T extends GlobalTableRow = GlobalTableRow> = {
@@ -93,6 +94,7 @@ export default function GlobalTable<T extends GlobalTableRow = GlobalTableRow>({
   );
 
   const [openMenuId, setOpenMenuId] = useState<string | null>(null);
+  const [bulkDeleteOpen, setBulkDeleteOpen] = useState(false);
 
   const isAllSelected =
     normalizedData.length > 0 &&
@@ -116,6 +118,19 @@ export default function GlobalTable<T extends GlobalTableRow = GlobalTableRow>({
     if (!fn || selectedIds.length === 0) return;
     fn(selectedIds);
     if (clearAfter) setSelectedIds([]);
+  };
+
+  const requestBulkDelete = () => {
+    if (!onDelete || selectedIds.length === 0) return;
+    setBulkDeleteOpen(true);
+  };
+
+  const confirmBulkDelete = () => {
+    if (onDelete && selectedIds.length > 0) {
+      onDelete(selectedIds);
+      if (clearSelectionOnDelete) setSelectedIds([]);
+    }
+    setBulkDeleteOpen(false);
   };
 
   const hasBulkToolbar =
@@ -171,7 +186,7 @@ export default function GlobalTable<T extends GlobalTableRow = GlobalTableRow>({
 
               <button
                 type="button"
-                onClick={() => runBulk(onDelete, clearSelectionOnDelete)}
+                onClick={requestBulkDelete}
                 disabled={!onDelete}
                 title={!onDelete ? 'Suppression non configurée pour cette vue' : undefined}
                 className="flex items-center gap-2 bg-red-600 hover:bg-red-700 disabled:opacity-40 disabled:cursor-not-allowed text-white px-4 py-2 rounded-lg text-sm font-semibold transition-all shadow-lg"
@@ -311,6 +326,16 @@ export default function GlobalTable<T extends GlobalTableRow = GlobalTableRow>({
       </div>
 
       {bulkToolbar}
+
+      <ConfirmDeleteDialog
+        open={bulkDeleteOpen}
+        entityName={`${selectedIds.length} élément${selectedIds.length > 1 ? 's' : ''}`}
+        entityType={`${selectedIds.length} élément${selectedIds.length > 1 ? 's' : ''}`}
+        showArchiveOption={false}
+        message={`${selectedIds.length} élément${selectedIds.length > 1 ? 's' : ''} sélectionné${selectedIds.length > 1 ? 's' : ''} ${selectedIds.length > 1 ? 'seront' : 'sera'} supprimé${selectedIds.length > 1 ? 's' : ''} définitivement. Cette action est irréversible.`}
+        onConfirmDelete={confirmBulkDelete}
+        onCancel={() => setBulkDeleteOpen(false)}
+      />
     </div>
   );
 }

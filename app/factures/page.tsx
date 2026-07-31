@@ -36,6 +36,7 @@ import type { GlobalTableColumn } from '@/app/components/data-grid/GlobalTable';
 import { exportTable } from '@/app/lib/atlas-table-export';
 import { FacturesTableSection, FacturesExportMenu } from '@/app/factures/FacturesTableSection';
 import { filterRowsBySelectedIds, normalizeGlobalTableRows, pruneSelectedIds, runOptimisticBulkDelete } from '@/app/components/data-grid/global-table-id';
+import { postBulkDelete } from '@/app/lib/atlas-bulk-delete';
 import { EntityAuditTable } from '@/app/components/history/EntityAuditTable';
 import { ModuleLoadErrorBanner } from '@/app/lib/use-enterprise-module-fetch';
 import { InvoiceShipmentPanel, type InvoiceShipmentTarget } from '@/app/components/logistics/InvoiceShipmentPanel';
@@ -734,8 +735,9 @@ export default function FacturesPage() {
   }, [filteredRows]);
 
   const handleBulkDelete = useCallback((ids: string[]) => {
-    runOptimisticBulkDelete({
+    void runOptimisticBulkDelete({
       ids,
+      skipConfirm: true,
       onOptimistic: () => {
         setSelectedInvoiceIds([]);
         setInvoices((prev) => {
@@ -745,7 +747,20 @@ export default function FacturesPage() {
         });
       },
       onPersist: async (deleteIds) => {
-        await Promise.all(deleteIds.map((id) => deleteAtlasInvoice(id as AtlasInvoice['id'])));
+        if (isAtlasSupabaseDataEnabled()) {
+          await postBulkDelete('/api/invoices/bulk-delete', deleteIds);
+          return;
+        }
+        const results = await Promise.all(
+          deleteIds.map((id) => deleteAtlasInvoice(id as AtlasInvoice['id'])),
+        );
+        const failed = results.find((result) => !result.ok);
+        if (failed && !failed.ok) {
+          throw new Error(failed.error);
+        }
+      },
+      onRollback: () => {
+        void loadPageData();
       },
       onPersistError: () => {
         void loadPageData();

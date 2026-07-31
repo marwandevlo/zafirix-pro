@@ -46,26 +46,8 @@ export function filterRowsNotInIds<T extends Record<string, unknown>>(
   return rows.filter((row, index) => !remove.has(getRowSelectionId(row, index)));
 }
 
-/** Confirm → optimistic callback → async persist with error logging. */
-export function runOptimisticBulkDelete(options: {
-  ids: string[];
-  confirmMessage?: string;
-  onOptimistic: () => void;
-  onPersist?: (ids: string[]) => void | Promise<void>;
-  onPersistError?: (err: unknown) => void;
-}): void {
-  const message = options.confirmMessage ?? 'هل أنت متأكد من حذف العناصر المحددة؟';
-  if (typeof window !== 'undefined' && !window.confirm(message)) return;
-
-  options.onOptimistic();
-
-  if (!options.onPersist) return;
-
-  void Promise.resolve(options.onPersist(options.ids)).catch((err) => {
-    console.error('فشل الحذف من قاعدة البيانات:', err);
-    options.onPersistError?.(err);
-  });
-}
+export { filterPersistableIds, runOptimisticBulkDelete } from '@/app/lib/atlas-bulk-delete';
+export type { OptimisticBulkDeleteOptions } from '@/app/lib/atlas-bulk-delete';
 
 /** Filter export/table rows by normalized ids (matches GlobalTable selection). */
 export function filterRowsBySelectedIds<T extends Record<string, unknown>>(

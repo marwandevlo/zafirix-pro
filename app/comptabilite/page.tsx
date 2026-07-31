@@ -28,6 +28,7 @@ import {
   pruneSelectedIds,
   runOptimisticBulkDelete,
 } from '@/app/components/data-grid/global-table-id';
+import { postBulkDelete } from '@/app/lib/atlas-bulk-delete';
 import { exportTable } from '@/app/lib/atlas-table-export';
 import { openWhatsAppShare } from '@/app/lib/atlas-quick-share';
 
@@ -600,15 +601,18 @@ export default function ComptabilitePage() {
                     void exportTable('xlsx', selected, SUPPLIER_INVOICE_EXPORT_COLUMNS, 'factures_fournisseur');
                   }}
                   onDelete={(ids) => {
-                    runOptimisticBulkDelete({
+                    void runOptimisticBulkDelete({
                       ids,
-                      confirmMessage: `Supprimer ${ids.length} facture(s) fournisseur ?`,
+                      skipConfirm: true,
                       onOptimistic: () => {
                         setSelectedSupplierIds([]);
                         setSupplierInvoices((prev) => prev.filter((inv) => !ids.includes(String(inv.id))));
                       },
                       onPersist: async (deleteIds) => {
-                        await Promise.all(deleteIds.map((id) => deleteSupplierInvoiceRow(id)));
+                        await postBulkDelete('/api/supplier-invoices/bulk-delete', deleteIds);
+                      },
+                      onRollback: () => {
+                        void reloadAccountingData();
                       },
                       onPersistError: () => {
                         void reloadAccountingData();
@@ -735,15 +739,18 @@ export default function ComptabilitePage() {
                       void exportTable('xlsx', selected, ECRITURE_EXPORT_COLUMNS, 'journal_comptable', { title: 'Journal Comptable' });
                     }}
                     onDelete={(ids) => {
-                      runOptimisticBulkDelete({
+                      void runOptimisticBulkDelete({
                         ids,
-                        confirmMessage: `Supprimer ${ids.length} écriture(s) ?`,
+                        skipConfirm: true,
                         onOptimistic: () => {
                           setSelectedJournalIds([]);
                           setEcritures((prev) => prev.filter((e) => !ids.includes(e.rowId ?? String(e.id))));
                         },
                         onPersist: async (deleteIds) => {
-                          await Promise.all(deleteIds.map((id) => deleteEcriture(id)));
+                          await postBulkDelete('/api/accounting/entries/bulk-delete', deleteIds);
+                        },
+                        onRollback: () => {
+                          void reloadAccountingData();
                         },
                         onPersistError: () => {
                           void reloadAccountingData();

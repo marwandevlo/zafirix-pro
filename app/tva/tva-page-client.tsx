@@ -29,6 +29,7 @@ import {
   pruneSelectedIds,
   runOptimisticBulkDelete,
 } from '@/app/components/data-grid/global-table-id';
+import { postBulkDelete } from '@/app/lib/atlas-bulk-delete';
 import { exportTable } from '@/app/lib/atlas-table-export';
 import { openWhatsAppShare } from '@/app/lib/atlas-quick-share';
 import type { AtlasTvaLineItem } from '@/app/types/atlas-tva';
@@ -134,6 +135,31 @@ async function deleteTvaSourceLine(line: AtlasTvaPeriodRecord['lines'][number]):
   if (!path) return false;
   const res = await fetch(path, { method: 'DELETE', credentials: 'include' });
   return res.ok;
+}
+
+async function bulkDeleteTvaSourceLines(
+  deleteIds: string[],
+  lineById: Map<string, AtlasTvaPeriodRecord['lines'][number]>,
+): Promise<void> {
+  const supplierIds: string[] = [];
+  const invoiceIds: string[] = [];
+  const entryIds: string[] = [];
+
+  for (const id of deleteIds) {
+    const line = lineById.get(id);
+    if (!line || line.source === 'tva_suggestion') continue;
+    if (line.source === 'supplier_invoice') supplierIds.push(line.id);
+    else if (line.source === 'invoice') invoiceIds.push(line.id);
+    else if (line.source === 'accounting_entry') entryIds.push(line.id);
+  }
+
+  if (supplierIds.length === 0 && invoiceIds.length === 0 && entryIds.length === 0) {
+    throw new Error('Aucune ligne supprimable (suggestions TVA non modifiables).');
+  }
+
+  if (supplierIds.length) await postBulkDelete('/api/supplier-invoices/bulk-delete', supplierIds);
+  if (invoiceIds.length) await postBulkDelete('/api/invoices/bulk-delete', invoiceIds);
+  if (entryIds.length) await postBulkDelete('/api/accounting/entries/bulk-delete', entryIds);
 }
 
 async function updateTvaSourceLine(line: AtlasTvaPeriodRecord['lines'][number], values: Record<string, string>): Promise<boolean> {
@@ -779,20 +805,30 @@ function InvoiceTable({
   };
 
   const handleBulkDelete = (ids: string[]) => {
-    runOptimisticBulkDelete({
+    void runOptimisticBulkDelete({
       ids,
-      confirmMessage: `Supprimer ${ids.length} ligne(s) TVA ?`,
+      skipConfirm: true,
       onOptimistic: () => {
         setHiddenIds((prev) => new Set([...prev, ...ids]));
         setSelectedIds([]);
       },
       onPersist: async (deleteIds) => {
-        for (const id of deleteIds) {
-          const line = lineById.get(id);
-          if (line) await deleteTvaSourceLine(line);
-        }
+        await bulkDeleteTvaSourceLines(deleteIds, lineById);
+      },
+      onRollback: () => {
+        setHiddenIds((prev) => {
+          const next = new Set(prev);
+          for (const id of ids) next.delete(id);
+          return next;
+        });
+        onRefresh?.();
       },
       onPersistError: () => {
+        setHiddenIds((prev) => {
+          const next = new Set(prev);
+          for (const id of ids) next.delete(id);
+          return next;
+        });
         onRefresh?.();
       },
     });
@@ -903,9 +939,9 @@ function TvaHistoryTable({
   };
 
   const handleBulkDelete = (ids: string[]) => {
-    runOptimisticBulkDelete({
+    void runOptimisticBulkDelete({
       ids,
-      confirmMessage: `Supprimer ${ids.length} période(s) de l'historique TVA ?`,
+      skipConfirm: true,
       onOptimistic: () => {
         onHistoryChange(history.filter((period) => !ids.includes(period.id)));
         onSelectionChange([]);
@@ -917,6 +953,9 @@ function TvaHistoryTable({
           body: JSON.stringify({ companyId, ids: deleteIds }),
         });
         if (!ok) throw new Error(data.error ?? 'delete_failed');
+      },
+      onRollback: () => {
+        onReload();
       },
       onPersistError: () => {
         onReload();

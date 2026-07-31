@@ -9,6 +9,7 @@ import { AppSubscriptionProviders } from "@/app/components/subscription/AppSubsc
 import { FirstRunManager } from "@/app/components/onboarding/FirstRunManager";
 import { SoundEffectsGlobalChrome } from "@/app/components/sound/SoundEffectsGlobalChrome";
 import { UserPresencePing } from "@/app/components/activity/UserPresencePing";
+import { AppToastHost } from "@/app/components/ui/AppToastHost";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -66,6 +67,7 @@ export default function RootLayout({
         <FirstRunManager />
         {enableGlobalSearchOverlay ? <GlobalSearchOverlay /> : null}
         {enableAssistantOverlay ? <AssistantOverlay /> : null}
+        <AppToastHost />
       </body>
     </html>
   );
