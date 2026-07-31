@@ -1,4 +1,4 @@
-import type { AtlasTvaLineItem, AtlasTvaPeriodRecord } from '@/app/types/atlas-tva';
+import type { AtlasTvaLineItem, AtlasTvaPeriodRecord, AtlasTvaPeriodType } from '@/app/types/atlas-tva';
 
 /** DGI SIMPL-TVA payment mode codes (Relevé de déductions). */
 const PAYMENT_MODE_CODES: Record<string, number> = {
@@ -33,6 +33,20 @@ const PAYMENT_MODE_LABELS: Record<number, string> = {
 
 /** DGI declaration regime: 1 = Débit / Encaissement standard. */
 export const DGI_DECLARATION_REGIME_STANDARD = 1;
+
+/** SIMPL-TVA accepted regime codes for Relevé de déductions. */
+export const DGI_REGIME_CODES = [1, 2] as const;
+
+export type DgiPeriodKind = 'monthly' | 'quarterly' | 'annual';
+
+export type DgiPeriodMetadata = {
+  annee: number;
+  periode: number;
+  periodKind: DgiPeriodKind;
+  periodLabel: string;
+  valid: boolean;
+  error?: string;
+};
 
 export type TvaDgiExportCompanySources = {
   if_fiscal?: string | null;
@@ -275,30 +289,106 @@ export function escapeDgiXml(text: string): string {
 }
 
 export function parseDgiPeriodFromKey(periodKey: string): { annee: number; periode: number; periodLabel: string } {
-  const annual = periodKey.match(/^(\d{4})-AN$/);
-  if (annual) {
-    const year = Number(annual[1]);
-    return { annee: year, periode: 4, periodLabel: `Annuel / ${year}` };
-  }
-
-  const quarterly = periodKey.match(/^(\d{4})-Q([1-4])$/);
-  if (quarterly) {
-    const year = Number(quarterly[1]);
-    const q = Number(quarterly[2]);
-    return { annee: year, periode: q, periodLabel: `Trimestre ${q} / ${year}` };
-  }
-
-  const monthly = periodKey.match(/^(\d{4})-(\d{2})$/);
-  if (monthly) {
-    const year = Number(monthly[1]);
-    const month = Number(monthly[2]);
-    return { annee: year, periode: month, periodLabel: `Mois ${month} / ${year}` };
+  const meta = resolveDgiPeriodMetadata(periodKey);
+  if (meta.valid) {
+    return { annee: meta.annee, periode: meta.periode, periodLabel: meta.periodLabel };
   }
 
   const now = new Date();
   const q = Math.ceil((now.getMonth() + 1) / 3);
   const year = now.getFullYear();
   return { annee: year, periode: q, periodLabel: `Trimestre ${q} / ${year}` };
+}
+
+function finalizeDgiPeriodMetadata(
+  meta: Omit<DgiPeriodMetadata, 'valid' | 'error'>,
+): DgiPeriodMetadata {
+  const currentYear = new Date().getFullYear();
+  if (!Number.isInteger(meta.annee) || meta.annee < 2000 || meta.annee > currentYear + 1) {
+    return { ...meta, valid: false, error: 'invalid_year' };
+  }
+  if (!Number.isInteger(meta.periode)) {
+    return { ...meta, valid: false, error: 'invalid_period' };
+  }
+  if (meta.periodKind === 'monthly' && (meta.periode < 1 || meta.periode > 12)) {
+    return { ...meta, valid: false, error: 'invalid_month' };
+  }
+  if (meta.periodKind === 'quarterly' && (meta.periode < 1 || meta.periode > 4)) {
+    return { ...meta, valid: false, error: 'invalid_quarter' };
+  }
+  if (meta.periodKind === 'annual' && meta.periode !== 4) {
+    return { ...meta, valid: false, error: 'invalid_annual_period' };
+  }
+  return { ...meta, valid: true };
+}
+
+/**
+ * Strict SIMPL-TVA period resolution — no silent fallback to "today".
+ * Monthly keys → periode 1-12; quarterly → 1-4; annual (-AN) → periode 4.
+ */
+export function resolveDgiPeriodMetadata(
+  periodKey: string,
+  periodType?: AtlasTvaPeriodType | null,
+): DgiPeriodMetadata {
+  const annual = periodKey.match(/^(\d{4})-AN$/);
+  if (annual) {
+    return finalizeDgiPeriodMetadata({
+      annee: Number(annual[1]),
+      periode: 4,
+      periodKind: 'annual',
+      periodLabel: `Annuel / ${annual[1]}`,
+    });
+  }
+
+  const quarterly = periodKey.match(/^(\d{4})-Q([1-4])$/);
+  if (quarterly) {
+    const annee = Number(quarterly[1]);
+    const periode = Number(quarterly[2]);
+    return finalizeDgiPeriodMetadata({
+      annee,
+      periode,
+      periodKind: 'quarterly',
+      periodLabel: `Trimestre ${periode} / ${annee}`,
+    });
+  }
+
+  const monthly = periodKey.match(/^(\d{4})-(\d{2})$/);
+  if (monthly) {
+    const annee = Number(monthly[1]);
+    const periode = Number(monthly[2]);
+    return finalizeDgiPeriodMetadata({
+      annee,
+      periode,
+      periodKind: periodType === 'quarterly' ? 'quarterly' : 'monthly',
+      periodLabel: `Mois ${periode} / ${annee}`,
+    });
+  }
+
+  return {
+    annee: 0,
+    periode: 0,
+    periodKind: 'quarterly',
+    periodLabel: periodKey,
+    valid: false,
+    error: 'invalid_period_key',
+  };
+}
+
+export function isValidDgiRegimeCode(regime: number): boolean {
+  return Number.isInteger(regime) && (DGI_REGIME_CODES as readonly number[]).includes(regime);
+}
+
+export function normalizeDgiRegimeCode(
+  regime?: number | null,
+  regimeTVA?: string | null,
+): number {
+  if (regime != null && isValidDgiRegimeCode(regime)) return regime;
+  return dgiDeclarationRegime(regimeTVA);
+}
+
+/** Validate YYYY-MM-DD date strings required by SIMPL-TVA rd/dpai/dfac nodes. */
+export function isValidDgiDateYmd(value: string): boolean {
+  return /^\d{4}-\d{2}-\d{2}$/.test(value);
 }
 
 export function dgiPaymentModeCode(paymentMode: string | number | null | undefined): number {

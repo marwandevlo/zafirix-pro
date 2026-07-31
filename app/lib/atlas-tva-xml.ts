@@ -8,7 +8,10 @@ import {
   formatDgiIce,
   formatDgiIdentifiantFiscal,
   isDeductiblePurchaseLine,
-  parseDgiPeriodFromKey,
+  isValidDgiDateYmd,
+  isValidDgiRegimeCode,
+  normalizeDgiRegimeCode,
+  resolveDgiPeriodMetadata,
   resolveTvaDeclarationCompanyIce,
   resolveTvaDeclarationIdentifiantFiscal,
   sanitizeDgiNomFournisseur,
@@ -35,13 +38,17 @@ export {
   formatDgiRc,
   formatTaxIdentifier,
   isPlaceholderTaxIdentifier,
+  isValidDgiDateYmd,
+  isValidDgiRegimeCode,
+  lookupSupplierIdentityByName,
+  normalizeDgiRegimeCode,
   parseDgiPeriodFromKey,
   resolveDgiCompanyIdentifiers,
   resolveDgiIce,
   resolveDgiIdentifiantFiscal,
+  resolveDgiPeriodMetadata,
   resolveDgiRc,
   resolveDgiSupplierRef,
-  lookupSupplierIdentityByName,
   resolveTvaDeclarationCompanyIce,
   resolveTvaDeclarationIdentifiantFiscal,
   sanitizeDgiDesignation,
@@ -61,9 +68,44 @@ export type TvaDgiExportValidationOptions = {
   companyIce?: string | null;
   company?: TvaDgiExportCompanySources | null;
   supplierIndex?: SupplierIdentityIndex | null;
+  regime?: number | null;
+  regimeTVA?: string | null;
 };
 
-/** Validate supplier ICE rows before SIMPL-TVA export; company IF/ICE are advisory only. */
+const PERIOD_ERROR_MESSAGES: Record<string, string> = {
+  invalid_period_key:
+    'Clé de période TVA non reconnue par SIMPL-TVA. Utilisez un format YYYY-MM, YYYY-Q[1-4] ou YYYY-AN.',
+  invalid_year: 'Année fiscale invalide — vérifiez la période déclarée (الفترة أو السنة خاطئة).',
+  invalid_month: 'Mois invalide — SIMPL-TVA attend une période entre 1 et 12 pour le régime mensuel.',
+  invalid_quarter: 'Trimestre invalide — SIMPL-TVA attend une période entre 1 et 4.',
+  invalid_annual_period: 'Période annuelle invalide pour SIMPL-TVA.',
+  invalid_period: 'Période TVA invalide.',
+};
+
+function periodValidationMessage(errorCode: string | undefined, periodKey: string): string {
+  const base = PERIOD_ERROR_MESSAGES[errorCode ?? ''] ?? PERIOD_ERROR_MESSAGES.invalid_period;
+  return `${base} (période : ${periodKey}).`;
+}
+
+function collectExportRows(
+  record: AtlasTvaPeriodRecord,
+  supplierIndex: SupplierIdentityIndex,
+): DgiReleveDeductionRow[] {
+  return buildDgiReleveRows(record, supplierIndex);
+}
+
+function validateDgiReleveRowFields(row: DgiReleveDeductionRow): string | null {
+  if (!row.refF.ice) return `ICE fournisseur manquant (facture ${row.num})`;
+  if (!isValidDgiDateYmd(row.dfac)) return `Date facture invalide (facture ${row.num})`;
+  if (!isValidDgiDateYmd(row.dpai)) return `Date paiement invalide (facture ${row.num})`;
+  if (row.mp < 1 || row.mp > 6) return `Mode paiement invalide (facture ${row.num})`;
+  if (!Number.isFinite(row.mht) || !Number.isFinite(row.tva) || !Number.isFinite(row.ttc)) {
+    return `Montants invalides (facture ${row.num})`;
+  }
+  return null;
+}
+
+/** Advisory validation for Excel / preview — warnings only. */
 export function validateTvaDgiExport(
   record: AtlasTvaPeriodRecord,
   opts: TvaDgiExportValidationOptions,
@@ -72,21 +114,25 @@ export function validateTvaDgiExport(
   const identifiantFiscal = resolveTvaDeclarationIdentifiantFiscal(opts.company, opts.identifiantFiscal);
   if (!identifiantFiscal) {
     warnings.push(
-      "Identifiant Fiscal (IF) société absent du profil — l'export s'appuie sur les IF/ICE des factures et fournisseurs.",
+      "Identifiant Fiscal (IF) société absent du profil — requis pour un dépôt SIMPL-TVA conforme.",
     );
   }
 
   if (!resolveTvaDeclarationCompanyIce(opts.company, opts.companyIce)) {
-    warnings.push("ICE société manquant ou invalide dans le profil entreprise.");
+    warnings.push('ICE société manquant ou invalide dans le profil entreprise.');
+  }
+
+  const periodMeta = resolveDgiPeriodMetadata(record.periodKey, record.periodType);
+  if (!periodMeta.valid) {
+    warnings.push(periodValidationMessage(periodMeta.error, record.periodKey));
   }
 
   const supplierIndex = opts.supplierIndex ?? buildSupplierIdentityIndexFromPeriod(record);
-  const rows = buildDgiReleveRows(record, supplierIndex);
+  const rows = collectExportRows(record, supplierIndex);
   const missingSupplierIce = rows.filter((row) => !row.refF.ice).length;
   if (missingSupplierIce > 0) {
     warnings.push(
-      `${missingSupplierIce} ligne(s) d'achat sans ICE fournisseur valide (15 chiffres) — ` +
-        "l'export inclura ces lignes avec des champs ICE/IF vides. Complétez les factures fournisseur pour un dépôt SIMPL-TVA conforme.",
+      `${missingSupplierIce} ligne(s) d'achat sans ICE fournisseur valide (15 chiffres) — complétez les factures fournisseur.`,
     );
   }
 
@@ -97,19 +143,106 @@ export function validateTvaDgiExport(
     );
   }
 
-  const missingSupplierName = rows.filter((row) => !row.refF.nom || row.refF.nom === 'Fournisseur').length;
-  if (missingSupplierName > 0) {
-    warnings.push(`${missingSupplierName} ligne(s) avec nom fournisseur générique — vérifiez les libellés.`);
+  return { ok: true, warnings: warnings.length > 0 ? warnings : undefined };
+}
+
+/**
+ * Strict SIMPL-TVA pre-flight for XML EDI export.
+ * Blocks on invalid company IF, period/year, regime, or supplier ICE.
+ */
+export function validateTvaDgiXmlExport(
+  record: AtlasTvaPeriodRecord,
+  opts: TvaDgiExportValidationOptions,
+): TvaDgiExportValidation {
+  const warnings: string[] = [];
+
+  const identifiantFiscal = resolveTvaDeclarationIdentifiantFiscal(opts.company, opts.identifiantFiscal);
+  if (!identifiantFiscal) {
+    return {
+      ok: false,
+      error: 'missing_if',
+      message:
+        "Identifiant Fiscal (IF) société manquant ou invalide (7-8 chiffres requis). " +
+        'Complétez le profil société (Paramètres) — رقم التعريف الضريبي خاطئ.',
+    };
+  }
+
+  const periodMeta = resolveDgiPeriodMetadata(record.periodKey, record.periodType);
+  if (!periodMeta.valid) {
+    return {
+      ok: false,
+      error: periodMeta.error ?? 'invalid_period',
+      message: periodValidationMessage(periodMeta.error, record.periodKey),
+    };
+  }
+
+  const regime = normalizeDgiRegimeCode(opts.regime, opts.regimeTVA);
+  if (!isValidDgiRegimeCode(regime)) {
+    return {
+      ok: false,
+      error: 'invalid_regime',
+      message: 'Code régime TVA invalide — SIMPL-TVA attend 1 (Débit) ou 2 (Encaissement).',
+    };
+  }
+
+  const supplierIndex = opts.supplierIndex ?? buildSupplierIdentityIndexFromPeriod(record);
+  const rows = collectExportRows(record, supplierIndex);
+  const purchaseRows = rows;
+  const invalidIceRows = purchaseRows.filter((row) => !row.refF.ice);
+
+  if (purchaseRows.length > 0 && invalidIceRows.length > 0) {
+    const samples = invalidIceRows
+      .slice(0, 5)
+      .map((row) => `${row.num} (${row.refF.nom})`)
+      .join(', ');
+    return {
+      ok: false,
+      error: 'missing_supplier_ice',
+      message:
+        `${invalidIceRows.length} ligne(s) d'achat sans ICE fournisseur valide (15 chiffres exactement). ` +
+        `Factures : ${samples}${invalidIceRows.length > 5 ? '…' : ''}. ` +
+        'Les zéros factices (000000000000000) et ICE incomplets sont rejetés par SIMPL-TVA.',
+    };
+  }
+
+  for (const row of purchaseRows) {
+    const rowError = validateDgiReleveRowFields(row);
+    if (rowError) {
+      return {
+        ok: false,
+        error: 'invalid_releve_row',
+        message: `${rowError} — corrigez la facture avant export DGI.`,
+      };
+    }
+  }
+
+  const missingSupplierIf = purchaseRows.filter((row) => !row.refF.ifFiscal).length;
+  if (missingSupplierIf > 0) {
+    warnings.push(
+      `${missingSupplierIf} ligne(s) sans IF fournisseur — vérifiez si la DGI exige l'IF pour ces tiers.`,
+    );
+  }
+
+  const genericNames = purchaseRows.filter((row) => !row.refF.nom || row.refF.nom === 'Fournisseur').length;
+  if (genericNames > 0) {
+    warnings.push(`${genericNames} ligne(s) avec nom fournisseur générique — vérifiez les libellés.`);
+  }
+
+  if (!resolveTvaDeclarationCompanyIce(opts.company, opts.companyIce)) {
+    warnings.push('ICE société (15 chiffres) absent du profil — recommandé pour la cohérence SIMPL-TVA.');
   }
 
   return { ok: true, warnings: warnings.length > 0 ? warnings : undefined };
 }
 
 function buildRefFXml(ref: DgiReleveDeductionRow['refF']): string[] {
-  // DGI SIMPL-TVA: refF/if, refF/nom, refF/ice — empty tags when unknown (never fake zeros).
   const ice = formatDgiIce(ref.ice);
   const ifFiscal = formatDgiIdentifiantFiscal(ref.ifFiscal);
   const nom = sanitizeDgiNomFournisseur(ref.nom);
+
+  if (!ice) {
+    throw new Error('invalid_supplier_ice_in_xml_row');
+  }
 
   return [
     '      <refF>',
@@ -120,13 +253,46 @@ function buildRefFXml(ref: DgiReleveDeductionRow['refF']): string[] {
   ];
 }
 
-/** Reject legacy flat tags and all-zero placeholder ICE values in generated XML. */
+/** Post-generation guard — rejects legacy schema, placeholder IDs, malformed header/rows. */
 export function assertValidTvaDgiXmlOutput(xml: string): void {
   if (/iceFournisseur|nomFournisseur|ifFournisseur|montantHT|numFacture|dateFacture/i.test(xml)) {
     throw new Error('legacy_tva_xml_schema');
   }
+
+  const ifMatch = xml.match(/<identifiantFiscal>(\d*)<\/identifiantFiscal>/);
+  if (!ifMatch || ifMatch[1].length < 7 || ifMatch[1].length > 8) {
+    throw new Error('invalid_header_identifiant_fiscal');
+  }
+
+  const anneeMatch = xml.match(/<annee>(\d+)<\/annee>/);
+  const periodeMatch = xml.match(/<periode>(\d+)<\/periode>/);
+  const regimeMatch = xml.match(/<regime>(\d+)<\/regime>/);
+  if (!anneeMatch || !periodeMatch || !regimeMatch) {
+    throw new Error('missing_dgi_header_fields');
+  }
+
+  const annee = Number(anneeMatch[1]);
+  const periode = Number(periodeMatch[1]);
+  const regime = Number(regimeMatch[1]);
+  const currentYear = new Date().getFullYear();
+  if (annee < 2000 || annee > currentYear + 1) throw new Error('invalid_year');
+  if (periode < 1 || periode > 12) throw new Error('invalid_period');
+  if (!isValidDgiRegimeCode(regime)) throw new Error('invalid_regime');
+
   if (/<ice>\s*0+\s*<\/ice>/i.test(xml)) {
     throw new Error('placeholder_supplier_ice');
+  }
+
+  const rdBlocks = xml.match(/<rd>[\s\S]*?<\/rd>/g) ?? [];
+  for (const block of rdBlocks) {
+    const iceMatch = block.match(/<ice>(\d*)<\/ice>/);
+    if (!iceMatch || iceMatch[1].length !== 15) {
+      throw new Error('invalid_supplier_ice_in_xml');
+    }
+    const ifMatch = block.match(/<if>(\d*)<\/if>/);
+    if (ifMatch && ifMatch[1].length > 0 && (ifMatch[1].length < 7 || ifMatch[1].length > 8)) {
+      throw new Error('invalid_supplier_if_in_xml');
+    }
   }
 }
 
@@ -135,10 +301,10 @@ export function tvaDgiXmlFilename(periodKey: string): string {
 }
 
 /** Official DGI `<rd>` block — ord/num/des/mht/tva/ttc + refF + tx/mp/dpai/dfac. */
-function buildRdXmlBlock(row: DgiReleveDeductionRow): string {
+function buildRdXmlBlock(row: DgiReleveDeductionRow, ord: number): string {
   return [
     '    <rd>',
-    `      <ord>${row.ord}</ord>`,
+    `      <ord>${ord}</ord>`,
     `      <num>${escapeDgiXml(row.num)}</num>`,
     `      <des>${escapeDgiXml(row.des)}</des>`,
     `      <mht>${formatDgiAmount(row.mht)}</mht>`,
@@ -157,27 +323,38 @@ function buildRdXmlBlock(row: DgiReleveDeductionRow): string {
 
 /**
  * Generate DGI SIMPL-TVA Relevé de déductions XML.
- * Schema: DeclarationReleveDeduction → identifiantFiscal, annee, periode, regime, releveDeductions/rd[]
+ * Call validateTvaDgiXmlExport() first — this function throws on non-compliant data.
  */
 export function generateTvaDeclarationXml(
   record: AtlasTvaPeriodRecord,
-  opts: DgiTvaXmlOptions,
+  opts: DgiTvaXmlOptions & { regimeTVA?: string | null },
 ): string {
-  const { annee, periode } = parseDgiPeriodFromKey(record.periodKey);
-  const regime = opts.regime ?? DGI_DECLARATION_REGIME_STANDARD;
+  const preflight = validateTvaDgiXmlExport(record, {
+    company: opts.company,
+    identifiantFiscal: opts.identifiantFiscal,
+    supplierIndex: opts.supplierIndex,
+    regime: opts.regime,
+    regimeTVA: opts.regimeTVA,
+  });
+  if (!preflight.ok) {
+    throw new Error(preflight.error ?? 'dgi_preflight_failed');
+  }
+
+  const periodMeta = resolveDgiPeriodMetadata(record.periodKey, record.periodType);
+  const regime = normalizeDgiRegimeCode(opts.regime, opts.regimeTVA);
   const identifiantFiscal = resolveTvaDeclarationIdentifiantFiscal(opts.company, opts.identifiantFiscal);
 
   const supplierIndex = opts.supplierIndex ?? buildSupplierIdentityIndexFromPeriod(record);
-  const rows = buildDgiReleveRows(record, supplierIndex);
+  const rows = collectExportRows(record, supplierIndex).filter((row) => Boolean(row.refF.ice));
 
-  const rdBlocks = rows.map(buildRdXmlBlock).join('\n');
+  const rdBlocks = rows.map((row, index) => buildRdXmlBlock(row, index + 1)).join('\n');
 
   const lines = [
     '<?xml version="1.0" encoding="UTF-8"?>',
     '<DeclarationReleveDeduction>',
     `  <identifiantFiscal>${identifiantFiscal}</identifiantFiscal>`,
-    `  <annee>${annee}</annee>`,
-    `  <periode>${periode}</periode>`,
+    `  <annee>${periodMeta.annee}</annee>`,
+    `  <periode>${periodMeta.periode}</periode>`,
     `  <regime>${regime}</regime>`,
     '  <releveDeductions>',
   ];

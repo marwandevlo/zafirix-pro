@@ -49,8 +49,10 @@ const TVA_LINE_EXPORT_COLUMNS: ExportColumn[] = [
 import { getActiveCompanyDbRowId } from '@/app/lib/atlas-active-company';
 import { readActiveCompanyFromLocalStorage } from '@/app/lib/atlas-companies-repository';
 import { isAtlasSupabaseDataEnabled } from '@/app/lib/atlas-data-source';
+import { dgiDeclarationRegime } from '@/app/lib/atlas-tva-dgi';
 import {
   validateTvaDgiExport,
+  validateTvaDgiXmlExport,
   type TvaDgiExportCompanySources,
 } from '@/app/lib/atlas-tva-xml';
 import type { AtlasTvaDashboard, AtlasTvaPeriodRecord } from '@/app/types/atlas-tva';
@@ -431,9 +433,19 @@ export default function TvaPageClient() {
   };
 
   const downloadXml = async () => {
-    if (!current || !companyId) return;
+    if (!current || !companyId || !dashboard) return;
     const company = buildTvaExportCompanySources(companyExportInfo);
-    const validation = validateTvaDgiExport(current, { company });
+    const regime = dgiDeclarationRegime(dashboard.regimeTVA);
+    const validation = validateTvaDgiXmlExport(current, {
+      company,
+      regime,
+      regimeTVA: dashboard.regimeTVA,
+    });
+    if (!validation.ok) {
+      setError(validation.message ?? 'Export XML impossible — données non conformes SIMPL-TVA.');
+      showAtlasErrorToast(validation.message ?? 'Export XML impossible.');
+      return;
+    }
     notifyTvaExportWarnings(validation.warnings);
 
     setExportingXml(true);

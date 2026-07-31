@@ -10,7 +10,7 @@ import {
 import {
   generateTvaDeclarationXml,
   tvaDgiXmlFilename,
-  validateTvaDgiExport,
+  validateTvaDgiXmlExport,
 } from '@/app/lib/atlas-tva-xml';
 
 export const runtime = 'nodejs';
@@ -51,11 +51,26 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: 'company_not_found' }, { status: 404, headers: NO_STORE_HEADERS });
     }
 
-    const validation = validateTvaDgiExport(dashboard.current, { company, supplierIndex });
+    const regime = dgiDeclarationRegime(dashboard.regimeTVA);
+    const validation = validateTvaDgiXmlExport(dashboard.current, {
+      company,
+      supplierIndex,
+      regime,
+      regimeTVA: dashboard.regimeTVA,
+    });
+
+    if (!validation.ok) {
+      return NextResponse.json(
+        { error: validation.error, message: validation.message },
+        { status: 422, headers: NO_STORE_HEADERS },
+      );
+    }
+
     const xml = generateTvaDeclarationXml(dashboard.current, {
       company,
       supplierIndex,
-      regime: dgiDeclarationRegime(dashboard.regimeTVA),
+      regime,
+      regimeTVA: dashboard.regimeTVA,
     });
     const filename = tvaDgiXmlFilename(periodKey);
     const headers: Record<string, string> = {
