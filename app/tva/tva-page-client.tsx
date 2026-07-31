@@ -441,12 +441,12 @@ export default function TvaPageClient() {
       regime,
       regimeTVA: dashboard.regimeTVA,
     });
+    notifyTvaExportWarnings(validation.warnings);
     if (!validation.ok) {
-      setError(validation.message ?? 'Export XML impossible — données non conformes SIMPL-TVA.');
+      setError(validation.message ?? 'Export XML impossible — vérifiez IF société et période.');
       showAtlasErrorToast(validation.message ?? 'Export XML impossible.');
       return;
     }
-    notifyTvaExportWarnings(validation.warnings);
 
     setExportingXml(true);
     setError('');
