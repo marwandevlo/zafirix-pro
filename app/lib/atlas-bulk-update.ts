@@ -95,7 +95,7 @@ export async function runBulkTvaLineIdentityUpdate(options: {
   tvaSuggestionIds: string[];
   supplierIce: string;
   supplierIf: string;
-  onSuccess?: () => void;
+  onSuccess?: () => void | Promise<void>;
 }): Promise<boolean> {
   const totalTargets = options.supplierInvoiceIds.length + options.tvaSuggestionIds.length;
   if (totalTargets === 0) return false;
@@ -112,7 +112,7 @@ export async function runBulkTvaLineIdentityUpdate(options: {
         `${unresolvedSuggestions} suggestion(s) sans facture fournisseur liée — ICE/IF non appliqués.`,
       );
     }
-    options.onSuccess?.();
+    await options.onSuccess?.();
     return true;
   } catch (err) {
     showAtlasErrorToast(formatBulkUpdateError(err));

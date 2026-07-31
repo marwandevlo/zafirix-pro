@@ -126,6 +126,57 @@ function formatMad(n: number): string {
   return `${n.toLocaleString('fr-MA', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} MAD`;
 }
 
+type LineIdentityPatch = Pick<AtlasTvaLineItem, 'supplierIce' | 'supplierIf'>;
+
+type TvaReloadOptions = {
+  detectLatest?: boolean;
+  periodKey?: string;
+  /** Re-fetch without unmounting tables (post-edit refresh). */
+  silent?: boolean;
+};
+
+function mergeLineIdentityPatches(
+  lines: AtlasTvaPeriodRecord['lines'],
+  patches: Map<string, LineIdentityPatch>,
+): AtlasTvaPeriodRecord['lines'] {
+  if (patches.size === 0) return lines;
+  return lines.map((line) => {
+    const patch = patches.get(line.id);
+    return patch ? { ...line, ...patch } : line;
+  });
+}
+
+function buildSupplierIdentityPatches(
+  lines: AtlasTvaPeriodRecord['lines'],
+  supplierIce: string,
+  supplierIf: string,
+  opts: {
+    selectionIds?: string[];
+    supplierInvoiceIds?: string[];
+  },
+): Map<string, LineIdentityPatch> {
+  const patch: LineIdentityPatch = {
+    supplierIce: supplierIce.replace(/\D/g, ''),
+    supplierIf: supplierIf.replace(/\D/g, ''),
+  };
+  const selectionSet = new Set(opts.selectionIds ?? []);
+  const invoiceIdSet = new Set(opts.supplierInvoiceIds ?? []);
+  const next = new Map<string, LineIdentityPatch>();
+
+  for (const line of lines) {
+    const selected = selectionSet.has(line.id);
+    const directInvoice = line.source === 'supplier_invoice' && invoiceIdSet.has(line.id);
+    const linkedInvoice =
+      line.sourceInvoiceId != null && invoiceIdSet.has(String(line.sourceInvoiceId));
+
+    if (selected || directInvoice || linkedInvoice) {
+      next.set(line.id, patch);
+    }
+  }
+
+  return next;
+}
+
 function statusBadge(status: string) {
   if (status === 'declared') {
     return (
@@ -401,9 +452,9 @@ export default function TvaPageClient() {
   const supabaseEnabled = isAtlasSupabaseDataEnabled();
 
   const reload = useCallback(
-    async (opts?: { detectLatest?: boolean; periodKey?: string }) => {
+    async (opts?: TvaReloadOptions) => {
       setError('');
-      setLoading(true);
+      if (!opts?.silent) setLoading(true);
       try {
         const cid = await getActiveCompanyDbRowId();
         setCompanyId(cid);
@@ -459,7 +510,7 @@ export default function TvaPageClient() {
       } catch {
         setError('Erreur réseau.');
       } finally {
-        setLoading(false);
+        if (!opts?.silent) setLoading(false);
       }
     },
     [supabaseEnabled, selectedYear, selectedQuarter],
@@ -893,11 +944,11 @@ export default function TvaPageClient() {
           )}
 
           {!loading && current && tab === 'ventes' && (
-            <InvoiceTable title="Factures ventes (TVA collectée)" lines={salesLines} counterpartyLabel="Client" onRefresh={() => void reload()} />
+            <InvoiceTable title="Factures ventes (TVA collectée)" lines={salesLines} counterpartyLabel="Client" onRefresh={reload} />
           )}
 
           {!loading && current && tab === 'achats' && (
-            <InvoiceTable title="Factures achats (TVA déductible)" lines={purchaseLines} counterpartyLabel="Fournisseur" onRefresh={() => void reload()} />
+            <InvoiceTable title="Factures achats (TVA déductible)" lines={purchaseLines} counterpartyLabel="Fournisseur" onRefresh={reload} />
           )}
 
           {!loading && tab === 'audit' && (
@@ -930,25 +981,47 @@ function InvoiceTable({
   title: string;
   lines: AtlasTvaPeriodRecord['lines'];
   counterpartyLabel: string;
-  onRefresh?: () => void;
+  onRefresh?: (opts?: TvaReloadOptions) => Promise<void>;
 }) {
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [hiddenIds, setHiddenIds] = useState<Set<string>>(() => new Set());
   const [bulkEditOpen, setBulkEditOpen] = useState(false);
+  const [bulkEditSelectionIds, setBulkEditSelectionIds] = useState<string[]>([]);
   const [bulkEditTargets, setBulkEditTargets] = useState<{
     supplierInvoiceIds: string[];
     tvaSuggestionIds: string[];
   }>({ supplierInvoiceIds: [], tvaSuggestionIds: [] });
+  const [identityPatches, setIdentityPatches] = useState<Map<string, LineIdentityPatch>>(() => new Map());
+  const [refreshingLines, setRefreshingLines] = useState(false);
   const isSupplierTable = counterpartyLabel === 'Fournisseur';
   const bulkEditCount = bulkEditTargets.supplierInvoiceIds.length + bulkEditTargets.tvaSuggestionIds.length;
 
+  const mergedLines = useMemo(
+    () => mergeLineIdentityPatches(lines, identityPatches),
+    [identityPatches, lines],
+  );
+
   useEffect(() => {
-    setHiddenIds(new Set());
+    setIdentityPatches(new Map());
   }, [lines]);
 
+  const refreshAfterEdit = useCallback(async () => {
+    if (!onRefresh) return;
+    setRefreshingLines(true);
+    try {
+      await onRefresh({ silent: true });
+    } finally {
+      setRefreshingLines(false);
+    }
+  }, [onRefresh]);
+
+  useEffect(() => {
+    setHiddenIds(new Set());
+  }, [mergedLines]);
+
   const visibleLines = useMemo(
-    () => lines.filter((line) => !hiddenIds.has(line.id)),
-    [hiddenIds, lines],
+    () => mergedLines.filter((line) => !hiddenIds.has(line.id)),
+    [hiddenIds, mergedLines],
   );
 
   const tableRows = useMemo(
@@ -1057,12 +1130,36 @@ function InvoiceTable({
               ]}
               onEditSave={async (values) => {
                 const ok = await updateTvaSourceLine(f, values);
-                if (ok) onRefresh?.();
+                if (ok) {
+                  if (isSupplierTable && values.supplierIce && values.supplierIf) {
+                    setIdentityPatches((prev) => {
+                      const next = new Map(prev);
+                      for (const [id, patch] of buildSupplierIdentityPatches(
+                        mergedLines,
+                        values.supplierIce,
+                        values.supplierIf,
+                        {
+                          selectionIds: [f.id],
+                          supplierInvoiceIds:
+                            f.source === 'supplier_invoice'
+                              ? [f.id]
+                              : f.sourceInvoiceId
+                                ? [f.sourceInvoiceId]
+                                : [],
+                        },
+                      )) {
+                        next.set(id, patch);
+                      }
+                      return next;
+                    });
+                  }
+                  await refreshAfterEdit();
+                }
                 return ok;
               }}
               onDelete={async () => {
                 const ok = await deleteTvaSourceLine(f);
-                if (ok) onRefresh?.();
+                if (ok) await refreshAfterEdit();
                 return ok;
               }}
             />
@@ -1070,7 +1167,7 @@ function InvoiceTable({
         );
       },
     },
-  ], [counterpartyLabel, lineById, onRefresh, title]);
+  ], [counterpartyLabel, isSupplierTable, lineById, mergedLines, onRefresh, refreshAfterEdit, title]);
 
   const handleBulkShare = (ids: string[]) => {
     const selected = filterRowsBySelectedIds(tableRows as unknown as Record<string, unknown>[], ids) as typeof tableRows;
@@ -1111,6 +1208,7 @@ function InvoiceTable({
     }
 
     setBulkEditTargets({ supplierInvoiceIds, tvaSuggestionIds });
+    setBulkEditSelectionIds(ids);
     setBulkEditOpen(true);
   };
 
@@ -1122,10 +1220,28 @@ function InvoiceTable({
       supplierIf: values.supplierIf,
       onSuccess: () => {
         setSelectedIds([]);
-        onRefresh?.();
       },
     });
-    if (ok) setBulkEditTargets({ supplierInvoiceIds: [], tvaSuggestionIds: [] });
+    if (ok) {
+      setIdentityPatches((prev) => {
+        const next = new Map(prev);
+        for (const [id, patch] of buildSupplierIdentityPatches(
+          mergedLines,
+          values.supplierIce,
+          values.supplierIf,
+          {
+            selectionIds: bulkEditSelectionIds,
+            supplierInvoiceIds: bulkEditTargets.supplierInvoiceIds,
+          },
+        )) {
+          next.set(id, patch);
+        }
+        return next;
+      });
+      await refreshAfterEdit();
+      setBulkEditTargets({ supplierInvoiceIds: [], tvaSuggestionIds: [] });
+      setBulkEditSelectionIds([]);
+    }
     return ok;
   };
 
@@ -1147,7 +1263,7 @@ function InvoiceTable({
           for (const id of ids) next.delete(id);
           return next;
         });
-        onRefresh?.();
+        void refreshAfterEdit();
       },
       onPersistError: () => {
         setHiddenIds((prev) => {
@@ -1155,7 +1271,7 @@ function InvoiceTable({
           for (const id of ids) next.delete(id);
           return next;
         });
-        onRefresh?.();
+        void refreshAfterEdit();
       },
     });
   };
@@ -1165,7 +1281,15 @@ function InvoiceTable({
       <div className="px-5 py-4 border-b border-gray-100 flex items-center justify-between gap-3">
         <div>
           <h2 className="font-semibold text-gray-700">{title}</h2>
-          <p className="text-xs text-gray-400 mt-0.5">{visibleLines.length} ligne(s)</p>
+          <p className="text-xs text-gray-400 mt-0.5 flex items-center gap-2">
+            <span>{visibleLines.length} ligne(s)</span>
+            {refreshingLines && (
+              <span className="inline-flex items-center gap-1 text-blue-600">
+                <Loader2 size={12} className="animate-spin" />
+                Mise à jour…
+              </span>
+            )}
+          </p>
         </div>
         <ExportMenu
           data={tableRows as unknown as Record<string, unknown>[]}
@@ -1223,6 +1347,7 @@ function InvoiceTable({
           onClose={() => {
             setBulkEditOpen(false);
             setBulkEditTargets({ supplierInvoiceIds: [], tvaSuggestionIds: [] });
+            setBulkEditSelectionIds([]);
           }}
         />
       )}
