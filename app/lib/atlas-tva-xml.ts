@@ -108,7 +108,7 @@ function validateDgiReleveRowFields(row: DgiReleveDeductionRow): string | null {
   return null;
 }
 
-function isXmlExportableDgiReleveRow(row: DgiReleveDeductionRow): boolean {
+function hasCompleteSupplierIdentity(row: DgiReleveDeductionRow): boolean {
   return Boolean(row.refF.ice && row.refF.ifFiscal);
 }
 
@@ -124,8 +124,8 @@ function appendMissingSupplierIdentifierWarnings(
       .join(', ');
     warnings.push(
       `${missingIceRows.length} ligne(s) sans ICE fournisseur valide (15 chiffres) — ` +
-        `exclue(s) de l'export XML : ${samples}${missingIceRows.length > 5 ? '…' : ''}. ` +
-        'Complétez les factures fournisseur pour les inclure dans une prochaine déclaration.',
+        `exportées avec balise <ice> vide : ${samples}${missingIceRows.length > 5 ? '…' : ''}. ` +
+        'Complétez les factures fournisseur pour un dépôt SIMPL-TVA conforme.',
     );
   }
 
@@ -137,8 +137,16 @@ function appendMissingSupplierIdentifierWarnings(
       .join(', ');
     warnings.push(
       `${missingIfRows.length} ligne(s) sans IF fournisseur valide (7-8 chiffres) — ` +
-        `exclue(s) de l'export XML : ${samples}${missingIfRows.length > 5 ? '…' : ''}. ` +
-        'Complétez les factures fournisseur pour les inclure dans une prochaine déclaration.',
+        `exportées avec balise <if> vide : ${samples}${missingIfRows.length > 5 ? '…' : ''}. ` +
+        'Complétez les factures fournisseur pour un dépôt SIMPL-TVA conforme.',
+    );
+  }
+
+  const incompleteCount = purchaseRows.filter((row) => !hasCompleteSupplierIdentity(row)).length;
+  if (incompleteCount > 0 && purchaseRows.length > 0) {
+    warnings.push(
+      `${incompleteCount}/${purchaseRows.length} ligne(s) d'achat avec identifiants fournisseur incomplets — ` +
+        'le relevé XML est généré mais SIMPL-TVA peut rejeter le fichier tant que ICE/IF ne sont pas renseignés.',
     );
   }
 }
@@ -272,8 +280,7 @@ export function validateTvaDgiXmlExport(
   const purchaseRows = collectExportRows(record, supplierIndex);
   appendMissingSupplierIdentifierWarnings(warnings, purchaseRows);
 
-  const exportableRows = purchaseRows.filter(isXmlExportableDgiReleveRow);
-  for (const row of exportableRows) {
+  for (const row of purchaseRows) {
     const rowError = validateDgiReleveRowFields(row);
     if (rowError) {
       return {
@@ -344,11 +351,15 @@ export function assertValidTvaDgiXmlOutput(xml: string): void {
   const rdBlocks = xml.match(/<rd>[\s\S]*?<\/rd>/g) ?? [];
   for (const block of rdBlocks) {
     const iceMatch = block.match(/<ice>(\d*)<\/ice>/);
-    if (!iceMatch || iceMatch[1].length !== 15) {
+    if (iceMatch && iceMatch[1].length > 0 && iceMatch[1].length !== 15) {
       throw new Error('invalid_supplier_ice_in_xml');
     }
     const blockIfMatch = block.match(/<if>(\d*)<\/if>/);
-    if (!blockIfMatch || blockIfMatch[1].length < 7 || blockIfMatch[1].length > 8) {
+    if (
+      blockIfMatch &&
+      blockIfMatch[1].length > 0 &&
+      (blockIfMatch[1].length < 7 || blockIfMatch[1].length > 8)
+    ) {
       throw new Error('invalid_supplier_if_in_xml');
     }
   }
@@ -381,9 +392,8 @@ function buildRdXmlBlock(row: DgiReleveDeductionRow, ord: number): string {
 
 /**
  * Generate DGI SIMPL-TVA Relevé de déductions XML.
- * Each `<rd>` block gets its own `<refF>` from that line's invoice id and stored ICE/IF
- * (no fuzzy name fallback when a source invoice is linked).
- * Lines without valid supplier ICE/IF are omitted from XML (see warnings); no placeholder identifiers.
+ * All deductible purchase lines for the period are included; missing supplier ICE/IF
+ * are exported as empty <ice>/<if> tags (see preflight warnings).
  */
 export function generateTvaDeclarationXml(
   record: AtlasTvaPeriodRecord,
@@ -406,9 +416,9 @@ export function generateTvaDeclarationXml(
   const identifiantFiscal = resolveTvaDeclarationIdentifiantFiscal(opts.company, opts.identifiantFiscal);
 
   const supplierIndex = opts.supplierIndex ?? buildSupplierIdentityIndexFromPeriod(record);
-  const exportableRows = collectExportRows(record, supplierIndex).filter(isXmlExportableDgiReleveRow);
+  const exportRows = collectExportRows(record, supplierIndex);
 
-  const rdBlocks = exportableRows.map((row, index) => buildRdXmlBlock(row, index + 1)).join('\n');
+  const rdBlocks = exportRows.map((row, index) => buildRdXmlBlock(row, index + 1)).join('\n');
 
   const lines = [
     '<?xml version="1.0" encoding="UTF-8"?>',

@@ -617,6 +617,7 @@ export function buildDgiReleveRows(
 ): DgiReleveDeductionRow[] {
   const supplierIndex = index ?? buildSupplierIdentityIndexFromPeriod(record);
 
+  // Every deductible purchase line for the period is included; ICE/IF may be empty in refF.
   return record.lines.filter(isDeductiblePurchaseLine).map((line, rowIndex) => {
     const modePaiementCode = dgiPaymentModeCode(line.paymentMode);
     const issueDate = formatDgiDateYmd(line.issueDate);
