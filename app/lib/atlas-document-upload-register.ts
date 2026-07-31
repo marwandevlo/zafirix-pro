@@ -302,7 +302,7 @@ export async function registerStoredDocument(
     ok: true,
     document: {
       id: documentId,
-      companyId,
+      companyId: effectiveCompanyId,
       filename: safeName,
       mimeType,
       sizeBytes,

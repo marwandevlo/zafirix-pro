@@ -86,6 +86,13 @@ export async function prepareStorageUploadSlot(
   const safeName = sanitizeDocumentFilename(filename);
   const storagePath = buildAtlasDocumentStoragePath(userId, companyId, documentId, safeName);
 
+  try {
+    const admin = supabase;
+    await ensureCompanyStorageNamespace(admin, userId, companyId);
+  } catch {
+    /* non-blocking */
+  }
+
   let signedUploadToken: string | undefined;
   let signedUploadPath: string | undefined;
 
