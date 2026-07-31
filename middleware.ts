@@ -17,6 +17,7 @@ import {
   normalizeStatus,
   type ProfileStatus,
 } from '@/app/types/auth';
+import { finalizeHtmlDocumentResponse } from '@/app/lib/html-cache-headers';
 
 async function userHasAdminAccess(user: User, supabaseUrl: string): Promise<boolean> {
   if (jwtUserShowsAdmin(user)) return true;
@@ -177,7 +178,9 @@ async function resolveProfileStatusForGate(
 export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
-  if (isPublicPath(pathname)) return NextResponse.next();
+  if (isPublicPath(pathname)) {
+    return finalizeHtmlDocumentResponse(NextResponse.next(), pathname);
+  }
 
   if (pathname === '/api/health' || pathname === '/api/health/dependencies') {
     return NextResponse.next();
@@ -305,7 +308,7 @@ export async function middleware(request: NextRequest) {
     }
   }
 
-  return sessionResponse;
+  return finalizeHtmlDocumentResponse(sessionResponse, pathname);
 }
 
 export const config = {
