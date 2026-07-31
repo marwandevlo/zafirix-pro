@@ -9,6 +9,7 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { documentUploadSessionUserId } from '@/app/lib/atlas-document-upload-auth';
+import { loadDocumentForCompanyAccess } from '@/app/lib/atlas-company-resource-guard';
 import {
   markDocumentValidated,
   registerValidatedDocumentRecords,
@@ -20,6 +21,7 @@ import { parseNestedClassification } from '@/app/lib/atlas-ai-json-parse';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
+export const fetchCache = 'force-no-store';
 
 type ValidateBody = {
   action?: string;
@@ -53,16 +55,18 @@ export async function POST(
 
   const admin = getSupabaseServiceRoleClient();
 
-  const { data: doc, error: fetchErr } = await admin
-    .from('atlas_documents')
-    .select('id, company_id, processing_status, validation_status, document_type, metadata')
-    .eq('id', documentId)
-    .eq('user_id', userId)
-    .maybeSingle();
+  const loaded = await loadDocumentForCompanyAccess(
+    admin,
+    userId,
+    documentId,
+    'id, company_id, processing_status, validation_status, document_type, metadata',
+  );
 
-  if (fetchErr || !doc) {
-    return NextResponse.json({ error: 'document_not_found' }, { status: 404 });
+  if (!loaded.ok) {
+    return NextResponse.json({ error: 'document_not_found' }, { status: loaded.status });
   }
+
+  const doc = loaded.row;
 
   if (doc.processing_status !== 'processed') {
     return NextResponse.json(
@@ -104,8 +108,8 @@ export async function POST(
       admin,
       userId,
       documentId,
-      doc.company_id ? String(doc.company_id) : null,
-      doc.validation_status,
+      loaded.companyId,
+      doc.validation_status as string | null,
       registration,
       docType,
     );
@@ -135,21 +139,19 @@ export async function POST(
       updated_at: now,
     })
     .eq('id', documentId)
-    .eq('user_id', userId);
+    .eq('company_id', loaded.companyId);
 
   if (updateErr) {
     return NextResponse.json({ error: 'update_failed', message: updateErr.message }, { status: 500 });
   }
 
-  if (doc.company_id) {
-    void logDocumentEvent({
-      companyId: doc.company_id,
+  void logDocumentEvent({
+      companyId: loaded.companyId,
       documentId,
       userId,
       eventType: action === 'rejected' ? 'user_rejected' : 'validation_required',
       payload: { action, note: body.note ?? null, previous_status: doc.validation_status },
     });
-  }
 
   revalidateDocumentSurfaces();
 

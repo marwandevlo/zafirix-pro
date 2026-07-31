@@ -1,8 +1,6 @@
-import { revalidatePath } from 'next/cache';
+import { revalidateCompanySurfaces } from '@/app/lib/revalidate-company-surfaces';
 
 /** Invalidate cached TVA surfaces after supplier identity or suggestion mutations. */
-export function revalidateTvaSurfaces(_companyId?: string): void {
-  revalidatePath('/tva');
-  revalidatePath('/declarations');
-  revalidatePath('/comptabilite');
+export function revalidateTvaSurfaces(companyId?: string): void {
+  revalidateCompanySurfaces(companyId);
 }

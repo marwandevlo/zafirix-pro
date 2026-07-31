@@ -8,6 +8,7 @@ import type {
 } from '@/app/types/atlas-document';
 
 import type { AtlasOcrPageMeta } from '@/app/lib/atlas-pdf-ocr-multipage';
+import { resolveDocumentScope, type DocumentScope } from '@/app/lib/atlas-company-resource-guard';
 
 const STUCK_OCR_MS = 5 * 60 * 1000;
 const MAX_OCR_RETRIES = 1;
@@ -23,17 +24,26 @@ function progressPercent(page: number, total: number): number {
   return Math.min(100, Math.round((page / total) * 100));
 }
 
+function scopeDocumentQuery<T extends { eq: (col: string, val: string) => T }>(
+  query: T,
+  scope: DocumentScope,
+): T {
+  if (scope.mode === 'company') return query.eq('company_id', scope.companyId);
+  return query.eq('user_id', scope.userId);
+}
+
 async function fetchDocumentMetadata(
   supabase: SupabaseClient,
   userId: string,
   documentId: string,
 ): Promise<Record<string, unknown>> {
-  const { data } = await supabase
-    .from('atlas_documents')
-    .select('metadata')
-    .eq('id', documentId)
-    .eq('user_id', userId)
-    .maybeSingle();
+  const scope = await resolveDocumentScope(supabase, userId, documentId);
+  if (!scope) return {};
+
+  let query = supabase.from('atlas_documents').select('metadata').eq('id', documentId);
+  query = scopeDocumentQuery(query, scope);
+
+  const { data } = await query.maybeSingle();
   return asMetaRecord(data?.metadata);
 }
 
@@ -44,12 +54,15 @@ export async function updateDocumentOcrProgress(
   documentId: string,
   progress: { phase: OcrProgressPhase; page: number; total: number },
 ): Promise<void> {
+  const scope = await resolveDocumentScope(supabase, userId, documentId);
+  if (!scope) return;
+
   const meta = await fetchDocumentMetadata(supabase, userId, documentId);
   const ocr = asMetaRecord(meta.ocr);
   const total = progress.total;
   const page = progress.page;
 
-  await supabase
+  let updateQuery = supabase
     .from('atlas_documents')
     .update({
       processing_status: 'processing',
@@ -67,8 +80,10 @@ export async function updateDocumentOcrProgress(
       },
       updated_at: new Date().toISOString(),
     })
-    .eq('id', documentId)
-    .eq('user_id', userId);
+    .eq('id', documentId);
+
+  updateQuery = scopeDocumentQuery(updateQuery, scope);
+  await updateQuery;
 }
 
 export async function markDocumentOcrJobStarted(
@@ -78,12 +93,15 @@ export async function markDocumentOcrJobStarted(
   file: { filename: string | null; mimeType: string | null; sizeBytes: number | null; retryCount?: number },
   opts?: { pageCount?: number },
 ): Promise<void> {
+  const scope = await resolveDocumentScope(supabase, userId, documentId);
+  if (!scope) return;
+
   const meta = await fetchDocumentMetadata(supabase, userId, documentId);
   const ocr = asMetaRecord(meta.ocr);
   const total = opts?.pageCount ?? (typeof ocr.page_count === 'number' ? ocr.page_count : 0);
   const now = new Date().toISOString();
 
-  await supabase
+  let updateQuery = supabase
     .from('atlas_documents')
     .update({
       processing_status: 'processing',
@@ -106,8 +124,10 @@ export async function markDocumentOcrJobStarted(
       },
       updated_at: now,
     })
-    .eq('id', documentId)
-    .eq('user_id', userId);
+    .eq('id', documentId);
+
+  updateQuery = scopeDocumentQuery(updateQuery, scope);
+  await updateQuery;
 }
 
 export async function updateDocumentOcrPageCount(
@@ -116,10 +136,13 @@ export async function updateDocumentOcrPageCount(
   documentId: string,
   pageCount: number,
 ): Promise<void> {
+  const scope = await resolveDocumentScope(supabase, userId, documentId);
+  if (!scope) return;
+
   const meta = await fetchDocumentMetadata(supabase, userId, documentId);
   const ocr = asMetaRecord(meta.ocr);
 
-  await supabase
+  let updateQuery = supabase
     .from('atlas_documents')
     .update({
       metadata: {
@@ -133,8 +156,10 @@ export async function updateDocumentOcrPageCount(
       },
       updated_at: new Date().toISOString(),
     })
-    .eq('id', documentId)
-    .eq('user_id', userId);
+    .eq('id', documentId);
+
+  updateQuery = scopeDocumentQuery(updateQuery, scope);
+  await updateQuery;
 }
 
 export async function markDocumentOcrFailed(
@@ -249,16 +274,19 @@ export async function persistDocumentOcrResult(
   documentId: string,
   input: PersistDocumentOcrInput,
 ): Promise<{ ok: true } | { ok: false; error: string }> {
+  const scope = await resolveDocumentScope(supabase, userId, documentId);
+  if (!scope) return { ok: false, error: 'document_not_found_or_forbidden' };
+
   const baseMeta = input.preserveFileMeta
     ? asMetaRecord(input.preserveFileMeta.existingMetadata)
     : await fetchDocumentMetadata(supabase, userId, documentId);
 
-  const { data: currentRow } = await supabase
+  let statusQuery = supabase
     .from('atlas_documents')
     .select('processing_status')
-    .eq('id', documentId)
-    .eq('user_id', userId)
-    .maybeSingle();
+    .eq('id', documentId);
+  statusQuery = scopeDocumentQuery(statusQuery, scope);
+  const { data: currentRow } = await statusQuery.maybeSingle();
 
   if (currentRow?.processing_status === 'processed' && input.processingStatus === 'failed') {
     return { ok: true };
@@ -300,7 +328,7 @@ export async function persistDocumentOcrResult(
       ? JSON.stringify(extraction, null, 2)
       : input.ocrError?.message ?? JSON.stringify(ocrMeta, null, 2));
 
-  const { error } = await supabase
+  let updateQuery = supabase
     .from('atlas_documents')
     .update({
       processing_status: input.processingStatus,
@@ -315,23 +343,25 @@ export async function persistDocumentOcrResult(
       },
       updated_at: now,
     })
-    .eq('id', documentId)
-    .eq('user_id', userId);
+    .eq('id', documentId);
+
+  updateQuery = scopeDocumentQuery(updateQuery, scope);
+  const { error } = await updateQuery;
 
   if (error) return { ok: false, error: error.message };
 
   // Best-effort: set top-level classification columns (requires migration to have run).
   // If columns don't exist yet, the error is silently ignored — data is in metadata.
   if (input.classification && input.processingStatus === 'processed') {
-    await supabase
+    let classifyQuery = supabase
       .from('atlas_documents')
       .update({
         document_type: input.classification.detected_type,
         validation_status: input.classification.type_confidence < 0.85 ? 'needs_correction' : 'pending_review',
       })
-      .eq('id', documentId)
-      .eq('user_id', userId)
-      .then(() => {/* best-effort, ignore errors */});
+      .eq('id', documentId);
+    classifyQuery = scopeDocumentQuery(classifyQuery, scope);
+    await classifyQuery.then(() => {/* best-effort, ignore errors */});
   }
 
   return { ok: true };
@@ -360,12 +390,15 @@ export async function readDocumentOcrProgress(
   userId: string,
   documentId: string,
 ): Promise<{ ok: true; progress: DocumentOcrProgressSnapshot } | { ok: false; code: string }> {
-  const { data, error } = await supabase
+  const scope = await resolveDocumentScope(supabase, userId, documentId);
+  if (!scope) return { ok: false, code: 'document_not_found_or_forbidden' };
+
+  let query = supabase
     .from('atlas_documents')
     .select('processing_status, metadata, extracted_text')
-    .eq('id', documentId)
-    .eq('user_id', userId)
-    .maybeSingle();
+    .eq('id', documentId);
+  query = scopeDocumentQuery(query, scope);
+  const { data, error } = await query.maybeSingle();
 
   if (error || !data) {
     return { ok: false, code: 'document_not_found_or_forbidden' };

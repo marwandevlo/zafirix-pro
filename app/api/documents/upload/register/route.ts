@@ -13,6 +13,7 @@ import { checkWorkspaceRateLimit, rateLimitResponse } from '@/app/lib/atlas-rate
 import { meterFeatureUsage } from '@/app/lib/atlas-usage-meter';
 import { ensureWorkspaceSubscription } from '@/app/lib/atlas-billing-server';
 import { getSupabaseServiceRoleClient } from '@/app/lib/supabase-admin';
+import { revalidateCompanySurfaces } from '@/app/lib/revalidate-company-surfaces';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -150,6 +151,8 @@ export async function POST(request: NextRequest) {
       await runDocumentAutoPipeline(userId, result.document.id, 'register');
     });
   }
+
+  revalidateCompanySurfaces(companyId);
 
   return NextResponse.json({
     success: true,

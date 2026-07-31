@@ -16,6 +16,7 @@ import { getSupabaseServiceRoleClient } from '@/app/lib/supabase-admin';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
+export const fetchCache = 'force-no-store';
 
 function rowToInvoice(row: Record<string, unknown>) {
   return {
@@ -56,8 +57,7 @@ export async function GET(request: NextRequest) {
         .from('atlas_invoices')
         .select('*')
         .eq('id', invoiceId.trim())
-        .eq('user_id', session.userId)
-        .or(`company_id.eq.${access.companyId},company_id.is.null`)
+        .eq('company_id', access.companyId)
         .maybeSingle();
 
       if (error) {
@@ -80,8 +80,7 @@ export async function GET(request: NextRequest) {
     const { data, error } = await admin
       .from('atlas_invoices')
       .select('*')
-      .eq('user_id', session.userId)
-      .or(`company_id.eq.${access.companyId},company_id.is.null`)
+      .eq('company_id', access.companyId)
       .order('issue_date', { ascending: false })
       .limit(500);
 

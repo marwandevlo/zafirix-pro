@@ -195,13 +195,16 @@ export async function findSupplierInvoiceByDocumentPage(
     );
   }
 
-  const auth = await requireSupabaseUser();
-  if (!auth.ok) return null;
+  const ownedDoc = await requireOwnedDocument(documentId);
+  if (!ownedDoc.ok) return null;
+
+  const companyId = ownedDoc.companyId;
+  if (!companyId) return null;
 
   let query = supabase
     .from('atlas_supplier_invoices')
     .select(SUPPLIER_INVOICE_SELECT)
-    .eq('user_id', auth.userId)
+    .eq('company_id', companyId)
     .eq('document_id', documentId)
     .eq('source_page', sourcePage);
 
@@ -224,13 +227,16 @@ export async function findSupplierInvoiceByDocumentId(
     return readSupplierInvoicesFromLocalStorage().find((inv) => inv.documentId === documentId) ?? null;
   }
 
-  const auth = await requireSupabaseUser();
-  if (!auth.ok) return null;
+  const ownedDoc = await requireOwnedDocument(documentId);
+  if (!ownedDoc.ok) return null;
+
+  const companyId = ownedDoc.companyId;
+  if (!companyId) return null;
 
   const { data, error } = await supabase
     .from('atlas_supplier_invoices')
     .select(SUPPLIER_INVOICE_SELECT)
-    .eq('user_id', auth.userId)
+    .eq('company_id', companyId)
     .eq('document_id', documentId)
     .order('created_at', { ascending: true })
     .limit(1)
@@ -336,7 +342,7 @@ export async function createSupplierInvoicesFromOcr(
     .from('atlas_documents')
     .select('id, user_id, company_id, processing_status, content, metadata')
     .eq('id', documentId)
-    .eq('user_id', auth.userId)
+    .eq('company_id', ownedDoc.companyId ?? '')
     .maybeSingle();
 
   if (docErr || !row?.id) return { ok: false, error: 'document_not_found_or_forbidden' };
@@ -497,7 +503,7 @@ export async function updateSupplierInvoice(
     .from('atlas_supplier_invoices')
     .update(row)
     .eq('id', invoice.id)
-    .eq('user_id', auth.userId);
+    .eq('company_id', companyId);
 
   if (error) return { ok: false, error: error.message };
   return { ok: true };
@@ -519,11 +525,14 @@ export async function deleteSupplierInvoice(
   const owned = await requireOwnedSupplierInvoice(id);
   if (!owned.ok) return { ok: false, error: owned.error };
 
+  const scopedCompanyId = owned.companyId;
+  if (!scopedCompanyId) return { ok: false, error: 'company_required' };
+
   const { error } = await supabase
     .from('atlas_supplier_invoices')
     .delete()
     .eq('id', id)
-    .eq('user_id', auth.userId);
+    .eq('company_id', scopedCompanyId);
 
   if (error) return { ok: false, error: error.message };
   return { ok: true };

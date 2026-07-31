@@ -1,24 +1,25 @@
 /**
  * POST /api/accounting/entries/bulk-delete
- * Body: { ids: string[] }
+ * Body: { ids: string[]; companyId?: string }
  */
 import { NextRequest, NextResponse } from 'next/server';
 import { documentUploadSessionUserId } from '@/app/lib/atlas-document-upload-auth';
+import { bulkDeleteCompanyScoped } from '@/app/lib/atlas-company-resource-guard';
 import { bulkDeleteStatusForError, prepareBulkDeleteIds } from '@/app/lib/atlas-bulk-delete-server';
 import { getSupabaseServiceRoleClient } from '@/app/lib/supabase-admin';
+import { revalidateCompanySurfaces } from '@/app/lib/revalidate-company-surfaces';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
-
-const BATCH_SIZE = 50;
+export const fetchCache = 'force-no-store';
 
 export async function POST(request: NextRequest) {
   const userId = await documentUploadSessionUserId(request);
   if (!userId) return NextResponse.json({ error: 'auth_required' }, { status: 401 });
 
-  let body: { ids?: string[] };
+  let body: { ids?: string[]; companyId?: string };
   try {
-    body = (await request.json()) as { ids?: string[] };
+    body = (await request.json()) as { ids?: string[]; companyId?: string };
   } catch {
     return NextResponse.json({ error: 'invalid_body' }, { status: 400 });
   }
@@ -34,22 +35,19 @@ export async function POST(request: NextRequest) {
   }
 
   const admin = getSupabaseServiceRoleClient();
-  let deleted = 0;
+  const result = await bulkDeleteCompanyScoped(
+    admin,
+    userId,
+    'atlas_accounting_entries',
+    uuidIds,
+    body.companyId,
+  );
 
-  for (let i = 0; i < uuidIds.length; i += BATCH_SIZE) {
-    const batch = uuidIds.slice(i, i + BATCH_SIZE);
-    const { error, count } = await admin
-      .from('atlas_accounting_entries')
-      .delete({ count: 'exact' })
-      .in('id', batch)
-      .eq('user_id', userId);
-
-    if (error) {
-      return NextResponse.json({ error: error.message }, { status: bulkDeleteStatusForError(error.message) });
-    }
-
-    deleted += count ?? batch.length;
+  if (!result.ok) {
+    const status = bulkDeleteStatusForError(result.error);
+    return NextResponse.json({ error: result.error }, { status });
   }
 
-  return NextResponse.json({ ok: true, deleted, skipped, skippedIds });
+  revalidateCompanySurfaces(body.companyId);
+  return NextResponse.json({ ok: true, deleted: result.deleted, skipped, skippedIds });
 }

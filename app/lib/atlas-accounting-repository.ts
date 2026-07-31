@@ -5,6 +5,7 @@ import { ATLAS_STORAGE_KEYS } from '@/app/lib/atlas-storage-keys';
 import { isAtlasSupabaseDataEnabled } from '@/app/lib/atlas-data-source';
 import { blockCriticalLocalStorageInProduction } from '@/app/lib/atlas-runtime-guards';
 import { requireSupabaseUser } from '@/app/lib/atlas-supabase-guard';
+import { canAccessCompany } from '@/app/lib/atlas-permissions';
 
 export function readAccountingFromLocalStorage(): AtlasAccountingEntry[] {
   if (blockCriticalLocalStorageInProduction('atlas_accounting')) return [];
@@ -40,6 +41,9 @@ export async function listAtlasAccountingEntries(opts?: { companyId?: string | n
     .order('entry_date', { ascending: true });
 
   if (opts?.companyId) {
+    const auth = await requireSupabaseUser();
+    if (!auth.ok) return [];
+    if (!(await canAccessCompany(supabase, auth.userId, opts.companyId))) return [];
     q = q.eq('company_id', opts.companyId);
   }
 
@@ -107,15 +111,39 @@ export async function updateAtlasAccountingEntryByRowId(
   const auth = await requireSupabaseUser();
   if (!auth.ok) return { ok: false, error: 'auth_required' };
 
-  const { error } = await supabase
+  const { data: existing } = await supabase
+    .from('atlas_accounting_entries')
+    .select('id, company_id, user_id')
+    .eq('id', rowId)
+    .maybeSingle();
+
+  if (!existing?.id) return { ok: false, error: 'entry_not_found_or_forbidden' };
+
+  const entryCompanyId = existing.company_id ? String(existing.company_id) : null;
+  if (entryCompanyId) {
+    if (!(await canAccessCompany(supabase, auth.userId, entryCompanyId))) {
+      return { ok: false, error: 'entry_not_found_or_forbidden' };
+    }
+  } else if (String(existing.user_id) !== auth.userId) {
+    return { ok: false, error: 'entry_not_found_or_forbidden' };
+  }
+
+  let updateQuery = supabase
     .from('atlas_accounting_entries')
     .update({
       entry_json: entry,
       entry_date: entry.date || null,
       updated_at: new Date().toISOString(),
     })
-    .eq('id', rowId)
-    .eq('user_id', auth.userId);
+    .eq('id', rowId);
+
+  if (entryCompanyId) {
+    updateQuery = updateQuery.eq('company_id', entryCompanyId);
+  } else {
+    updateQuery = updateQuery.eq('user_id', auth.userId);
+  }
+
+  const { error } = await updateQuery;
 
   if (error) return { ok: false, error: error.message };
   return { ok: true };
@@ -154,11 +182,31 @@ export async function deleteAtlasAccountingEntryBySelectionId(
   const auth = await requireSupabaseUser();
   if (!auth.ok) return { ok: false, error: 'auth_required' };
 
-  const { error } = await supabase
+  const { data: existing } = await supabase
     .from('atlas_accounting_entries')
-    .delete()
+    .select('id, company_id, user_id')
     .eq('id', uuid)
-    .eq('user_id', auth.userId);
+    .maybeSingle();
+
+  if (!existing?.id) return { ok: false, error: 'entry_not_found_or_forbidden' };
+
+  const entryCompanyId = existing.company_id ? String(existing.company_id) : null;
+  if (entryCompanyId) {
+    if (!(await canAccessCompany(supabase, auth.userId, entryCompanyId))) {
+      return { ok: false, error: 'entry_not_found_or_forbidden' };
+    }
+  } else if (String(existing.user_id) !== auth.userId) {
+    return { ok: false, error: 'entry_not_found_or_forbidden' };
+  }
+
+  let deleteQuery = supabase.from('atlas_accounting_entries').delete().eq('id', uuid);
+  if (entryCompanyId) {
+    deleteQuery = deleteQuery.eq('company_id', entryCompanyId);
+  } else {
+    deleteQuery = deleteQuery.eq('user_id', auth.userId);
+  }
+
+  const { error } = await deleteQuery;
 
   if (error) return { ok: false, error: error.message };
   return { ok: true };

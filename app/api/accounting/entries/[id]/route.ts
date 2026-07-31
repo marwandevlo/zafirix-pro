@@ -3,13 +3,16 @@
  */
 import { NextRequest, NextResponse } from 'next/server';
 import { documentUploadSessionUserId } from '@/app/lib/atlas-document-upload-auth';
+import { assertUserCompanyAccess, bulkDeleteCompanyScoped } from '@/app/lib/atlas-company-resource-guard';
 import { isPostgresUuid } from '@/app/lib/atlas-id-validation';
 import { getSupabaseServiceRoleClient } from '@/app/lib/supabase-admin';
 import { isValidPcgeAccount } from '@/app/lib/atlas-morocco-compliance';
+import { revalidateCompanySurfaces } from '@/app/lib/revalidate-company-surfaces';
 import type { AtlasAccountingEntry } from '@/app/types/atlas-accounting';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
+export const fetchCache = 'force-no-store';
 
 type RouteParams = { params: Promise<{ id: string }> };
 
@@ -23,13 +26,26 @@ export async function DELETE(_request: NextRequest, { params }: RouteParams) {
   }
   const admin = getSupabaseServiceRoleClient();
 
-  const { error } = await admin
+  const { data: row } = await admin
     .from('atlas_accounting_entries')
-    .delete()
+    .select('company_id')
     .eq('id', id)
-    .eq('user_id', userId);
+    .maybeSingle();
 
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  if (!row?.company_id) return NextResponse.json({ error: 'not_found' }, { status: 404 });
+
+  const companyId = String(row.company_id);
+  const access = await assertUserCompanyAccess(admin, userId, companyId);
+  if (!access.ok) {
+    return NextResponse.json({ error: access.error }, { status: access.status });
+  }
+
+  const result = await bulkDeleteCompanyScoped(admin, userId, 'atlas_accounting_entries', [id], companyId);
+  if (!result.ok) {
+    return NextResponse.json({ error: result.error }, { status: result.status });
+  }
+
+  revalidateCompanySurfaces(companyId);
   return NextResponse.json({ ok: true });
 }
 
@@ -46,12 +62,17 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
 
   const { data: existing } = await admin
     .from('atlas_accounting_entries')
-    .select('entry_json, validation_status')
+    .select('entry_json, validation_status, company_id')
     .eq('id', id)
-    .eq('user_id', userId)
     .maybeSingle();
 
-  if (!existing) return NextResponse.json({ error: 'not_found' }, { status: 404 });
+  if (!existing?.company_id) return NextResponse.json({ error: 'not_found' }, { status: 404 });
+
+  const companyId = String(existing.company_id);
+  const access = await assertUserCompanyAccess(admin, userId, companyId);
+  if (!access.ok) {
+    return NextResponse.json({ error: access.error }, { status: access.status });
+  }
 
   const current = existing.entry_json as AtlasAccountingEntry;
   const compte = body.compte != null ? String(body.compte).trim() : current.compte;
@@ -79,8 +100,10 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
       updated_at: new Date().toISOString(),
     })
     .eq('id', id)
-    .eq('user_id', userId);
+    .eq('company_id', companyId);
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+
+  revalidateCompanySurfaces(companyId);
   return NextResponse.json({ ok: true, entry: updated });
 }

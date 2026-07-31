@@ -1,8 +1,10 @@
 /**
  * Application-layer ownership helpers (RLS remains authoritative on Supabase).
+ * Shared workspace resources are scoped by company_id + canAccessCompany.
  */
 
 import { isAtlasSupabaseDataEnabled } from '@/app/lib/atlas-data-source';
+import { canAccessCompany } from '@/app/lib/atlas-permissions';
 import { requireSupabaseUser } from '@/app/lib/atlas-supabase-guard';
 import { supabase } from '@/app/lib/supabase';
 
@@ -14,7 +16,11 @@ export async function requireEntityOwner(): Promise<OwnershipAuth> {
   return { ok: true, userId: auth.userId };
 }
 
-/** Verifies the company row belongs to the signed-in user (Sprint A). */
+async function assertCompanyAccess(userId: string, companyId: string): Promise<boolean> {
+  return canAccessCompany(supabase, userId, companyId);
+}
+
+/** Verifies the signed-in user may access the company workspace. */
 export async function requireOwnedCompany(
   dbRowId: string,
 ): Promise<OwnershipAuth & { companyId?: string }> {
@@ -25,24 +31,18 @@ export async function requireOwnedCompany(
     return { ok: true, userId: auth.userId, companyId: dbRowId };
   }
 
-  const { data, error } = await supabase
-    .from('atlas_companies')
-    .select('id')
-    .eq('id', dbRowId)
-    .eq('user_id', auth.userId)
-    .maybeSingle();
-
-  if (error || !data?.id) {
+  const allowed = await assertCompanyAccess(auth.userId, dbRowId);
+  if (!allowed) {
     return { ok: false, error: 'company_not_found_or_forbidden' };
   }
 
-  return { ok: true, userId: auth.userId, companyId: data.id };
+  return { ok: true, userId: auth.userId, companyId: dbRowId };
 }
 
-/** Verifies the client row belongs to the signed-in user (Sprint C). */
+/** Verifies the client row belongs to an accessible company workspace. */
 export async function requireOwnedClient(
   clientId: string,
-): Promise<OwnershipAuth & { clientId?: string }> {
+): Promise<OwnershipAuth & { clientId?: string; companyId?: string | null }> {
   const auth = await requireEntityOwner();
   if (!auth.ok) return auth;
 
@@ -52,22 +52,30 @@ export async function requireOwnedClient(
 
   const { data, error } = await supabase
     .from('atlas_clients')
-    .select('id')
+    .select('id, company_id, user_id')
     .eq('id', clientId)
-    .eq('user_id', auth.userId)
     .maybeSingle();
 
   if (error || !data?.id) {
     return { ok: false, error: 'client_not_found_or_forbidden' };
   }
 
-  return { ok: true, userId: auth.userId, clientId: data.id };
+  const companyId = data.company_id ? String(data.company_id) : null;
+  if (companyId) {
+    if (!(await assertCompanyAccess(auth.userId, companyId))) {
+      return { ok: false, error: 'client_not_found_or_forbidden' };
+    }
+  } else if (String(data.user_id) !== auth.userId) {
+    return { ok: false, error: 'client_not_found_or_forbidden' };
+  }
+
+  return { ok: true, userId: auth.userId, clientId: data.id, companyId };
 }
 
-/** Verifies the document row belongs to the signed-in user (Sprint D-alt). */
+/** Verifies the document row belongs to an accessible company workspace. */
 export async function requireOwnedDocument(
   documentId: string,
-): Promise<OwnershipAuth & { documentId?: string }> {
+): Promise<OwnershipAuth & { documentId?: string; companyId?: string | null }> {
   const auth = await requireEntityOwner();
   if (!auth.ok) return auth;
 
@@ -77,19 +85,27 @@ export async function requireOwnedDocument(
 
   const { data, error } = await supabase
     .from('atlas_documents')
-    .select('id')
+    .select('id, company_id, user_id')
     .eq('id', documentId)
-    .eq('user_id', auth.userId)
     .maybeSingle();
 
   if (error || !data?.id) {
     return { ok: false, error: 'document_not_found_or_forbidden' };
   }
 
-  return { ok: true, userId: auth.userId, documentId: data.id };
+  const companyId = data.company_id ? String(data.company_id) : null;
+  if (companyId) {
+    if (!(await assertCompanyAccess(auth.userId, companyId))) {
+      return { ok: false, error: 'document_not_found_or_forbidden' };
+    }
+  } else if (String(data.user_id) !== auth.userId) {
+    return { ok: false, error: 'document_not_found_or_forbidden' };
+  }
+
+  return { ok: true, userId: auth.userId, documentId: data.id, companyId };
 }
 
-/** Verifies the invoice row belongs to the signed-in user (optionally same company). */
+/** Verifies the invoice row belongs to an accessible company workspace. */
 export async function requireOwnedInvoice(
   invoiceId: string,
   companyId?: string | null,
@@ -103,23 +119,31 @@ export async function requireOwnedInvoice(
 
   const { data, error } = await supabase
     .from('atlas_invoices')
-    .select('id, company_id')
+    .select('id, company_id, user_id')
     .eq('id', invoiceId)
-    .eq('user_id', auth.userId)
     .maybeSingle();
 
   if (error || !data?.id) {
     return { ok: false, error: 'invoice_not_found_or_forbidden' };
   }
 
-  if (companyId && data.company_id && data.company_id !== companyId) {
+  const rowCompanyId = data.company_id ? String(data.company_id) : null;
+  if (rowCompanyId) {
+    if (!(await assertCompanyAccess(auth.userId, rowCompanyId))) {
+      return { ok: false, error: 'invoice_not_found_or_forbidden' };
+    }
+  } else if (String(data.user_id) !== auth.userId) {
+    return { ok: false, error: 'invoice_not_found_or_forbidden' };
+  }
+
+  if (companyId && rowCompanyId && rowCompanyId !== companyId) {
     return { ok: false, error: 'invoice_company_mismatch' };
   }
 
-  return { ok: true, userId: auth.userId, invoiceId: data.id, companyId: data.company_id ?? null };
+  return { ok: true, userId: auth.userId, invoiceId: data.id, companyId: rowCompanyId };
 }
 
-/** Verifies a client row belongs to the signed-in user and target company. */
+/** Verifies a client row belongs to the target company workspace. */
 export async function requireClientInCompany(
   clientId: string,
   companyId: string,
@@ -131,11 +155,13 @@ export async function requireClientInCompany(
     return { ok: true, userId: auth.userId };
   }
 
+  const companyOk = await requireOwnedCompany(companyId);
+  if (!companyOk.ok) return companyOk;
+
   const { data, error } = await supabase
     .from('atlas_clients')
     .select('id, company_id')
     .eq('id', clientId)
-    .eq('user_id', auth.userId)
     .maybeSingle();
 
   if (error || !data?.id) {
@@ -148,10 +174,10 @@ export async function requireClientInCompany(
   return { ok: true, userId: auth.userId };
 }
 
-/** Verifies the supplier invoice row belongs to the signed-in user (Sprint E). */
+/** Verifies the supplier invoice row belongs to an accessible company workspace. */
 export async function requireOwnedSupplierInvoice(
   supplierInvoiceId: string,
-): Promise<OwnershipAuth & { supplierInvoiceId?: string }> {
+): Promise<OwnershipAuth & { supplierInvoiceId?: string; companyId?: string | null }> {
   const auth = await requireEntityOwner();
   if (!auth.ok) return auth;
 
@@ -161,14 +187,22 @@ export async function requireOwnedSupplierInvoice(
 
   const { data, error } = await supabase
     .from('atlas_supplier_invoices')
-    .select('id')
+    .select('id, company_id, user_id')
     .eq('id', supplierInvoiceId)
-    .eq('user_id', auth.userId)
     .maybeSingle();
 
   if (error || !data?.id) {
     return { ok: false, error: 'supplier_invoice_not_found_or_forbidden' };
   }
 
-  return { ok: true, userId: auth.userId, supplierInvoiceId: data.id };
+  const companyId = data.company_id ? String(data.company_id) : null;
+  if (companyId) {
+    if (!(await assertCompanyAccess(auth.userId, companyId))) {
+      return { ok: false, error: 'supplier_invoice_not_found_or_forbidden' };
+    }
+  } else if (String(data.user_id) !== auth.userId) {
+    return { ok: false, error: 'supplier_invoice_not_found_or_forbidden' };
+  }
+
+  return { ok: true, userId: auth.userId, supplierInvoiceId: data.id, companyId };
 }

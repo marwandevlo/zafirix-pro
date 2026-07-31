@@ -130,18 +130,20 @@ export async function getAtlasInvoiceById(
   }
 
   try {
-    const { data, error } = await supabase
-      .from('atlas_invoices')
-      .select('*')
-      .eq('id', id)
-      .eq('user_id', auth.userId)
-      .maybeSingle();
+    let query = supabase.from('atlas_invoices').select('*').eq('id', id);
+    if (companyId) query = query.eq('company_id', companyId);
 
+    const { data, error } = await query.maybeSingle();
     if (error || !data?.id) return null;
 
-    if (companyId) {
-      if (!data.company_id || String(data.company_id) !== companyId) return null;
+    const rowCompanyId = data.company_id ? String(data.company_id) : null;
+    if (rowCompanyId) {
+      if (!(await canAccessCompany(supabase, auth.userId, rowCompanyId))) return null;
+    } else if (String(data.user_id) !== auth.userId) {
+      return null;
     }
+
+    if (companyId && rowCompanyId && rowCompanyId !== companyId) return null;
 
     return rowToInvoice(data as Record<string, unknown>);
   } catch {
@@ -209,7 +211,6 @@ export async function upsertAtlasInvoice(
       .from('atlas_invoices')
       .update(row)
       .eq('id', invoice.id)
-      .eq('user_id', auth.userId)
       .eq('company_id', companyId);
     if (error) return { ok: false, error: error.message };
     const invMeta = (invoice.metadata ?? {}) as InvoiceInventoryMetadata;
@@ -246,8 +247,10 @@ export async function deleteAtlasInvoice(
   const ownedInvoice = await requireOwnedInvoice(id, companyId ?? undefined);
   if (!ownedInvoice.ok) return { ok: false, error: ownedInvoice.error };
 
-  let query = supabase.from('atlas_invoices').delete().eq('id', id).eq('user_id', auth.userId);
-  if (companyId) query = query.eq('company_id', companyId);
+  const scopedCompanyId = companyId ?? ownedInvoice.companyId;
+  if (!scopedCompanyId) return { ok: false, error: 'company_required' };
+
+  const query = supabase.from('atlas_invoices').delete().eq('id', id).eq('company_id', scopedCompanyId);
 
   const { error } = await query;
   if (error) return { ok: false, error: error.message };
@@ -265,7 +268,7 @@ export function atlasInvoiceErrorMessage(code: string): string {
     case 'client_company_mismatch':
       return 'Ce client n’appartient pas à la société active.';
     case 'invoice_not_found_or_forbidden':
-      return 'Cette facture est introuvable ou ne vous appartient pas.';
+      return 'Cette facture est introuvable ou non autorisée pour cette société.';
     case 'invoice_company_mismatch':
       return 'Cette facture n’appartient pas à la société active.';
     case 'invalid_id':

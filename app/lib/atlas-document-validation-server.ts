@@ -11,6 +11,7 @@ import type {
   AtlasStructuredExtraction,
 } from '@/app/types/atlas-document';
 import { asRecord } from '@/app/lib/atlas-json';
+import { loadDocumentForCompanyAccess, resolveDocumentScope } from '@/app/lib/atlas-company-resource-guard';
 import { logDocumentEvent } from '@/app/lib/atlas-document-events';
 import {
   buildJournalLines,
@@ -193,7 +194,7 @@ function resolvePersistedInvoiceDate(
 
 async function findExistingSupplierInvoice(
   admin: SupabaseClient,
-  userId: string,
+  companyId: string,
   documentId: string,
   sourcePage: number,
   invoiceNumber?: string | null,
@@ -201,7 +202,7 @@ async function findExistingSupplierInvoice(
   let query = admin
     .from('atlas_supplier_invoices')
     .select('id')
-    .eq('user_id', userId)
+    .eq('company_id', companyId)
     .eq('document_id', documentId)
     .eq('source_page', sourcePage);
 
@@ -214,14 +215,14 @@ async function findExistingSupplierInvoice(
 
 async function findExistingClientInvoice(
   admin: SupabaseClient,
-  userId: string,
+  companyId: string,
   documentId: string,
   invoiceNumber?: string | null,
 ): Promise<string | null> {
   let query = admin
     .from('atlas_invoices')
     .select('id')
-    .eq('user_id', userId)
+    .eq('company_id', companyId)
     .eq('source_document_id', documentId);
 
   const trimmed = invoiceNumber?.trim();
@@ -459,18 +460,18 @@ export async function registerValidatedDocumentRecords(
   userId: string,
   documentId: string,
 ): Promise<DocumentValidationResult> {
-  const { data: row, error: fetchErr } = await admin
-    .from('atlas_documents')
-    .select('id, company_id, processing_status, validation_status, document_type, metadata, content, created_at')
-    .eq('id', documentId)
-    .eq('user_id', userId)
-    .maybeSingle();
+  const loaded = await loadDocumentForCompanyAccess(
+    admin,
+    userId,
+    documentId,
+    'id, company_id, processing_status, validation_status, document_type, metadata, content, created_at',
+  );
 
-  if (fetchErr || !row) {
+  if (!loaded.ok) {
     return { ok: false, error: 'document_not_found', message: 'Document introuvable.' };
   }
 
-  const docRow = row as DocumentRow;
+  const docRow = loaded.row as unknown as DocumentRow;
   if (docRow.processing_status !== 'processed') {
     return {
       ok: false,
@@ -479,7 +480,7 @@ export async function registerValidatedDocumentRecords(
     };
   }
 
-  const companyId = docRow.company_id ? String(docRow.company_id) : '';
+  const companyId = loaded.companyId;
   if (!companyId) {
     return { ok: false, error: 'company_required', message: 'Société active requise pour enregistrer les factures.' };
   }
@@ -488,7 +489,6 @@ export async function registerValidatedDocumentRecords(
     .from('atlas_companies')
     .select('company_json')
     .eq('id', companyId)
-    .eq('user_id', userId)
     .maybeSingle();
 
   const companyJson = companyRow?.company_json;
@@ -583,12 +583,12 @@ export async function registerValidatedDocumentRecords(
       const existing = isPurchase
         ? await findExistingSupplierInvoice(
             admin,
-            userId,
+            companyId,
             documentId,
             0,
             extractStr(extraction.invoice_number),
           )
-        : await findExistingClientInvoice(admin, userId, documentId, extractStr(extraction.invoice_number));
+        : await findExistingClientInvoice(admin, companyId, documentId, extractStr(extraction.invoice_number));
       if (existing) {
         invoiceIds.push(existing);
         invoicesSkipped += 1;
@@ -637,12 +637,12 @@ export async function registerValidatedDocumentRecords(
         const existing = isPurchase
           ? await findExistingSupplierInvoice(
               admin,
-              userId,
+              companyId,
               documentId,
               sourcePage,
               detected.invoice_number,
             )
-          : await findExistingClientInvoice(admin, userId, documentId, detected.invoice_number);
+          : await findExistingClientInvoice(admin, companyId, documentId, detected.invoice_number);
         if (existing) {
           invoiceIds.push(existing);
           invoicesSkipped += 1;
@@ -705,13 +705,12 @@ export async function markDocumentValidated(
   registration: DocumentValidationResult & { ok: true },
   documentType?: string | null,
 ): Promise<void> {
+  const scope = await resolveDocumentScope(admin, userId, documentId);
+  if (!scope || scope.mode !== 'company') return;
+
   const now = new Date().toISOString();
-  const { data: row } = await admin
-    .from('atlas_documents')
-    .select('metadata')
-    .eq('id', documentId)
-    .eq('user_id', userId)
-    .maybeSingle();
+  let metaQuery = admin.from('atlas_documents').select('metadata').eq('id', documentId).eq('company_id', scope.companyId);
+  const { data: row } = await metaQuery.maybeSingle();
 
   const meta = asRecord(row?.metadata);
   let routedModules: string[] = Array.isArray(meta?.routed_to)
@@ -758,7 +757,7 @@ export async function markDocumentValidated(
       updated_at: now,
     })
     .eq('id', documentId)
-    .eq('user_id', userId);
+    .eq('company_id', scope.companyId);
 
   if (companyId) {
     void logDocumentEvent({

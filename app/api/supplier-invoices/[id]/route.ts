@@ -29,19 +29,26 @@ export async function DELETE(_request: NextRequest, { params }: RouteParams) {
   const { id } = await params;
   const admin = getSupabaseServiceRoleClient();
 
+  let companyId: string | null = null;
   try {
-    await assertSupplierInvoiceCompanyAccess(admin, userId, id);
+    ({ companyId } = await assertSupplierInvoiceCompanyAccess(admin, userId, id));
   } catch (err) {
     const message = err instanceof Error ? err.message : 'forbidden';
     const status = message === 'not_found' ? 404 : 403;
     return NextResponse.json({ error: message }, { status, headers: NO_STORE_HEADERS });
   }
 
-  const { error } = await admin.from('atlas_supplier_invoices').delete().eq('id', id);
+  const { error } = await admin
+    .from('atlas_supplier_invoices')
+    .delete()
+    .eq('id', id)
+    .eq('company_id', companyId ?? '');
 
   if (error) {
     return NextResponse.json({ error: error.message }, { status: 500, headers: NO_STORE_HEADERS });
   }
+
+  revalidateTvaSurfaces(companyId ?? undefined);
   return NextResponse.json({ ok: true }, { headers: NO_STORE_HEADERS });
 }
 
@@ -98,6 +105,7 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
     .from('atlas_supplier_invoices')
     .update(patch)
     .eq('id', id)
+    .eq('company_id', companyId ?? '')
     .select('id, supplier_name, invoice_number, invoice_date, amount_ht, vat_amount, amount_ttc, supplier_ice, supplier_if, vat_rate')
     .maybeSingle();
 

@@ -249,7 +249,7 @@ export async function upsertAtlasDocument(doc: AtlasDocument): Promise<{ ok: tru
   const owned = await requireOwnedDocument(String(doc.id));
   if (!owned.ok) return { ok: false, error: owned.error };
 
-  const { error } = await supabase.from('atlas_documents').update({
+  let updateQuery = supabase.from('atlas_documents').update({
     company_id: doc.companyId ?? null,
     type: doc.type ?? 'generic',
     title: doc.title,
@@ -259,7 +259,15 @@ export async function upsertAtlasDocument(doc: AtlasDocument): Promise<{ ok: tru
     status: doc.status,
     metadata: doc.metadata ?? {},
     updated_at: new Date().toISOString(),
-  }).eq('id', doc.id).eq('user_id', auth.userId);
+  }).eq('id', doc.id);
+
+  if (owned.companyId) {
+    updateQuery = updateQuery.eq('company_id', owned.companyId);
+  } else {
+    updateQuery = updateQuery.eq('user_id', auth.userId);
+  }
+
+  const { error } = await updateQuery;
 
   if (error) return { ok: false, error: error.message };
   return { ok: true };
@@ -277,11 +285,18 @@ export async function updateAtlasDocumentProcessingStatus(
   const auth = await requireSupabaseUser();
   if (!auth.ok) return { ok: false, error: 'auth_required' };
 
-  const { error } = await supabase
+  let updateQuery = supabase
     .from('atlas_documents')
     .update({ processing_status: processingStatus, updated_at: new Date().toISOString() })
-    .eq('id', documentId)
-    .eq('user_id', auth.userId);
+    .eq('id', documentId);
+
+  if (owned.companyId) {
+    updateQuery = updateQuery.eq('company_id', owned.companyId);
+  } else {
+    updateQuery = updateQuery.eq('user_id', auth.userId);
+  }
+
+  const { error } = await updateQuery;
 
   if (error) return { ok: false, error: error.message };
   return { ok: true };
@@ -320,7 +335,7 @@ export async function saveAtlasDocumentOcrResult(
       ? JSON.stringify(extraction, null, 2)
       : input.ocrError?.message ?? JSON.stringify(ocrMeta, null, 2));
 
-  const { error } = await supabase
+  let updateQuery = supabase
     .from('atlas_documents')
     .update({
       processing_status: input.processingStatus,
@@ -329,8 +344,15 @@ export async function saveAtlasDocumentOcrResult(
       metadata: { ocr: ocrMeta },
       updated_at: new Date().toISOString(),
     })
-    .eq('id', documentId)
-    .eq('user_id', auth.userId);
+    .eq('id', documentId);
+
+  if (owned.companyId) {
+    updateQuery = updateQuery.eq('company_id', owned.companyId);
+  } else {
+    updateQuery = updateQuery.eq('user_id', auth.userId);
+  }
+
+  const { error } = await updateQuery;
 
   if (error) return { ok: false, error: error.message };
   return { ok: true };
@@ -354,10 +376,16 @@ export async function deleteAtlasDocument(
     .from('atlas_documents')
     .select('storage_path')
     .eq('id', documentId)
-    .eq('user_id', auth.userId)
     .maybeSingle();
 
-  const { error } = await supabase.from('atlas_documents').delete().eq('id', documentId).eq('user_id', auth.userId);
+  let deleteQuery = supabase.from('atlas_documents').delete().eq('id', documentId);
+  if (owned.companyId) {
+    deleteQuery = deleteQuery.eq('company_id', owned.companyId);
+  } else {
+    deleteQuery = deleteQuery.eq('user_id', auth.userId);
+  }
+
+  const { error } = await deleteQuery;
   if (error) return { ok: false, error: error.message };
 
   const storagePath = (row as { storage_path?: string } | null)?.storage_path;
@@ -629,12 +657,18 @@ export async function getAtlasDocumentOcrProgress(
   const owned = await requireOwnedDocument(documentId);
   if (!owned.ok) return null;
 
-  const { data, error } = await supabase
+  let progressQuery = supabase
     .from('atlas_documents')
     .select('processing_status, metadata')
-    .eq('id', documentId)
-    .eq('user_id', auth.userId)
-    .maybeSingle();
+    .eq('id', documentId);
+
+  if (owned.companyId) {
+    progressQuery = progressQuery.eq('company_id', owned.companyId);
+  } else {
+    progressQuery = progressQuery.eq('user_id', auth.userId);
+  }
+
+  const { data, error } = await progressQuery.maybeSingle();
 
   if (error || !data) return null;
 
