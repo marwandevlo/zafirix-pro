@@ -120,63 +120,65 @@ export default function GlobalTable<T extends GlobalTableRow = GlobalTableRow>({
 
   const hasBulkActions = Boolean(onModify || onShare || onDownload || onDelete);
 
+  const bulkToolbar =
+    selectedIds.length > 0 && hasBulkActions ? (
+      <div className="sticky bottom-4 z-50 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 bg-slate-900 text-white px-6 py-3 rounded-xl shadow-2xl border border-slate-700 animate-in fade-in slide-in-from-bottom-4 duration-200">
+        <div className="flex items-center gap-3">
+          <span className="bg-blue-600 text-white px-3 py-1 rounded-lg text-sm font-bold">
+            {selectedIds.length} عناصر محددة
+          </span>
+        </div>
+
+        <div className="flex flex-wrap items-center gap-3">
+          {onModify ? (
+            <button
+              type="button"
+              onClick={() => runBulk(onModify)}
+              className="flex items-center gap-2 bg-slate-800 hover:bg-slate-700 text-slate-100 px-4 py-2 rounded-lg text-sm font-medium transition-all"
+            >
+              <Edit3 size={16} className="text-amber-400" />
+              <span>Modifier</span>
+            </button>
+          ) : null}
+
+          {onShare ? (
+            <button
+              type="button"
+              onClick={() => runBulk(onShare)}
+              className="flex items-center gap-2 bg-slate-800 hover:bg-slate-700 text-slate-100 px-4 py-2 rounded-lg text-sm font-medium transition-all"
+            >
+              <Share2 size={16} className="text-blue-400" />
+              <span>Partager</span>
+            </button>
+          ) : null}
+
+          {onDownload ? (
+            <button
+              type="button"
+              onClick={() => runBulk(onDownload)}
+              className="flex items-center gap-2 bg-slate-800 hover:bg-slate-700 text-slate-100 px-4 py-2 rounded-lg text-sm font-medium transition-all"
+            >
+              <Download size={16} className="text-emerald-400" />
+              <span>Télécharger</span>
+            </button>
+          ) : null}
+
+          {onDelete ? (
+            <button
+              type="button"
+              onClick={() => runBulk(onDelete, clearSelectionOnDelete)}
+              className="flex items-center gap-2 bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded-lg text-sm font-semibold transition-all shadow-lg"
+            >
+              <Trash2 size={16} />
+              <span>Supprimer</span>
+            </button>
+          ) : null}
+        </div>
+      </div>
+    ) : null;
+
   return (
     <div className="space-y-4 relative w-full">
-      {selectedIds.length > 0 && hasBulkActions ? (
-        <div className="sticky top-4 z-30 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 bg-slate-900 text-white px-5 py-3 rounded-xl shadow-xl border border-slate-700">
-          <div className="flex items-center gap-2 text-sm font-semibold">
-            <span className="bg-blue-600 text-white px-2.5 py-0.5 rounded-md text-xs">{selectedIds.length}</span>
-            <span>عناصر محددة</span>
-          </div>
-
-          <div className="flex flex-wrap items-center gap-2">
-            {onModify ? (
-              <button
-                type="button"
-                onClick={() => runBulk(onModify)}
-                className="flex items-center gap-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 px-3.5 py-1.5 rounded-lg text-xs font-medium transition"
-              >
-                <Edit3 size={14} className="text-amber-400" />
-                <span>Modifier</span>
-              </button>
-            ) : null}
-
-            {onShare ? (
-              <button
-                type="button"
-                onClick={() => runBulk(onShare)}
-                className="flex items-center gap-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 px-3.5 py-1.5 rounded-lg text-xs font-medium transition"
-              >
-                <Share2 size={14} className="text-blue-400" />
-                <span>Partager</span>
-              </button>
-            ) : null}
-
-            {onDownload ? (
-              <button
-                type="button"
-                onClick={() => runBulk(onDownload)}
-                className="flex items-center gap-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 px-3.5 py-1.5 rounded-lg text-xs font-medium transition"
-              >
-                <Download size={14} className="text-emerald-400" />
-                <span>Télécharger</span>
-              </button>
-            ) : null}
-
-            {onDelete ? (
-              <button
-                type="button"
-                onClick={() => runBulk(onDelete, clearSelectionOnDelete)}
-                className="flex items-center gap-1.5 bg-red-600/20 hover:bg-red-600 text-red-300 hover:text-white px-3.5 py-1.5 rounded-lg text-xs font-medium transition border border-red-500/30"
-              >
-                <Trash2 size={14} />
-                <span>Supprimer</span>
-              </button>
-            ) : null}
-          </div>
-        </div>
-      ) : null}
-
       <div className="overflow-x-auto border border-slate-200 rounded-xl bg-white shadow-sm">
         {normalizedData.length === 0 ? (
           <div className="px-6 py-10 text-center text-sm text-slate-500">{emptyLabel}</div>
@@ -299,6 +301,8 @@ export default function GlobalTable<T extends GlobalTableRow = GlobalTableRow>({
           </table>
         )}
       </div>
+
+      {bulkToolbar}
     </div>
   );
 }

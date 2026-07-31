@@ -35,7 +35,7 @@ import type { ExportColumn } from '@/app/components/ExportMenu';
 import type { GlobalTableColumn } from '@/app/components/data-grid/GlobalTable';
 import { exportTable } from '@/app/lib/atlas-table-export';
 import { FacturesTableSection, FacturesExportMenu } from '@/app/factures/FacturesTableSection';
-import { filterRowsBySelectedIds, normalizeGlobalTableRows, pruneSelectedIds } from '@/app/components/data-grid/global-table-id';
+import { filterRowsBySelectedIds, normalizeGlobalTableRows, pruneSelectedIds, runOptimisticBulkDelete } from '@/app/components/data-grid/global-table-id';
 import { EntityAuditTable } from '@/app/components/history/EntityAuditTable';
 import { ModuleLoadErrorBanner } from '@/app/lib/use-enterprise-module-fetch';
 import { InvoiceShipmentPanel, type InvoiceShipmentTarget } from '@/app/components/logistics/InvoiceShipmentPanel';
@@ -734,10 +734,24 @@ export default function FacturesPage() {
   }, [filteredRows]);
 
   const handleBulkDelete = useCallback((ids: string[]) => {
-    if (!window.confirm(`Supprimer ${ids.length} facture(s) ?`)) return;
-    for (const id of ids) removeInvoice(id as AtlasInvoice['id']);
-    setSelectedInvoiceIds([]);
-  }, [removeInvoice]);
+    runOptimisticBulkDelete({
+      ids,
+      onOptimistic: () => {
+        setSelectedInvoiceIds([]);
+        setInvoices((prev) => {
+          const next = prev.filter((inv) => !ids.includes(String(inv.id)));
+          syncInvoiceUsageCount(next.length);
+          return next;
+        });
+      },
+      onPersist: async (deleteIds) => {
+        await Promise.all(deleteIds.map((id) => deleteAtlasInvoice(id as AtlasInvoice['id'])));
+      },
+      onPersistError: () => {
+        void loadPageData();
+      },
+    });
+  }, [loadPageData]);
 
   return (
     <div className="flex h-screen bg-gray-50">

@@ -1,7 +1,7 @@
 'use client';
 import { useCallback, useState, useEffect, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
-import { Plus, ChevronRight, Trash2, CheckCircle, Search } from 'lucide-react';
+import { Plus, ChevronRight, Trash2, CheckCircle, Search, Eraser } from 'lucide-react';
 import type { AtlasCompany } from '@/app/types/atlas-company';
 import type { AtlasPaymentTerms, AtlasPaymentTermsPreset } from '@/app/types/atlas-payment-terms';
 import { normalizePaymentTerms, paymentTermsLabel } from '@/app/types/atlas-payment-terms';
@@ -18,6 +18,7 @@ import { getReferralExtraCompanySlots } from '@/app/lib/atlas-referral-bonus-sta
 import { isAtlasSupabaseDataEnabled } from '@/app/lib/atlas-data-source';
 import {
   atlasCompanyErrorMessage,
+  clearCompanyData,
   deleteAtlasCompany,
   ensureValidActiveCompany,
   listAtlasCompanies,
@@ -44,6 +45,7 @@ export default function CompaniesPage() {
   /** Bumps when returning to the tab so Pro add-on limits refresh from localStorage. */
   const [limitRefreshTick, setLimitRefreshTick] = useState(0);
   const [persistError, setPersistError] = useState('');
+  const [clearingId, setClearingId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [form, setForm] = useState({
     raisonSociale: '', formeJuridique: 'SARL', if_fiscal: '', ice: '',
@@ -206,6 +208,35 @@ export default function CompaniesPage() {
     const updated = companies.filter((row) => row.id !== c.id);
     persistLocalCompanies(updated);
     syncCompanyUsageCount(updated.length);
+  };
+
+  const clearCompanyTransactions = async (c: AtlasCompany) => {
+    const companyId = c.dbRowId ?? String(c.id);
+    const companyName = c.raisonSociale || c.tradeName || 'هذه الشركة';
+    const confirmed = window.confirm(
+      `⚠️ تحذير خطير:\n\nهل أنت متأكد من رغبتك في إفراغ جميع بيانات، فواتير وحسابات شركة (${companyName})؟\n\n` +
+      `سيتم مسح كافة الأعمال المرتبطة بها مع الاحتفاظ بملف الشركة ومعلوماتها الأساسية.\n\n` +
+      `⚠️ Avertissement : vider toutes les données transactionnelles de « ${companyName} » ?\n` +
+      `Le profil société (ICE, IF, etc.) sera conservé.`,
+    );
+    if (!confirmed) return;
+
+    setPersistError('');
+    setClearingId(companyId);
+    try {
+      const res = await clearCompanyData(companyId);
+      if (!res.ok) {
+        setPersistError(atlasCompanyErrorMessage(res.error));
+        return;
+      }
+      window.alert('✨ تم إفراغ بيانات الشركة بنجاح مع الاحتفاظ بمعلوماتها الأساسية.');
+      window.location.reload();
+    } catch (error) {
+      console.error('فشل إفراغ البيانات:', error);
+      setPersistError('حدث خطأ أثناء محاولة إفراغ بيانات الشركة.');
+    } finally {
+      setClearingId(null);
+    }
   };
 
   const filtered = companies.filter(c =>
@@ -468,7 +499,16 @@ export default function CompaniesPage() {
                         Sélectionner <ChevronRight size={12} />
                       </button>
                     )}
-                    <button onClick={() => void deleteCompany(c)} className="p-2 text-gray-400 hover:text-red-500 transition-colors">
+                    <button
+                      type="button"
+                      onClick={() => void clearCompanyTransactions(c)}
+                      disabled={clearingId === (c.dbRowId ?? String(c.id))}
+                      title="إفراغ جميع بيانات وأعمال الشركة / Vider les données transactionnelles"
+                      className="p-2 text-amber-600 hover:text-amber-800 hover:bg-amber-50 rounded-lg transition-colors disabled:opacity-50"
+                    >
+                      <Eraser size={16} />
+                    </button>
+                    <button onClick={() => void deleteCompany(c)} className="p-2 text-gray-400 hover:text-red-500 transition-colors" title="Supprimer la société">
                       <Trash2 size={16} />
                     </button>
                   </div>

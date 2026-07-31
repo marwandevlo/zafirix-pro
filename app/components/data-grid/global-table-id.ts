@@ -31,6 +31,42 @@ export function pruneSelectedIds(selectedIds: string[], rows: GlobalTableRow[]):
   return selectedIds.filter((id) => valid.has(id));
 }
 
+/** Id used for selection/export — prefers normalized `id`, else resolveRowId. */
+export function getRowSelectionId(item: Record<string, unknown>, index?: number): string {
+  if (item.id != null && String(item.id).trim() !== '') return String(item.id);
+  return resolveRowId(item, index);
+}
+
+/** Remove rows whose selection id is in `selectedIds` (optimistic UI delete). */
+export function filterRowsNotInIds<T extends Record<string, unknown>>(
+  rows: T[],
+  selectedIds: string[],
+): T[] {
+  const remove = new Set(selectedIds);
+  return rows.filter((row, index) => !remove.has(getRowSelectionId(row, index)));
+}
+
+/** Confirm → optimistic callback → async persist with error logging. */
+export function runOptimisticBulkDelete(options: {
+  ids: string[];
+  confirmMessage?: string;
+  onOptimistic: () => void;
+  onPersist?: (ids: string[]) => void | Promise<void>;
+  onPersistError?: (err: unknown) => void;
+}): void {
+  const message = options.confirmMessage ?? 'هل أنت متأكد من حذف العناصر المحددة؟';
+  if (typeof window !== 'undefined' && !window.confirm(message)) return;
+
+  options.onOptimistic();
+
+  if (!options.onPersist) return;
+
+  void Promise.resolve(options.onPersist(options.ids)).catch((err) => {
+    console.error('فشل الحذف من قاعدة البيانات:', err);
+    options.onPersistError?.(err);
+  });
+}
+
 /** Filter export/table rows by normalized ids (matches GlobalTable selection). */
 export function filterRowsBySelectedIds<T extends Record<string, unknown>>(
   rows: T[],
@@ -38,5 +74,5 @@ export function filterRowsBySelectedIds<T extends Record<string, unknown>>(
 ): T[] {
   if (selectedIds.length === 0) return [];
   const selected = new Set(selectedIds);
-  return rows.filter((row, index) => selected.has(resolveRowId(row, index)));
+  return rows.filter((row, index) => selected.has(getRowSelectionId(row, index)));
 }

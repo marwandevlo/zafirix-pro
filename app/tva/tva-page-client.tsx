@@ -27,6 +27,7 @@ import {
   filterRowsBySelectedIds,
   normalizeGlobalTableRows,
   pruneSelectedIds,
+  runOptimisticBulkDelete,
 } from '@/app/components/data-grid/global-table-id';
 import { exportTable } from '@/app/lib/atlas-table-export';
 import { openWhatsAppShare } from '@/app/lib/atlas-quick-share';
@@ -627,10 +628,20 @@ function InvoiceTable({
   onRefresh?: () => void;
 }) {
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const [hiddenIds, setHiddenIds] = useState<Set<string>>(() => new Set());
+
+  useEffect(() => {
+    setHiddenIds(new Set());
+  }, [lines]);
+
+  const visibleLines = useMemo(
+    () => lines.filter((line) => !hiddenIds.has(line.id)),
+    [hiddenIds, lines],
+  );
 
   const tableRows = useMemo(
-    () => normalizeGlobalTableRows(lines as unknown as Record<string, unknown>[]) as (AtlasTvaLineItem & GlobalTableRow)[],
-    [lines],
+    () => normalizeGlobalTableRows(visibleLines as unknown as Record<string, unknown>[]) as (AtlasTvaLineItem & GlobalTableRow)[],
+    [visibleLines],
   );
 
   useEffect(() => {
@@ -727,14 +738,24 @@ function InvoiceTable({
     );
   };
 
-  const handleBulkDelete = async (ids: string[]) => {
-    if (!window.confirm(`Supprimer ${ids.length} ligne(s) TVA ?`)) return;
-    for (const id of ids) {
-      const line = lineById.get(id);
-      if (line) await deleteTvaSourceLine(line);
-    }
-    setSelectedIds([]);
-    onRefresh?.();
+  const handleBulkDelete = (ids: string[]) => {
+    runOptimisticBulkDelete({
+      ids,
+      confirmMessage: `Supprimer ${ids.length} ligne(s) TVA ?`,
+      onOptimistic: () => {
+        setHiddenIds((prev) => new Set([...prev, ...ids]));
+        setSelectedIds([]);
+      },
+      onPersist: async (deleteIds) => {
+        for (const id of deleteIds) {
+          const line = lineById.get(id);
+          if (line) await deleteTvaSourceLine(line);
+        }
+      },
+      onPersistError: () => {
+        onRefresh?.();
+      },
+    });
   };
 
   return (
@@ -742,7 +763,7 @@ function InvoiceTable({
       <div className="px-5 py-4 border-b border-gray-100 flex items-center justify-between gap-3">
         <div>
           <h2 className="font-semibold text-gray-700">{title}</h2>
-          <p className="text-xs text-gray-400 mt-0.5">{lines.length} ligne(s)</p>
+          <p className="text-xs text-gray-400 mt-0.5">{visibleLines.length} ligne(s)</p>
         </div>
         <ExportMenu
           data={tableRows as unknown as Record<string, unknown>[]}
@@ -755,7 +776,7 @@ function InvoiceTable({
         />
       </div>
 
-      {lines.length === 0 ? (
+      {visibleLines.length === 0 ? (
         <ModuleEmptyState module="tva" />
       ) : (
         <div className="p-4">

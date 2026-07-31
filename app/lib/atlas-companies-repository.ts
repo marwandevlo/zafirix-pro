@@ -356,7 +356,90 @@ export function atlasCompanyErrorMessage(code: string): string {
       return 'Cette société est introuvable ou ne vous appartient pas.';
     case 'name_required':
       return 'La raison sociale est obligatoire.';
+    case 'supabase_required':
+      return 'La persistance cloud est requise pour cette action.';
     default:
       return code || 'Une erreur est survenue. Réessayez.';
   }
+}
+
+function readJsonArray(key: string): Record<string, unknown>[] {
+  if (typeof window === 'undefined') return [];
+  try {
+    const raw = localStorage.getItem(key);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw) as unknown;
+    return Array.isArray(parsed) ? (parsed as Record<string, unknown>[]) : [];
+  } catch {
+    return [];
+  }
+}
+
+function writeJsonArray(key: string, rows: Record<string, unknown>[]): void {
+  if (typeof window === 'undefined') return;
+  localStorage.setItem(key, JSON.stringify(rows));
+}
+
+function rowBelongsToCompany(row: Record<string, unknown>, companyDbRowId: string): boolean {
+  const cid = row.company_id ?? row.companyId ?? row.dbRowId;
+  return cid != null && String(cid) === companyDbRowId;
+}
+
+/** Local mode: purge transactional keys for one company; keep company profile in atlas_companies. */
+export function clearLocalCompanyData(companyDbRowId: string): void {
+  if (blockCriticalLocalStorageInProduction('clear_company_data')) return;
+
+  for (const key of [
+    ATLAS_STORAGE_KEYS.accountingEntries,
+    ATLAS_STORAGE_KEYS.clients,
+    ATLAS_STORAGE_KEYS.invoices,
+    ATLAS_STORAGE_KEYS.supplierInvoices,
+    ATLAS_STORAGE_KEYS.payments,
+    ATLAS_STORAGE_KEYS.documents,
+    ATLAS_STORAGE_KEYS.employees,
+    ATLAS_STORAGE_KEYS.projects,
+    ATLAS_STORAGE_KEYS.links,
+  ] as const) {
+    const kept = readJsonArray(key).filter((row) => !rowBelongsToCompany(row, companyDbRowId));
+    writeJsonArray(key, kept);
+  }
+
+  const companies = readCompaniesFromLocalStorage().map((c) =>
+    c.dbRowId === companyDbRowId || String(c.id) === companyDbRowId
+      ? { ...c, balance: 0 }
+      : c,
+  );
+  writeCompaniesToLocalStorage(companies);
+
+  const active = readActiveCompanyFromLocalStorage();
+  if (active && (active.dbRowId === companyDbRowId || String(active.id) === companyDbRowId)) {
+    localStorage.setItem(
+      ATLAS_STORAGE_KEYS.activeCompany,
+      JSON.stringify({ ...active, balance: 0 }),
+    );
+  }
+}
+
+/** Empty all transactional data for a company; profile row is preserved. */
+export async function clearCompanyData(
+  companyDbRowId: string,
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  if (!companyDbRowId?.trim()) return { ok: false, error: 'company_id_required' };
+
+  if (!isAtlasSupabaseDataEnabled()) {
+    clearLocalCompanyData(companyDbRowId);
+    return { ok: true };
+  }
+
+  const res = await fetch(`/api/companies/${encodeURIComponent(companyDbRowId)}/clear-data`, {
+    method: 'POST',
+    credentials: 'include',
+  });
+
+  const body = (await res.json().catch(() => ({}))) as { error?: string; message?: string };
+  if (!res.ok) {
+    return { ok: false, error: body.message ?? body.error ?? 'clear_failed' };
+  }
+
+  return { ok: true };
 }

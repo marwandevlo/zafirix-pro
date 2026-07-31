@@ -6,8 +6,10 @@ import ExportMenu from '@/app/components/ExportMenu';
 import type { ExportColumn } from '@/app/components/ExportMenu';
 import {
   filterRowsBySelectedIds,
+  filterRowsNotInIds,
   normalizeGlobalTableRows,
   pruneSelectedIds,
+  runOptimisticBulkDelete,
 } from '@/app/components/data-grid/global-table-id';
 import { exportTable } from '@/app/lib/atlas-table-export';
 import { openWhatsAppShare } from '@/app/lib/atlas-quick-share';
@@ -31,7 +33,9 @@ interface GenericModuleSectionProps<T extends GlobalTableRow> {
   onModify?: (ids: string[]) => void;
   onShare?: (ids: string[]) => void;
   onDownload?: (ids: string[]) => void;
-  onDelete?: (ids: string[]) => void;
+  /** Backend / Supabase delete — runs after optimistic UI removal */
+  onDelete?: (ids: string[]) => void | Promise<void>;
+  onDeleteError?: (err: unknown) => void;
 }
 
 export default function GenericModuleSection<T extends GlobalTableRow>({
@@ -44,6 +48,7 @@ export default function GenericModuleSection<T extends GlobalTableRow>({
   onShare,
   onDownload,
   onDelete,
+  onDeleteError,
 }: GenericModuleSectionProps<T>) {
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [data, setData] = useState<T[]>(() =>
@@ -92,12 +97,18 @@ export default function GenericModuleSection<T extends GlobalTableRow>({
     );
   });
 
-  const handleDelete = onDelete || ((ids: string[]) => {
-    if (confirm(`هل أنت متأكد من حذف ${ids.length} عنصر من ${moduleTitle}؟`)) {
-      setData((prev) => prev.filter((item) => !ids.includes(item.id)));
-      setSelectedIds([]);
-    }
-  });
+  const handleDelete = useCallback((ids: string[]) => {
+    runOptimisticBulkDelete({
+      ids,
+      confirmMessage: `هل أنت متأكد من حذف ${ids.length} عنصر من ${moduleTitle}؟`,
+      onOptimistic: () => {
+        setData((prevData) => filterRowsNotInIds(prevData as Record<string, unknown>[], ids) as T[]);
+        setSelectedIds([]);
+      },
+      onPersist: onDelete,
+      onPersistError: onDeleteError,
+    });
+  }, [moduleTitle, onDelete, onDeleteError]);
 
   return (
     <div className="p-6 space-y-6 w-full">
@@ -122,6 +133,7 @@ export default function GenericModuleSection<T extends GlobalTableRow>({
         onDownload={handleDownload}
         onDelete={handleDelete}
         hideRowActions
+        clearSelectionOnDelete={false}
       />
     </div>
   );

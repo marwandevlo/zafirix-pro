@@ -26,6 +26,7 @@ import {
   filterRowsBySelectedIds,
   normalizeGlobalTableRows,
   pruneSelectedIds,
+  runOptimisticBulkDelete,
 } from '@/app/components/data-grid/global-table-id';
 import { exportTable } from '@/app/lib/atlas-table-export';
 import { openWhatsAppShare } from '@/app/lib/atlas-quick-share';
@@ -598,12 +599,21 @@ export default function ComptabilitePage() {
                     const selected = filterRowsBySelectedIds(supplierTableRows as unknown as Record<string, unknown>[], ids);
                     void exportTable('xlsx', selected, SUPPLIER_INVOICE_EXPORT_COLUMNS, 'factures_fournisseur');
                   }}
-                  onDelete={async (ids) => {
-                    if (!window.confirm(`Supprimer ${ids.length} facture(s) fournisseur ?`)) return;
-                    for (const id of ids) {
-                      await deleteSupplierInvoiceRow(id);
-                    }
-                    setSelectedSupplierIds([]);
+                  onDelete={(ids) => {
+                    runOptimisticBulkDelete({
+                      ids,
+                      confirmMessage: `Supprimer ${ids.length} facture(s) fournisseur ?`,
+                      onOptimistic: () => {
+                        setSelectedSupplierIds([]);
+                        setSupplierInvoices((prev) => prev.filter((inv) => !ids.includes(String(inv.id))));
+                      },
+                      onPersist: async (deleteIds) => {
+                        await Promise.all(deleteIds.map((id) => deleteSupplierInvoiceRow(id)));
+                      },
+                      onPersistError: () => {
+                        void reloadAccountingData();
+                      },
+                    });
                   }}
                   hideRowActions
                   clearSelectionOnDelete={false}
@@ -724,12 +734,21 @@ export default function ComptabilitePage() {
                       const selected = filterRowsBySelectedIds(journalTableRows as unknown as Record<string, unknown>[], ids);
                       void exportTable('xlsx', selected, ECRITURE_EXPORT_COLUMNS, 'journal_comptable', { title: 'Journal Comptable' });
                     }}
-                    onDelete={async (ids) => {
-                      if (!window.confirm(`Supprimer ${ids.length} écriture(s) ?`)) return;
-                      for (const id of ids) {
-                        await deleteEcriture(id);
-                      }
-                      setSelectedJournalIds([]);
+                    onDelete={(ids) => {
+                      runOptimisticBulkDelete({
+                        ids,
+                        confirmMessage: `Supprimer ${ids.length} écriture(s) ?`,
+                        onOptimistic: () => {
+                          setSelectedJournalIds([]);
+                          setEcritures((prev) => prev.filter((e) => !ids.includes(e.rowId ?? String(e.id))));
+                        },
+                        onPersist: async (deleteIds) => {
+                          await Promise.all(deleteIds.map((id) => deleteEcriture(id)));
+                        },
+                        onPersistError: () => {
+                          void reloadAccountingData();
+                        },
+                      });
                     }}
                     hideRowActions
                     clearSelectionOnDelete={false}
