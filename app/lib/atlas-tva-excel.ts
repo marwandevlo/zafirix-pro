@@ -181,44 +181,44 @@ export async function generateTvaReleveExcelBuffer(
     const r = DATA_START_ROW + rowIdx;
     const excelRow = ws.getRow(r);
 
-    excelRow.getCell(1).value = item.num;
+    excelRow.getCell(1).value = item.ord;
     excelRow.getCell(1).alignment = { horizontal: 'center' };
 
-    setTextCell(excelRow.getCell(2), item.numFacture);
+    setTextCell(excelRow.getCell(2), item.num);
     excelRow.getCell(2).alignment = { horizontal: 'left' };
 
-    excelRow.getCell(3).value = item.designation;
+    excelRow.getCell(3).value = item.des;
     excelRow.getCell(3).alignment = { horizontal: 'left', wrapText: true };
 
-    excelRow.getCell(4).value = item.montantHT;
+    excelRow.getCell(4).value = item.mht;
     excelRow.getCell(4).numFmt = CURRENCY_FMT;
     excelRow.getCell(4).alignment = { horizontal: 'right' };
 
-    excelRow.getCell(5).value = item.taux / 100;
+    excelRow.getCell(5).value = item.tx / 100;
     excelRow.getCell(5).numFmt = PERCENT_FMT;
     excelRow.getCell(5).alignment = { horizontal: 'center' };
 
-    excelRow.getCell(6).value = item.montantTVA;
+    excelRow.getCell(6).value = item.tva;
     excelRow.getCell(6).numFmt = CURRENCY_FMT;
     excelRow.getCell(6).alignment = { horizontal: 'right' };
 
-    excelRow.getCell(7).value = item.montantTTC;
+    excelRow.getCell(7).value = item.ttc;
     excelRow.getCell(7).numFmt = CURRENCY_FMT;
     excelRow.getCell(7).alignment = { horizontal: 'right' };
 
-    setTextCell(excelRow.getCell(8), item.iceFournisseur);
+    setTextCell(excelRow.getCell(8), item.refF.ice);
     excelRow.getCell(8).alignment = { horizontal: 'center' };
 
-    excelRow.getCell(9).value = item.nomFournisseur;
+    excelRow.getCell(9).value = item.refF.nom;
     excelRow.getCell(9).alignment = { horizontal: 'left' };
 
-    setTextCell(excelRow.getCell(10), item.dateFacture);
+    setTextCell(excelRow.getCell(10), item.dfac);
     excelRow.getCell(10).alignment = { horizontal: 'center' };
 
     excelRow.getCell(11).value = item.modePaiement;
     excelRow.getCell(11).alignment = { horizontal: 'center' };
 
-    setTextCell(excelRow.getCell(12), item.datePaiement);
+    setTextCell(excelRow.getCell(12), item.dpai);
     excelRow.getCell(12).alignment = { horizontal: 'center' };
 
     for (let c = 1; c <= COL_COUNT; c += 1) {

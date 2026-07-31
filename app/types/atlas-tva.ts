@@ -14,6 +14,7 @@ export type AtlasTvaLineItem = {
   source: 'invoice' | 'supplier_invoice' | 'accounting_entry' | 'tva_suggestion';
   /** DGI Relevé de déductions — optional enrichment */
   supplierIce?: string;
+  supplierIf?: string;
   designation?: string;
   paymentMode?: string;
   paymentDate?: string;

@@ -40,20 +40,27 @@ export type DgiTvaXmlOptions = {
   regime?: number;
 };
 
+export type DgiReleveSupplierRef = {
+  ifFiscal: string;
+  nom: string;
+  ice: string;
+};
+
+/** Official DGI SIMPL-TVA relevé row (Cahier des charges EDI). */
 export type DgiReleveDeductionRow = {
-  num: number;
-  numFacture: string;
-  designation: string;
-  montantHT: number;
-  taux: number;
-  montantTVA: number;
-  montantTTC: number;
-  iceFournisseur: string;
-  nomFournisseur: string;
-  dateFacture: string;
+  ord: number;
+  num: string;
+  des: string;
+  mht: number;
+  tva: number;
+  ttc: number;
+  refF: DgiReleveSupplierRef;
+  tx: number;
+  mp: number;
+  dpai: string;
+  dfac: string;
+  /** Human-readable payment mode label (Excel export only). */
   modePaiement: string;
-  modePaiementCode: number;
-  datePaiement: string;
 };
 
 export type DgiTvaClientInfo = {
@@ -294,6 +301,19 @@ export function isDeductiblePurchaseLine(line: AtlasTvaLineItem): boolean {
   return line.kind === 'purchase' && line.source !== 'accounting_entry';
 }
 
+/** Build sanitized supplier reference for DGI `<refF>` nodes. */
+export function resolveDgiSupplierRef(sources: {
+  counterparty?: string | null;
+  supplierIce?: string | null;
+  supplierIf?: string | null;
+}): DgiReleveSupplierRef {
+  return {
+    ifFiscal: resolveDgiIdentifiantFiscal(sources.supplierIf),
+    nom: sanitizeDgiNomFournisseur(sources.counterparty),
+    ice: resolveDgiIce(sources.supplierIce),
+  };
+}
+
 export function buildDgiReleveRows(record: AtlasTvaPeriodRecord): DgiReleveDeductionRow[] {
   return record.lines.filter(isDeductiblePurchaseLine).map((line, index) => {
     const modePaiementCode = dgiPaymentModeCode(line.paymentMode);
@@ -301,19 +321,22 @@ export function buildDgiReleveRows(record: AtlasTvaPeriodRecord): DgiReleveDeduc
     const paymentDate = formatDgiDateYmd(line.paymentDate || line.issueDate, issueDate);
 
     return {
-      num: index + 1,
-      numFacture: sanitizeDgiNumFacture(line.reference || String(index + 1)),
-      designation: sanitizeDgiDesignation(line.designation),
-      montantHT: roundDgiAmount(line.amountHT),
-      taux: formatDgiVatRate(line.vatRate),
-      montantTVA: roundDgiAmount(line.vatAmount),
-      montantTTC: roundDgiAmount(line.totalTTC),
-      iceFournisseur: resolveDgiIce(line.supplierIce),
-      nomFournisseur: sanitizeDgiNomFournisseur(line.counterparty),
-      dateFacture: issueDate,
+      ord: index + 1,
+      num: sanitizeDgiNumFacture(line.reference || String(index + 1)),
+      des: sanitizeDgiDesignation(line.designation),
+      mht: roundDgiAmount(line.amountHT),
+      tva: roundDgiAmount(line.vatAmount),
+      ttc: roundDgiAmount(line.totalTTC),
+      refF: resolveDgiSupplierRef({
+        counterparty: line.counterparty,
+        supplierIce: line.supplierIce,
+        supplierIf: line.supplierIf,
+      }),
+      tx: formatDgiVatRate(line.vatRate),
+      mp: modePaiementCode,
+      dpai: paymentDate,
+      dfac: issueDate,
       modePaiement: dgiPaymentModeLabel(line.paymentMode, modePaiementCode),
-      modePaiementCode,
-      datePaiement: paymentDate,
     };
   });
 }

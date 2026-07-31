@@ -8,6 +8,7 @@ import {
   formatDgiIdentifiantFiscal,
   isDeductiblePurchaseLine,
   parseDgiPeriodFromKey,
+  type DgiReleveDeductionRow,
   type DgiTvaXmlOptions,
 } from '@/app/lib/atlas-tva-dgi';
 
@@ -31,6 +32,7 @@ export {
   resolveDgiIce,
   resolveDgiIdentifiantFiscal,
   resolveDgiRc,
+  resolveDgiSupplierRef,
   sanitizeDgiDesignation,
   sanitizeDgiNumFacture,
 } from '@/app/lib/atlas-tva-dgi';
@@ -63,31 +65,50 @@ export function validateTvaDgiExport(
   }
 
   const rows = buildDgiReleveRows(record);
-  const missingSupplierIce = rows.filter((row) => !row.iceFournisseur).length;
+  const missingSupplierIce = rows.filter((row) => !row.refF.ice).length;
   if (missingSupplierIce > 0) {
     warnings.push(
       `${missingSupplierIce} ligne(s) d'achat sans ICE fournisseur valide — SIMPL-TVA peut rejeter le relevé.`,
     );
   }
 
+  const missingSupplierIf = rows.filter((row) => !row.refF.ifFiscal).length;
+  if (missingSupplierIf > 0) {
+    warnings.push(
+      `${missingSupplierIf} ligne(s) sans IF fournisseur — complétez les factures achats si requis par la DGI.`,
+    );
+  }
+
   return { ok: true, warnings: warnings.length > 0 ? warnings : undefined };
 }
 
-function buildRdXmlBlock(row: ReturnType<typeof buildDgiReleveRows>[number]): string {
+function buildRefFXml(ref: DgiReleveDeductionRow['refF']): string[] {
+  return [
+    '      <refF>',
+    `        <if>${escapeDgiXml(ref.ifFiscal)}</if>`,
+    `        <nom>${escapeDgiXml(ref.nom)}</nom>`,
+    `        <ice>${ref.ice}</ice>`,
+    '      </refF>',
+  ];
+}
+
+/** Official DGI `<rd>` block — ord/num/des/mht/tva/ttc + refF + tx/mp/dpai/dfac. */
+function buildRdXmlBlock(row: DgiReleveDeductionRow): string {
   return [
     '    <rd>',
-    `      <num>${row.num}</num>`,
-    `      <numFacture>${escapeDgiXml(row.numFacture)}</numFacture>`,
-    `      <designation>${escapeDgiXml(row.designation)}</designation>`,
-    `      <montantHT>${formatDgiAmount(row.montantHT)}</montantHT>`,
-    `      <taux>${row.taux}</taux>`,
-    `      <montantTVA>${formatDgiAmount(row.montantTVA)}</montantTVA>`,
-    `      <montantTTC>${formatDgiAmount(row.montantTTC)}</montantTTC>`,
-    `      <iceFournisseur>${row.iceFournisseur}</iceFournisseur>`,
-    `      <nomFournisseur>${escapeDgiXml(row.nomFournisseur)}</nomFournisseur>`,
-    `      <dateFacture>${row.dateFacture}</dateFacture>`,
-    `      <modePaiement>${row.modePaiementCode}</modePaiement>`,
-    `      <datePaiement>${row.datePaiement}</datePaiement>`,
+    `      <ord>${row.ord}</ord>`,
+    `      <num>${escapeDgiXml(row.num)}</num>`,
+    `      <des>${escapeDgiXml(row.des)}</des>`,
+    `      <mht>${formatDgiAmount(row.mht)}</mht>`,
+    `      <tva>${formatDgiAmount(row.tva)}</tva>`,
+    `      <ttc>${formatDgiAmount(row.ttc)}</ttc>`,
+    ...buildRefFXml(row.refF),
+    `      <tx>${row.tx}</tx>`,
+    '      <mp>',
+    `        <id>${row.mp}</id>`,
+    '      </mp>',
+    `      <dpai>${row.dpai}</dpai>`,
+    `      <dfac>${row.dfac}</dfac>`,
     '    </rd>',
   ].join('\n');
 }

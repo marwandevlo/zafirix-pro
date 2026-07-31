@@ -8,7 +8,7 @@ import type {
   AtlasTvaPeriodType,
 } from '@/app/types/atlas-tva';
 import { asRecord } from '@/app/lib/atlas-json';
-import { resolveDgiIce } from '@/app/lib/atlas-tva-dgi';
+import { resolveDgiIce, resolveDgiIdentifiantFiscal } from '@/app/lib/atlas-tva-dgi';
 
 const MONTH_NAMES = [
   'Janvier', 'Février', 'Mars', 'Avril', 'Mai', 'Juin',
@@ -222,6 +222,7 @@ type SupplierRow = {
   id: string;
   supplier_name: string;
   supplier_ice?: string | null;
+  supplier_if?: string | null;
   invoice_number: string | null;
   invoice_date: string | null;
   status: string;
@@ -322,7 +323,7 @@ export async function computeTvaPeriod(
     fetchCompanyScopedRows<SupplierRow>(
       db,
       'atlas_supplier_invoices',
-      'id, supplier_name, supplier_ice, invoice_number, invoice_date, status, validation_status, amount_ht, vat_amount, amount_ttc, vat_rate, payment_method, category, created_at, updated_at',
+      'id, supplier_name, supplier_ice, supplier_if, invoice_number, invoice_date, status, validation_status, amount_ht, vat_amount, amount_ttc, vat_rate, payment_method, category, created_at, updated_at',
       companyId,
       userId,
     ),
@@ -409,6 +410,7 @@ export async function computeTvaPeriod(
       vatRate: row.vat_rate != null ? Number(row.vat_rate) : undefined,
       source: 'supplier_invoice',
       supplierIce: resolveDgiIce(row.supplier_ice) || undefined,
+      supplierIf: resolveDgiIdentifiantFiscal(row.supplier_if) || undefined,
       designation: row.category ? String(row.category) : 'Achats / Services',
       paymentMode: row.payment_method ? String(row.payment_method) : undefined,
       paymentDate: issueDate,

@@ -217,20 +217,20 @@ function buildTvaSheet(wb: ExcelJS.Workbook, data: MasterExportData): void {
 
   data.tvaRows.forEach((row, i) => {
     const r = ws.getRow(dataStart + i);
-    r.getCell(1).value = row.num;
-    setTextCell(r.getCell(2), row.numFacture);
-    r.getCell(3).value = row.designation;
-    r.getCell(4).value = row.montantHT;
+    r.getCell(1).value = row.ord;
+    setTextCell(r.getCell(2), row.num);
+    r.getCell(3).value = row.des;
+    r.getCell(4).value = row.mht;
     r.getCell(4).numFmt = CURRENCY_FMT;
-    r.getCell(5).value = row.taux / 100;
+    r.getCell(5).value = row.tx / 100;
     r.getCell(5).numFmt = PERCENT_FMT;
-    r.getCell(6).value = row.montantTVA;
+    r.getCell(6).value = row.tva;
     r.getCell(6).numFmt = CURRENCY_FMT;
-    r.getCell(7).value = row.montantTTC;
+    r.getCell(7).value = row.ttc;
     r.getCell(7).numFmt = CURRENCY_FMT;
-    setTextCell(r.getCell(8), row.iceFournisseur);
-    r.getCell(9).value = row.nomFournisseur;
-    setTextCell(r.getCell(10), row.dateFacture);
+    setTextCell(r.getCell(8), row.refF.ice);
+    r.getCell(9).value = row.refF.nom;
+    setTextCell(r.getCell(10), row.dfac);
     for (let c = 1; c <= colCount; c += 1) {
       r.getCell(c).font = { name: FONT, size: 10 };
       r.getCell(c).border = thinBorder();
