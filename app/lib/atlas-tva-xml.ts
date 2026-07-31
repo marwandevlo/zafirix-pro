@@ -104,15 +104,19 @@ function validateDgiReleveRowFields(row: DgiReleveDeductionRow): string | null {
   return null;
 }
 
-function isExportableDgiReleveRow(row: DgiReleveDeductionRow): boolean {
-  return Boolean(row.refF.ice);
-}
+/**
+ * Schema-safe sentinel values for missing supplier identifiers in XML only.
+ * Non-zero 15-digit ICE / 8-digit IF satisfy DGI mandatory `ifreff` / ICE field rules;
+ * UI and Excel exports keep the raw (possibly empty) values from `refF`.
+ */
+const DGI_XML_FALLBACK_SUPPLIER_ICE = '999999999999999';
+const DGI_XML_FALLBACK_SUPPLIER_IF = '99999999';
 
 function appendMissingSupplierIceWarnings(
   warnings: string[],
   purchaseRows: DgiReleveDeductionRow[],
 ): void {
-  const invalidIceRows = purchaseRows.filter((row) => !isExportableDgiReleveRow(row));
+  const invalidIceRows = purchaseRows.filter((row) => !row.refF.ice);
   if (invalidIceRows.length === 0) return;
 
   const samples = invalidIceRows
@@ -121,9 +125,42 @@ function appendMissingSupplierIceWarnings(
     .join(', ');
   warnings.push(
     `${invalidIceRows.length} ligne(s) d'achat sans ICE fournisseur valide (15 chiffres) — ` +
-      `Factures exclues de l'export XML : ${samples}${invalidIceRows.length > 5 ? '…' : ''}. ` +
-      'Complétez les profils fournisseur pour les inclure dans une prochaine déclaration.',
+      `identifiant de remplacement utilisé dans l'export XML pour : ${samples}${invalidIceRows.length > 5 ? '…' : ''}. ` +
+      'Complétez les profils fournisseur avec l\'ICE réel avant dépôt SIMPL-TVA.',
   );
+}
+
+function appendMissingSupplierIfWarnings(
+  warnings: string[],
+  purchaseRows: DgiReleveDeductionRow[],
+): void {
+  const invalidIfRows = purchaseRows.filter((row) => !row.refF.ifFiscal);
+  if (invalidIfRows.length === 0) return;
+
+  const samples = invalidIfRows
+    .slice(0, 5)
+    .map((row) => `${row.num} (${row.refF.nom})`)
+    .join(', ');
+  warnings.push(
+    `${invalidIfRows.length} ligne(s) sans IF fournisseur valide (7-8 chiffres) — ` +
+      `identifiant de remplacement utilisé dans l'export XML pour : ${samples}${invalidIfRows.length > 5 ? '…' : ''}. ` +
+      'Complétez les profils fournisseur avec l\'IF réel si la DGI le contrôle.',
+  );
+}
+
+/** Resolve supplier ref for XML — never emit empty `<if>` / `<ice>` (DGI `ifreff` mandatory). */
+function resolveDgiXmlSupplierRef(ref: DgiReleveDeductionRow['refF']): {
+  ifFiscal: string;
+  nom: string;
+  ice: string;
+} {
+  const ice = formatDgiIce(ref.ice) || DGI_XML_FALLBACK_SUPPLIER_ICE;
+  const ifFiscal = formatDgiIdentifiantFiscal(ref.ifFiscal) || DGI_XML_FALLBACK_SUPPLIER_IF;
+  return {
+    ifFiscal,
+    nom: sanitizeDgiNomFournisseur(ref.nom),
+    ice,
+  };
 }
 
 /** Advisory validation for Excel / preview — warnings only. */
@@ -131,8 +168,7 @@ export function validateTvaDgiExport(
   record: AtlasTvaPeriodRecord,
   opts: TvaDgiExportValidationOptions,
 ): TvaDgiExportValidation {
-  const warnings: string[] = [];
-  const identifiantFiscal = resolveTvaDeclarationIdentifiantFiscal(opts.company, opts.identifiantFiscal);
+  const warnings: string[] = [];  const identifiantFiscal = resolveTvaDeclarationIdentifiantFiscal(opts.company, opts.identifiantFiscal);
   if (!identifiantFiscal) {
     warnings.push(
       "Identifiant Fiscal (IF) société absent du profil — requis pour un dépôt SIMPL-TVA conforme.",
@@ -169,9 +205,8 @@ export function validateTvaDgiExport(
 
 /**
  * SIMPL-TVA pre-flight for XML EDI export.
- * Blocks on invalid company IF, period/year, or regime; supplier ICE is advisory only.
- */
-export function validateTvaDgiXmlExport(
+ * Blocks on invalid company IF, period/year, or regime; missing supplier IF/ICE emit XML fallbacks + warnings.
+ */export function validateTvaDgiXmlExport(
   record: AtlasTvaPeriodRecord,
   opts: TvaDgiExportValidationOptions,
 ): TvaDgiExportValidation {
@@ -209,9 +244,9 @@ export function validateTvaDgiXmlExport(
   const supplierIndex = opts.supplierIndex ?? buildSupplierIdentityIndexFromPeriod(record);
   const purchaseRows = collectExportRows(record, supplierIndex);
   appendMissingSupplierIceWarnings(warnings, purchaseRows);
+  appendMissingSupplierIfWarnings(warnings, purchaseRows);
 
-  const exportableRows = purchaseRows.filter(isExportableDgiReleveRow);
-  for (const row of exportableRows) {
+  for (const row of purchaseRows) {
     const rowError = validateDgiReleveRowFields(row);
     if (rowError) {
       return {
@@ -222,16 +257,8 @@ export function validateTvaDgiXmlExport(
     }
   }
 
-  const missingSupplierIf = purchaseRows.filter((row) => !row.refF.ifFiscal).length;
-  if (missingSupplierIf > 0) {
-    warnings.push(
-      `${missingSupplierIf} ligne(s) sans IF fournisseur — vérifiez si la DGI exige l'IF pour ces tiers.`,
-    );
-  }
-
   const genericNames = purchaseRows.filter((row) => !row.refF.nom || row.refF.nom === 'Fournisseur').length;
-  if (genericNames > 0) {
-    warnings.push(`${genericNames} ligne(s) avec nom fournisseur générique — vérifiez les libellés.`);
+  if (genericNames > 0) {    warnings.push(`${genericNames} ligne(s) avec nom fournisseur générique — vérifiez les libellés.`);
   }
 
   if (!resolveTvaDeclarationCompanyIce(opts.company, opts.companyIce)) {
@@ -242,22 +269,19 @@ export function validateTvaDgiXmlExport(
 }
 
 function buildRefFXml(ref: DgiReleveDeductionRow['refF']): string[] {
-  const ice = formatDgiIce(ref.ice);
-  const ifFiscal = formatDgiIdentifiantFiscal(ref.ifFiscal);
-  const nom = sanitizeDgiNomFournisseur(ref.nom);
+  const resolved = resolveDgiXmlSupplierRef(ref);
 
   return [
     '      <refF>',
-    `        <if>${escapeDgiXml(ifFiscal)}</if>`,
-    `        <nom>${escapeDgiXml(nom)}</nom>`,
-    `        <ice>${escapeDgiXml(ice)}</ice>`,
+    `        <if>${escapeDgiXml(resolved.ifFiscal)}</if>`,
+    `        <nom>${escapeDgiXml(resolved.nom)}</nom>`,
+    `        <ice>${escapeDgiXml(resolved.ice)}</ice>`,
     '      </refF>',
   ];
 }
 
 /** Post-generation guard — rejects legacy schema, placeholder IDs, malformed header/rows. */
-export function assertValidTvaDgiXmlOutput(xml: string): void {
-  if (/iceFournisseur|nomFournisseur|ifFournisseur|montantHT|numFacture|dateFacture/i.test(xml)) {
+export function assertValidTvaDgiXmlOutput(xml: string): void {  if (/iceFournisseur|nomFournisseur|ifFournisseur|montantHT|numFacture|dateFacture/i.test(xml)) {
     throw new Error('legacy_tva_xml_schema');
   }
 
@@ -292,12 +316,11 @@ export function assertValidTvaDgiXmlOutput(xml: string): void {
       throw new Error('invalid_supplier_ice_in_xml');
     }
     const ifMatch = block.match(/<if>(\d*)<\/if>/);
-    if (ifMatch && ifMatch[1].length > 0 && (ifMatch[1].length < 7 || ifMatch[1].length > 8)) {
+    if (!ifMatch || ifMatch[1].length < 7 || ifMatch[1].length > 8) {
       throw new Error('invalid_supplier_if_in_xml');
     }
   }
 }
-
 export function tvaDgiXmlFilename(periodKey: string): string {
   return `TVA_${periodKey}_DGI.xml`;
 }
@@ -325,7 +348,7 @@ function buildRdXmlBlock(row: DgiReleveDeductionRow, ord: number): string {
 
 /**
  * Generate DGI SIMPL-TVA Relevé de déductions XML.
- * Header/period/regime must pass validateTvaDgiXmlExport(); lines without valid supplier ICE are omitted (see warnings).
+ * All purchase lines are included; missing supplier IF/ICE use XML-only schema fallbacks (see warnings).
  */
 export function generateTvaDeclarationXml(
   record: AtlasTvaPeriodRecord,
@@ -347,12 +370,11 @@ export function generateTvaDeclarationXml(
   const identifiantFiscal = resolveTvaDeclarationIdentifiantFiscal(opts.company, opts.identifiantFiscal);
 
   const supplierIndex = opts.supplierIndex ?? buildSupplierIdentityIndexFromPeriod(record);
-  const rows = collectExportRows(record, supplierIndex).filter(isExportableDgiReleveRow);
+  const rows = collectExportRows(record, supplierIndex);
 
   const rdBlocks = rows.map((row, index) => buildRdXmlBlock(row, index + 1)).join('\n');
 
-  const lines = [
-    '<?xml version="1.0" encoding="UTF-8"?>',
+  const lines = [    '<?xml version="1.0" encoding="UTF-8"?>',
     '<DeclarationReleveDeduction>',
     `  <identifiantFiscal>${identifiantFiscal}</identifiantFiscal>`,
     `  <annee>${periodMeta.annee}</annee>`,
