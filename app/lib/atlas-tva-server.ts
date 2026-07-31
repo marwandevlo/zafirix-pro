@@ -11,9 +11,13 @@ import { asRecord } from '@/app/lib/atlas-json';
 import { filterPostgresUuids } from '@/app/lib/atlas-id-validation';
 import {
   buildSupplierIdentityIndex,
+  formatDgiIce,
+  formatDgiIdentifiantFiscal,
+  lookupSupplierIdentityByName,
   resolveDgiIce,
   resolveDgiIdentifiantFiscal,
   sanitizeDgiNomFournisseur,
+  type SupplierIdentityIndex,
 } from '@/app/lib/atlas-tva-dgi';
 
 const MONTH_NAMES = [
@@ -354,6 +358,85 @@ async function loadDocumentSupplierHints(
   return map;
 }
 
+async function enrichSupplierIdentityIndexFromDocuments(
+  db: SupabaseClient,
+  companyId: string,
+  userId: string | undefined,
+  index: SupplierIdentityIndex,
+): Promise<SupplierIdentityIndex> {
+  let query = db
+    .from('atlas_documents')
+    .select('extraction_json')
+    .eq('company_id', companyId)
+    .order('created_at', { ascending: false })
+    .limit(500);
+  if (userId) query = query.eq('user_id', userId);
+
+  const { data, error } = await query;
+  if (error) {
+    console.warn('[TVA Server] document supplier index enrichment failed', error.message);
+    return index;
+  }
+
+  const byNormalizedName = new Map(index.byNormalizedName);
+  const byInvoiceId = new Map(index.byInvoiceId);
+
+  for (const row of data ?? []) {
+    const ext = (row as { extraction_json?: unknown }).extraction_json;
+    const name =
+      extractDocumentField(ext, 'supplier_name') ||
+      extractDocumentField(ext, 'customer_name') ||
+      extractDocumentField(ext, 'fournisseur');
+    const ice = extractDocumentField(ext, 'supplier_ice') || extractDocumentField(ext, 'ice');
+    const ifFiscal = extractDocumentField(ext, 'supplier_if') || extractDocumentField(ext, 'if_fiscal');
+    if (!name && !ice && !ifFiscal) continue;
+
+    const record = {
+      ifFiscal: formatDgiIdentifiantFiscal(ifFiscal),
+      ice: formatDgiIce(ice),
+      nom: sanitizeDgiNomFournisseur(name),
+    };
+    const nameKey = sanitizeDgiNomFournisseur(name).toLowerCase();
+    if (!nameKey) continue;
+
+    const existing = byNormalizedName.get(nameKey);
+    byNormalizedName.set(nameKey, {
+      nom: record.nom || existing?.nom || 'Fournisseur',
+      ice: record.ice || existing?.ice || '',
+      ifFiscal: record.ifFiscal || existing?.ifFiscal || '',
+    });
+  }
+
+  return { byInvoiceId, byNormalizedName };
+}
+
+/** Full company supplier ICE/IF index: all invoices + AI document extractions. */
+export async function loadCompanySupplierIdentityIndex(
+  db: SupabaseClient,
+  companyId: string,
+  userId?: string,
+): Promise<SupplierIdentityIndex> {
+  const rows = await fetchCompanyScopedRows<SupplierRow>(
+    db,
+    'atlas_supplier_invoices',
+    'id, supplier_name, supplier_ice, supplier_if',
+    companyId,
+    userId,
+  );
+
+  let index = buildSupplierIdentityIndex(
+    rows.map((row) => ({
+      id: String(row.id),
+      supplier_name: row.supplier_name,
+      supplier_ice: row.supplier_ice,
+      supplier_if: row.supplier_if,
+    })),
+  );
+
+  index = await enrichSupplierIdentityIndexFromDocuments(db, companyId, userId, index);
+  return index;
+}
+
 function resolveSupplierIdentityFromSources(
   sources: {
     supplierIce?: string | null;
@@ -365,43 +448,38 @@ function resolveSupplierIdentityFromSources(
   supplierById: Map<string, SupplierRow>,
   docHint?: { ice?: string; ifFiscal?: string; name?: string },
 ): { supplierIce?: string; supplierIf?: string; counterparty?: string } {
-  let ice = sources.supplierIce ? String(sources.supplierIce).trim() : undefined;
-  let ifF = sources.supplierIf ? String(sources.supplierIf).trim() : undefined;
   let name = sources.counterparty ? String(sources.counterparty).trim() : undefined;
+  const inv = sources.sourceInvoiceId ? supplierById.get(String(sources.sourceInvoiceId)) : undefined;
+  const indexed = sources.sourceInvoiceId
+    ? supplierIndex.byInvoiceId.get(String(sources.sourceInvoiceId))
+    : undefined;
+  const byName = lookupSupplierIdentityByName(supplierIndex, name);
 
-  if (sources.sourceInvoiceId) {
-    const inv = supplierById.get(String(sources.sourceInvoiceId));
-    if (inv) {
-      ice = ice || (inv.supplier_ice ? String(inv.supplier_ice).trim() : undefined);
-      ifF = ifF || (inv.supplier_if ? String(inv.supplier_if).trim() : undefined);
-      name = name || (inv.supplier_name ? String(inv.supplier_name).trim() : undefined);
-    }
-    const indexed = supplierIndex.byInvoiceId.get(String(sources.sourceInvoiceId));
-    if (indexed) {
-      ice = ice || indexed.ice || undefined;
-      ifF = ifF || indexed.ifFiscal || undefined;
-      name = name || indexed.nom || undefined;
-    }
+  if (inv) {
+    name = name || (inv.supplier_name ? String(inv.supplier_name).trim() : undefined);
   }
+  if (indexed?.nom) name = name || indexed.nom;
+  if (docHint?.name) name = name || docHint.name;
+  if (byName?.nom) name = name || byName.nom;
 
-  if (docHint) {
-    ice = ice || docHint.ice;
-    ifF = ifF || docHint.ifFiscal;
-    name = name || docHint.name;
-  }
-
-  const nameKey = sanitizeDgiNomFournisseur(name).toLowerCase();
-  if (nameKey) {
-    const byName = supplierIndex.byNormalizedName.get(nameKey);
-    if (byName) {
-      ice = ice || byName.ice || undefined;
-      ifF = ifF || byName.ifFiscal || undefined;
-    }
-  }
+  const supplierIce = resolveDgiIce(
+    sources.supplierIce,
+    inv?.supplier_ice,
+    indexed?.ice,
+    docHint?.ice,
+    byName?.ice,
+  );
+  const supplierIf = resolveDgiIdentifiantFiscal(
+    sources.supplierIf,
+    inv?.supplier_if,
+    indexed?.ifFiscal,
+    docHint?.ifFiscal,
+    byName?.ifFiscal,
+  );
 
   return {
-    supplierIce: resolveDgiIce(ice, docHint?.ice) || undefined,
-    supplierIf: resolveDgiIdentifiantFiscal(ifF, docHint?.ifFiscal) || undefined,
+    supplierIce: supplierIce || undefined,
+    supplierIf: supplierIf || undefined,
     counterparty: name,
   };
 }
@@ -446,7 +524,7 @@ export async function computeTvaPeriod(
     ),
   ]);
 
-  const supplierIndex = buildSupplierIdentityIndex(
+  let supplierIndex = buildSupplierIdentityIndex(
     supplierInvoices.map((row) => ({
       id: String(row.id),
       supplier_name: row.supplier_name,
@@ -454,6 +532,7 @@ export async function computeTvaPeriod(
       supplier_if: row.supplier_if,
     })),
   );
+  supplierIndex = await enrichSupplierIdentityIndexFromDocuments(db, companyId, userId, supplierIndex);
   const supplierById = new Map(supplierInvoices.map((row) => [String(row.id), row]));
   const docHints = await loadDocumentSupplierHints(
     db,

@@ -425,22 +425,16 @@ export default function TvaPageClient() {
     setSelectedHistoryIds((prev) => pruneSelectedIds(prev, historyTableRows));
   }, [historyTableRows]);
 
-  const confirmTvaExportWarnings = (warnings: string[] | undefined): boolean => {
-    if (!warnings?.length) return true;
-    return window.confirm(
-      `Attention avant export DGI :\n\n${warnings.join('\n')}\n\nContinuer quand même ?`,
-    );
+  const notifyTvaExportWarnings = (warnings: string[] | undefined) => {
+    if (!warnings?.length) return;
+    showAtlasWarningToast(warnings.join(' '));
   };
 
   const downloadXml = async () => {
     if (!current || !companyId) return;
     const company = buildTvaExportCompanySources(companyExportInfo);
     const validation = validateTvaDgiExport(current, { company });
-    if (!validation.ok) {
-      setError(validation.message ?? 'Export XML impossible.');
-      return;
-    }
-    if (!confirmTvaExportWarnings(validation.warnings)) return;
+    notifyTvaExportWarnings(validation.warnings);
 
     setExportingXml(true);
     setError('');
@@ -448,6 +442,10 @@ export default function TvaPageClient() {
       const periodKey = buildPeriodKey(selectedYear, selectedQuarter);
       const params = new URLSearchParams({ companyId, periodKey });
       const res = await fetch(`/api/tva/export-xml?${params.toString()}`, { credentials: 'include' });
+      const headerWarnings = res.headers.get('X-Tva-Export-Warnings');
+      if (headerWarnings) {
+        notifyTvaExportWarnings([decodeURIComponent(headerWarnings)]);
+      }
       if (!res.ok) {
         const body = (await res.json().catch(() => ({}))) as { error?: string; message?: string };
         setError(body.message ?? body.error ?? 'Export XML impossible.');
@@ -472,11 +470,7 @@ export default function TvaPageClient() {
     if (!current || !companyId) return;
     const company = buildTvaExportCompanySources(companyExportInfo);
     const validation = validateTvaDgiExport(current, { company });
-    if (!validation.ok) {
-      setError(validation.message ?? 'Export Excel impossible.');
-      return;
-    }
-    if (!confirmTvaExportWarnings(validation.warnings)) return;
+    notifyTvaExportWarnings(validation.warnings);
 
     setExportingExcel(true);
     setError('');
@@ -484,6 +478,10 @@ export default function TvaPageClient() {
       const periodKey = buildPeriodKey(selectedYear, selectedQuarter);
       const params = new URLSearchParams({ companyId, periodKey });
       const res = await fetch(`/api/tva/export?${params.toString()}`, { credentials: 'include' });
+      const headerWarnings = res.headers.get('X-Tva-Export-Warnings');
+      if (headerWarnings) {
+        notifyTvaExportWarnings([decodeURIComponent(headerWarnings)]);
+      }
       if (!res.ok) {
         const body = (await res.json().catch(() => ({}))) as { error?: string };
         setError(body.error ?? 'Export Excel impossible.');

@@ -14,6 +14,7 @@ import {
   sanitizeDgiNomFournisseur,
   type DgiReleveDeductionRow,
   type DgiTvaXmlOptions,
+  type SupplierIdentityIndex,
   type TvaDgiExportCompanySources,
 } from '@/app/lib/atlas-tva-dgi';
 
@@ -40,6 +41,7 @@ export {
   resolveDgiIdentifiantFiscal,
   resolveDgiRc,
   resolveDgiSupplierRef,
+  lookupSupplierIdentityByName,
   resolveTvaDeclarationCompanyIce,
   resolveTvaDeclarationIdentifiantFiscal,
   sanitizeDgiDesignation,
@@ -58,6 +60,7 @@ export type TvaDgiExportValidationOptions = {
   identifiantFiscal?: string | null;
   companyIce?: string | null;
   company?: TvaDgiExportCompanySources | null;
+  supplierIndex?: SupplierIdentityIndex | null;
 };
 
 /** Validate supplier ICE rows before SIMPL-TVA export; company IF/ICE are advisory only. */
@@ -77,17 +80,14 @@ export function validateTvaDgiExport(
     warnings.push("ICE société manquant ou invalide dans le profil entreprise.");
   }
 
-  const supplierIndex = buildSupplierIdentityIndexFromPeriod(record);
+  const supplierIndex = opts.supplierIndex ?? buildSupplierIdentityIndexFromPeriod(record);
   const rows = buildDgiReleveRows(record, supplierIndex);
   const missingSupplierIce = rows.filter((row) => !row.refF.ice).length;
   if (missingSupplierIce > 0) {
-    return {
-      ok: false,
-      error: 'missing_supplier_ice',
-      message:
-        `${missingSupplierIce} ligne(s) d'achat sans ICE fournisseur valide (15 chiffres). ` +
-        'Complétez les factures fournisseur (ICE/IF) avant export DGI — les zéros factices sont rejetés par SIMPL-TVA.',
-    };
+    warnings.push(
+      `${missingSupplierIce} ligne(s) d'achat sans ICE fournisseur valide (15 chiffres) — ` +
+        "l'export inclura ces lignes avec des champs ICE/IF vides. Complétez les factures fournisseur pour un dépôt SIMPL-TVA conforme.",
+    );
   }
 
   const missingSupplierIf = rows.filter((row) => !row.refF.ifFiscal).length;
@@ -106,14 +106,10 @@ export function validateTvaDgiExport(
 }
 
 function buildRefFXml(ref: DgiReleveDeductionRow['refF']): string[] {
-  // DGI SIMPL-TVA: refF/if, refF/nom, refF/ice — never emit padded zero placeholders.
+  // DGI SIMPL-TVA: refF/if, refF/nom, refF/ice — empty tags when unknown (never fake zeros).
   const ice = formatDgiIce(ref.ice);
   const ifFiscal = formatDgiIdentifiantFiscal(ref.ifFiscal);
   const nom = sanitizeDgiNomFournisseur(ref.nom);
-
-  if (!ice) {
-    throw new Error('invalid_supplier_ice_in_xml_row');
-  }
 
   return [
     '      <refF>',
@@ -124,16 +120,13 @@ function buildRefFXml(ref: DgiReleveDeductionRow['refF']): string[] {
   ];
 }
 
-/** Reject legacy flat tags and placeholder ICE values in generated XML. */
+/** Reject legacy flat tags and all-zero placeholder ICE values in generated XML. */
 export function assertValidTvaDgiXmlOutput(xml: string): void {
   if (/iceFournisseur|nomFournisseur|ifFournisseur|montantHT|numFacture|dateFacture/i.test(xml)) {
     throw new Error('legacy_tva_xml_schema');
   }
   if (/<ice>\s*0+\s*<\/ice>/i.test(xml)) {
     throw new Error('placeholder_supplier_ice');
-  }
-  if (!/<refF>[\s\S]*<ice>\d{15}<\/ice>[\s\S]*<\/refF>/.test(xml) && /<rd>/.test(xml)) {
-    throw new Error('missing_refF_supplier_block');
   }
 }
 
@@ -174,21 +167,8 @@ export function generateTvaDeclarationXml(
   const regime = opts.regime ?? DGI_DECLARATION_REGIME_STANDARD;
   const identifiantFiscal = resolveTvaDeclarationIdentifiantFiscal(opts.company, opts.identifiantFiscal);
 
-  const supplierIndex = buildSupplierIdentityIndexFromPeriod(record);
-  const rows = buildDgiReleveRows(record, supplierIndex).filter((row) => {
-    const valid = Boolean(row.refF.ice);
-    if (!valid) {
-      console.warn('[TVA XML] Ligne exclue — ICE fournisseur manquant', {
-        num: row.num,
-        nom: row.refF.nom,
-      });
-    }
-    return valid;
-  });
-
-  if (rows.length === 0 && record.lines.some(isDeductiblePurchaseLine)) {
-    throw new Error('missing_supplier_ice');
-  }
+  const supplierIndex = opts.supplierIndex ?? buildSupplierIdentityIndexFromPeriod(record);
+  const rows = buildDgiReleveRows(record, supplierIndex);
 
   const rdBlocks = rows.map(buildRdXmlBlock).join('\n');
 

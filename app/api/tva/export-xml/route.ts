@@ -2,7 +2,11 @@ import { NextRequest, NextResponse } from 'next/server';
 import { atlasDataBackend } from '@/app/lib/atlas-data-source';
 import { requireAgentsRouteDb } from '@/app/lib/atlas-agents-route-db';
 import { dgiDeclarationRegime } from '@/app/lib/atlas-tva-dgi';
-import { getTvaDashboard, loadCompanyTvaExportInfo } from '@/app/lib/atlas-tva-server';
+import {
+  getTvaDashboard,
+  loadCompanySupplierIdentityIndex,
+  loadCompanyTvaExportInfo,
+} from '@/app/lib/atlas-tva-server';
 import {
   generateTvaDeclarationXml,
   tvaDgiXmlFilename,
@@ -37,37 +41,33 @@ export async function GET(request: NextRequest) {
   }
 
   try {
-    const [dashboard, company] = await Promise.all([
+    const [dashboard, company, supplierIndex] = await Promise.all([
       getTvaDashboard(ctx.db, ctx.userId, companyId, { periodKey }),
       loadCompanyTvaExportInfo(ctx.db, companyId),
+      loadCompanySupplierIdentityIndex(ctx.db, companyId, ctx.userId),
     ]);
 
     if (!company) {
       return NextResponse.json({ error: 'company_not_found' }, { status: 404, headers: NO_STORE_HEADERS });
     }
 
-    const validation = validateTvaDgiExport(dashboard.current, { company });
-    if (!validation.ok) {
-      return NextResponse.json(
-        { error: validation.error, message: validation.message },
-        { status: 422, headers: NO_STORE_HEADERS },
-      );
-    }
-
+    const validation = validateTvaDgiExport(dashboard.current, { company, supplierIndex });
     const xml = generateTvaDeclarationXml(dashboard.current, {
       company,
+      supplierIndex,
       regime: dgiDeclarationRegime(dashboard.regimeTVA),
     });
     const filename = tvaDgiXmlFilename(periodKey);
+    const headers: Record<string, string> = {
+      ...NO_STORE_HEADERS,
+      'Content-Type': 'application/xml; charset=utf-8',
+      'Content-Disposition': `attachment; filename="${filename}"`,
+    };
+    if (validation.warnings?.length) {
+      headers['X-Tva-Export-Warnings'] = encodeURIComponent(validation.warnings.join(' | '));
+    }
 
-    return new NextResponse(xml, {
-      status: 200,
-      headers: {
-        ...NO_STORE_HEADERS,
-        'Content-Type': 'application/xml; charset=utf-8',
-        'Content-Disposition': `attachment; filename="${filename}"`,
-      },
-    });
+    return new NextResponse(xml, { status: 200, headers });
   } catch (err) {
     const message = err instanceof Error ? err.message : 'export_failed';
     return NextResponse.json({ error: message }, { status: 500, headers: NO_STORE_HEADERS });

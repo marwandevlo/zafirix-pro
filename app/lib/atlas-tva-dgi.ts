@@ -45,6 +45,8 @@ export type DgiTvaXmlOptions = {
   identifiantFiscal?: string | null;
   /** Company profile fields used when identifiantFiscal is omitted. */
   company?: TvaDgiExportCompanySources | null;
+  /** Pre-built supplier ICE/IF index (all company invoices + documents). */
+  supplierIndex?: SupplierIdentityIndex | null;
   /** DGI regime code — default 1 (Débit / Encaissement standard). */
   regime?: number;
 };
@@ -107,18 +109,56 @@ export function buildSupplierIdentityIndex(
   return { byInvoiceId, byNormalizedName };
 }
 
-/** Build supplier index from TVA period supplier_invoice lines. */
+/** Build supplier index from all deductible purchase lines in a TVA period. */
 export function buildSupplierIdentityIndexFromPeriod(record: AtlasTvaPeriodRecord): SupplierIdentityIndex {
   return buildSupplierIdentityIndex(
     record.lines
-      .filter((line) => line.source === 'supplier_invoice')
+      .filter((line) => line.kind === 'purchase')
       .map((line) => ({
-        id: line.id,
+        id: line.sourceInvoiceId ?? line.id,
         supplier_name: line.counterparty,
         supplier_ice: line.supplierIce,
         supplier_if: line.supplierIf,
       })),
   );
+}
+
+/** Exact then partial supplier name lookup (historical invoices, fuzzy token match). */
+export function lookupSupplierIdentityByName(
+  index: SupplierIdentityIndex,
+  name: string | null | undefined,
+): DgiReleveSupplierRef | undefined {
+  const key = normalizeSupplierNameKey(name);
+  if (!key) return undefined;
+
+  const exact = index.byNormalizedName.get(key);
+  if (exact && (exact.ice || exact.ifFiscal)) return exact;
+
+  let best: DgiReleveSupplierRef | undefined;
+  let bestScore = 0;
+
+  for (const [indexedKey, ref] of index.byNormalizedName) {
+    if (!ref.ice && !ref.ifFiscal) continue;
+
+    if (indexedKey.includes(key) || key.includes(indexedKey)) {
+      const score = Math.min(indexedKey.length, key.length) + 100;
+      if (score > bestScore) {
+        bestScore = score;
+        best = ref;
+      }
+      continue;
+    }
+
+    const tokens = key.split(/\s+/).filter((token) => token.length >= 3);
+    if (tokens.length === 0) continue;
+    const overlap = tokens.filter((token) => indexedKey.includes(token)).length;
+    if (overlap > bestScore) {
+      bestScore = overlap;
+      best = ref;
+    }
+  }
+
+  return bestScore > 0 ? best : exact;
 }
 
 /** Official DGI SIMPL-TVA relevé row (Cahier des charges EDI). */
@@ -419,35 +459,32 @@ export function resolveDgiSupplierRef(
   },
   index?: SupplierIdentityIndex | null,
 ): DgiReleveSupplierRef {
-  let rawIce = sources.supplierIce;
-  let rawIf = sources.supplierIf;
   let rawNom = sources.counterparty;
+  const iceSources: Array<string | null | undefined> = [sources.supplierIce];
+  const ifSources: Array<string | null | undefined> = [sources.supplierIf];
 
   if (index) {
     if (sources.sourceInvoiceId) {
       const linked = index.byInvoiceId.get(String(sources.sourceInvoiceId));
       if (linked) {
-        rawIce = rawIce || linked.ice || null;
-        rawIf = rawIf || linked.ifFiscal || null;
+        iceSources.push(linked.ice);
+        ifSources.push(linked.ifFiscal);
         rawNom = rawNom || linked.nom || null;
       }
     }
 
-    const nameKey = normalizeSupplierNameKey(rawNom);
-    if (nameKey) {
-      const byName = index.byNormalizedName.get(nameKey);
-      if (byName) {
-        rawIce = rawIce || byName.ice || null;
-        rawIf = rawIf || byName.ifFiscal || null;
-        rawNom = rawNom || byName.nom || null;
-      }
+    const byName = lookupSupplierIdentityByName(index, rawNom);
+    if (byName) {
+      rawNom = rawNom || byName.nom || null;
+      iceSources.push(byName.ice);
+      ifSources.push(byName.ifFiscal);
     }
   }
 
   return {
-    ifFiscal: resolveDgiIdentifiantFiscal(rawIf),
+    ifFiscal: resolveDgiIdentifiantFiscal(...ifSources),
     nom: sanitizeDgiNomFournisseur(rawNom),
-    ice: resolveDgiIce(rawIce),
+    ice: resolveDgiIce(...iceSources),
   };
 }
 
