@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { requireApiCompanyAccess } from '@/app/lib/atlas-api-company-guard';
 import { atlasDataBackend } from '@/app/lib/atlas-data-source';
 import { requireAgentsRouteDb } from '@/app/lib/atlas-agents-route-db';
 import {
@@ -40,11 +41,16 @@ export async function GET(request: NextRequest) {
     );
   }
 
+  const access = await requireApiCompanyAccess(ctx.db, ctx.userId, companyId);
+  if (!access.ok) {
+    return NextResponse.json({ error: access.error }, { status: 403, headers: NO_STORE_HEADERS });
+  }
+
   try {
     const [dashboard, company, supplierIndex] = await Promise.all([
-      getTvaDashboard(ctx.db, ctx.userId, companyId, { periodKey }),
-      loadCompanyTvaExportInfo(ctx.db, companyId),
-      loadCompanySupplierIdentityIndex(ctx.db, companyId, ctx.userId),
+      getTvaDashboard(ctx.db, ctx.userId, access.companyId, { periodKey }),
+      loadCompanyTvaExportInfo(ctx.db, access.companyId),
+      loadCompanySupplierIdentityIndex(ctx.db, access.companyId, ctx.userId),
     ]);
 
     if (!company) {

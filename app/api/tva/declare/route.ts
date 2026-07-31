@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { requireApiCompanyAccess } from '@/app/lib/atlas-api-company-guard';
 import { atlasDataBackend } from '@/app/lib/atlas-data-source';
 import { requireAgentsRouteDb } from '@/app/lib/atlas-agents-route-db';
 import { markTvaPeriodDeclared } from '@/app/lib/atlas-tva-server';
@@ -21,8 +22,13 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: 'company_and_period_required' }, { status: 400 });
   }
 
+  const access = await requireApiCompanyAccess(ctx.db, ctx.userId, companyId);
+  if (!access.ok) {
+    return NextResponse.json({ error: access.error }, { status: 403 });
+  }
+
   try {
-    const period = await markTvaPeriodDeclared(ctx.db, ctx.userId, companyId, periodKey);
+    const period = await markTvaPeriodDeclared(ctx.db, ctx.userId, access.companyId, periodKey);
     return NextResponse.json({ period });
   } catch (err) {
     const message = err instanceof Error ? err.message : 'declare_failed';

@@ -109,7 +109,7 @@ export default function ComptabilitePage() {
     }
     const companyId = await getActiveCompanyDbRowId();
     setActiveCompanyId(companyId);
-    setInvoices(await listAtlasInvoices());
+    setInvoices(companyId ? await listAtlasInvoices({ companyId }) : []);
     setPayments(await listAtlasPayments(companyId ? { companyId } : undefined));
     setEcritures(await listAtlasAccountingEntries(companyId ? { companyId } : undefined));
     if (companyId) {
@@ -690,7 +690,9 @@ export default function ComptabilitePage() {
                         setSupplierInvoices((prev) => prev.filter((inv) => !ids.includes(String(inv.id))));
                       },
                       onPersist: async (deleteIds) => {
-                        await postBulkDelete('/api/supplier-invoices/bulk-delete', deleteIds);
+                        await postBulkDelete('/api/supplier-invoices/bulk-delete', deleteIds, {
+                          companyId: activeCompanyId ?? undefined,
+                        });
                       },
                       onRollback: () => {
                         void reloadAccountingData();

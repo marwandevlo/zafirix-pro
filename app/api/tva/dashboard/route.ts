@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { requireApiCompanyAccess } from '@/app/lib/atlas-api-company-guard';
 import { atlasDataBackend } from '@/app/lib/atlas-data-source';
 import { requireAgentsRouteDb } from '@/app/lib/atlas-agents-route-db';
 import {
@@ -30,6 +31,11 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: 'company_required' }, { status: 400, headers: NO_STORE_HEADERS });
   }
 
+  const access = await requireApiCompanyAccess(ctx.db, ctx.userId, companyId);
+  if (!access.ok) {
+    return NextResponse.json({ error: access.error }, { status: 403, headers: NO_STORE_HEADERS });
+  }
+
   const periodKey = request.nextUrl.searchParams.get('periodKey');
   const detectLatest = request.nextUrl.searchParams.get('detectLatest') === '1';
   const yearParam = request.nextUrl.searchParams.get('year');
@@ -39,13 +45,13 @@ export async function GET(request: NextRequest) {
     let resolvedPeriodKey = periodKey?.trim() || undefined;
     if (detectLatest && !resolvedPeriodKey) {
       resolvedPeriodKey =
-        (await findLatestTvaPeriodKeyWithData(ctx.db, ctx.userId, companyId, year)) ?? undefined;
+        (await findLatestTvaPeriodKeyWithData(ctx.db, ctx.userId, access.companyId, year)) ?? undefined;
     }
     const [dashboard, companyExportInfo] = await Promise.all([
-      getTvaDashboard(ctx.db, ctx.userId, companyId, {
+      getTvaDashboard(ctx.db, ctx.userId, access.companyId, {
         periodKey: resolvedPeriodKey,
       }),
-      loadCompanyTvaExportInfo(ctx.db, companyId),
+      loadCompanyTvaExportInfo(ctx.db, access.companyId),
     ]);
     return NextResponse.json({ dashboard, companyExportInfo }, { headers: NO_STORE_HEADERS });
   } catch (err) {

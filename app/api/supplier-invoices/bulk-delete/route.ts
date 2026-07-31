@@ -1,8 +1,9 @@
 /**
  * POST /api/supplier-invoices/bulk-delete
- * Body: { ids: string[] }
+ * Body: { companyId: string, ids: string[] }
  */
 import { NextRequest, NextResponse } from 'next/server';
+import { requireApiCompanyAccess } from '@/app/lib/atlas-api-company-guard';
 import { documentUploadSessionUserId } from '@/app/lib/atlas-document-upload-auth';
 import { bulkDeleteStatusForError, prepareBulkDeleteIds } from '@/app/lib/atlas-bulk-delete-server';
 import { getSupabaseServiceRoleClient } from '@/app/lib/supabase-admin';
@@ -16,11 +17,20 @@ export async function POST(request: NextRequest) {
   const userId = await documentUploadSessionUserId(request);
   if (!userId) return NextResponse.json({ error: 'auth_required' }, { status: 401 });
 
-  let body: { ids?: string[] };
+  let body: { companyId?: string; ids?: string[] };
   try {
-    body = (await request.json()) as { ids?: string[] };
+    body = (await request.json()) as { companyId?: string; ids?: string[] };
   } catch {
     return NextResponse.json({ error: 'invalid_body' }, { status: 400 });
+  }
+
+  const admin = getSupabaseServiceRoleClient();
+  const access = await requireApiCompanyAccess(admin, userId, body.companyId);
+  if (!access.ok) {
+    return NextResponse.json(
+      { error: access.error },
+      { status: access.error === 'company_id_required' ? 400 : 403 },
+    );
   }
 
   const prepared = prepareBulkDeleteIds(body.ids);
@@ -33,7 +43,6 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ ok: true, deleted: 0, skipped, skippedIds });
   }
 
-  const admin = getSupabaseServiceRoleClient();
   let deleted = 0;
 
   for (let i = 0; i < uuidIds.length; i += BATCH_SIZE) {
@@ -42,7 +51,7 @@ export async function POST(request: NextRequest) {
       .from('atlas_supplier_invoices')
       .delete({ count: 'exact' })
       .in('id', batch)
-      .eq('user_id', userId);
+      .eq('company_id', access.companyId);
 
     if (error) {
       return NextResponse.json({ error: error.message }, { status: bulkDeleteStatusForError(error.message) });

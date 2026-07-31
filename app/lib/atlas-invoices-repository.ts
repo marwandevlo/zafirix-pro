@@ -12,6 +12,7 @@ import {
   requireOwnedCompany,
   requireOwnedInvoice,
 } from '@/app/lib/atlas-entity-ownership';
+import { canAccessCompany } from '@/app/lib/atlas-permissions';
 import { syncInvoiceInventoryCogs, type InvoiceInventoryMetadata } from '@/app/lib/atlas-inventory';
 
 export function readInvoicesFromLocalStorage(): AtlasInvoice[] {
@@ -84,15 +85,14 @@ export async function listAtlasInvoicesResult(
   // No active company — empty list, not a blocking error.
   if (!companyId) return { ok: true, invoices: [] };
 
-  const owned = await requireOwnedCompany(companyId);
-  if (!owned.ok) return { ok: true, invoices: [] };
+  const owned = await canAccessCompany(supabase, auth.userId, companyId);
+  if (!owned) return { ok: true, invoices: [] };
 
   try {
     const { data, error } = await supabase
       .from('atlas_invoices')
       .select('*')
-      .eq('user_id', auth.userId)
-      .or(`company_id.eq.${companyId},company_id.is.null`)
+      .eq('company_id', companyId)
       .order('issue_date', { ascending: false });
 
     if (error) {
@@ -139,8 +139,8 @@ export async function getAtlasInvoiceById(
 
     if (error || !data?.id) return null;
 
-    if (companyId && data.company_id && data.company_id !== companyId) {
-      return null;
+    if (companyId) {
+      if (!data.company_id || String(data.company_id) !== companyId) return null;
     }
 
     return rowToInvoice(data as Record<string, unknown>);

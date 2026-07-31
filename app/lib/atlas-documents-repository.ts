@@ -29,7 +29,9 @@ import { requireSupabaseUser } from '@/app/lib/atlas-supabase-guard';
 import { asRecord } from '@/app/lib/atlas-json';
 import { logAtlasServerEvent } from '@/app/lib/atlas-server-log';
 import { blockCriticalLocalStorageInProduction } from '@/app/lib/atlas-runtime-guards';
+import { getActiveCompanyDbRowId } from '@/app/lib/atlas-active-company';
 import { requireOwnedCompany, requireOwnedDocument } from '@/app/lib/atlas-entity-ownership';
+import { canAccessCompany } from '@/app/lib/atlas-permissions';
 import { ATLAS_DOCUMENTS_BUCKET } from '@/app/lib/atlas-document-storage';
 
 // New columns (document_type, validation_status, sha256_hash, validated_at, validated_by)
@@ -125,13 +127,21 @@ export async function listAtlasDocuments(opts?: ListAtlasDocumentsOptions): Prom
   const auth = await requireSupabaseUser();
   if (!auth.ok) return [];
 
-  let query = supabase.from('atlas_documents').select(DOCUMENT_SELECT).order('created_at', { ascending: false });
-
-  if (opts?.companyId) {
-    const owned = await requireOwnedCompany(opts.companyId);
-    if (!owned.ok) return [];
-    query = query.eq('company_id', opts.companyId);
+  let companyId = opts?.companyId;
+  if (companyId === undefined) {
+    companyId = await getActiveCompanyDbRowId();
   }
+  if (!companyId) return [];
+
+  const allowed = await canAccessCompany(supabase, auth.userId, companyId);
+  if (!allowed) return [];
+
+  let query = supabase
+    .from('atlas_documents')
+    .select(DOCUMENT_SELECT)
+    .eq('company_id', companyId)
+    .order('created_at', { ascending: false });
+
   if (opts?.source) query = query.eq('source', opts.source);
   if (opts?.processingStatus) query = query.eq('processing_status', opts.processingStatus);
 

@@ -18,6 +18,7 @@ import {
   requireOwnedDocument,
   requireOwnedSupplierInvoice,
 } from '@/app/lib/atlas-entity-ownership';
+import { canAccessCompany } from '@/app/lib/atlas-permissions';
 import { ocrExtractionFromDocument, ocrInvoicesFromDocument } from '@/app/lib/atlas-documents-repository';
 import {
   buildDetectedInvoicesFromExtraction,
@@ -281,13 +282,12 @@ export async function listSupplierInvoicesWithMeta(companyId: string): Promise<L
   const auth = await requireSupabaseUser();
   if (!auth.ok) return { invoices: [], tableMissing: false };
 
-  const owned = await requireOwnedCompany(companyId);
-  if (!owned.ok) return { invoices: [], tableMissing: false };
+  const allowed = await canAccessCompany(supabase, auth.userId, companyId);
+  if (!allowed) return { invoices: [], tableMissing: false };
 
   const { data, error } = await supabase
     .from('atlas_supplier_invoices')
     .select(SUPPLIER_INVOICE_SELECT)
-    .eq('user_id', auth.userId)
     .eq('company_id', companyId)
     .order('invoice_date', { ascending: false });
 

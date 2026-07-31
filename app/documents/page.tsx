@@ -72,6 +72,7 @@ import { createAtlasLink } from '@/app/lib/atlas-links-repository';
 import { listAtlasCompanies } from '@/app/lib/atlas-companies-repository';
 import { listAtlasInvoices } from '@/app/lib/atlas-invoices-repository';
 import { getActiveCompanyDbRowId } from '@/app/lib/atlas-active-company';
+import { onCompanySwitched } from '@/app/lib/atlas-company-switch-event';
 import {
   ATLAS_DOCUMENT_MAX_FILES_PER_BATCH,
   documentUploadLimitExceededMessage,
@@ -481,6 +482,28 @@ export default function DocumentsPage() {
     if (tab !== 'ocr') return;
     if (supabaseMode) void refreshOcr();
   }, [tab, refreshOcr, supabaseMode]);
+
+  useEffect(() => {
+    const off = onCompanySwitched(() => {
+      stopOcrPoll();
+      ocrPollingIdsRef.current.clear();
+      ocrRetriggeredRef.current.clear();
+      setOcrDocuments([]);
+      setLibrary([]);
+      setSupplierInvoiceKeys(new Set());
+      setActiveCompanyId(null);
+      setOcrError('');
+      setSelectedId('');
+      setLinkCompanyId('');
+      setLinkInvoiceId('');
+      setValidationDocId(null);
+      setConfirmDeleteRow(null);
+      setLocalDocuments([]);
+      if (tab === 'ocr') void refreshOcr();
+      else void refreshLibrary();
+    });
+    return off;
+  }, [stopOcrPoll, refreshOcr, refreshLibrary, tab]);
 
   useEffect(() => {
     if (!supabaseMode || tab !== 'ocr') return;

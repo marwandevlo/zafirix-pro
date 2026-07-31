@@ -49,6 +49,7 @@ const TVA_LINE_EXPORT_COLUMNS: ExportColumn[] = [
   { key: 'source_document_id', label: 'Source Document IA' },
 ];
 import { getActiveCompanyDbRowId } from '@/app/lib/atlas-active-company';
+import { onCompanySwitched } from '@/app/lib/atlas-company-switch-event';
 import { readActiveCompanyFromLocalStorage } from '@/app/lib/atlas-companies-repository';
 import { isAtlasSupabaseDataEnabled } from '@/app/lib/atlas-data-source';
 import {
@@ -261,6 +262,7 @@ async function deleteTvaSourceLine(line: AtlasTvaPeriodRecord['lines'][number]):
 async function bulkDeleteTvaSourceLines(
   deleteIds: string[],
   lineById: Map<string, AtlasTvaPeriodRecord['lines'][number]>,
+  companyId: string | null,
 ): Promise<void> {
   const supplierIds: string[] = [];
   const invoiceIds: string[] = [];
@@ -301,7 +303,9 @@ async function bulkDeleteTvaSourceLines(
     );
   }
 
-  if (supplierIds.length) await postBulkDelete('/api/supplier-invoices/bulk-delete', supplierIds);
+  if (supplierIds.length) {
+    await postBulkDelete('/api/supplier-invoices/bulk-delete', supplierIds, companyId ? { companyId } : undefined);
+  }
   if (invoiceIds.length) await postBulkDelete('/api/invoices/bulk-delete', invoiceIds);
   if (entryIds.length) await postBulkDelete('/api/accounting/entries/bulk-delete', entryIds);
 
@@ -536,6 +540,21 @@ export default function TvaPageClient() {
     }
     void reload();
   }, [selectedYear, selectedQuarter, reload]);
+
+  useEffect(() => {
+    const off = onCompanySwitched(() => {
+      setDashboard(null);
+      setHistory([]);
+      setCompanyExportInfo(null);
+      setCompanyId(null);
+      setSelectedHistoryIds([]);
+      setError('');
+      initialDetectDoneRef.current = false;
+      skipPeriodFetchRef.current = false;
+      void reload({ detectLatest: true });
+    });
+    return off;
+  }, [reload]);
 
   const current = dashboard?.current ?? null;
   const salesLines = useMemo(
@@ -1274,7 +1293,7 @@ function InvoiceTable({
         setSelectedIds([]);
       },
       onPersist: async (deleteIds) => {
-        await bulkDeleteTvaSourceLines(deleteIds, lineById);
+        await bulkDeleteTvaSourceLines(deleteIds, lineById, companyId);
       },
       onRollback: () => {
         setHiddenIds((prev) => {

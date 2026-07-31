@@ -67,12 +67,16 @@ export async function runInBatches<T>(
   }
 }
 
-export async function postBulkDelete(apiPath: string, ids: string[]): Promise<number> {
+export async function postBulkDelete(
+  apiPath: string,
+  ids: string[],
+  extra?: { companyId?: string },
+): Promise<number> {
   const res = await fetch(apiPath, {
     method: 'POST',
     credentials: 'include',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ ids }),
+    body: JSON.stringify({ ids, ...extra }),
   });
 
   const data = (await res.json().catch(() => ({}))) as {

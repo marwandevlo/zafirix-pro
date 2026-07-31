@@ -274,41 +274,17 @@ type TvaSuggestionRow = {
   updated_at?: string | null;
 };
 
-/** All rows for the company; legacy null-company rows scoped to userId when provided. */
+/** All rows strictly scoped to the active company. */
 async function fetchCompanyScopedRows<T>(
   db: SupabaseClient,
   table: string,
   select: string,
   companyId: string,
-  userId?: string,
+  _userId?: string,
 ): Promise<T[]> {
-  const { data: companyRows, error: companyError } = await db
-    .from(table)
-    .select(select)
-    .eq('company_id', companyId);
-  if (companyError) throw new Error(`${table}: ${companyError.message}`);
-
-  let legacyRows: T[] = [];
-  if (userId) {
-    const { data, error } = await db
-      .from(table)
-      .select(select)
-      .is('company_id', null)
-      .eq('user_id', userId);
-    if (error) throw new Error(`${table}: ${error.message}`);
-    legacyRows = (data ?? []) as T[];
-  }
-
-  const seen = new Set<string>();
-  const merged: T[] = [];
-  for (const row of [...(companyRows ?? []), ...legacyRows] as T[]) {
-    const id = (row as { id?: string }).id;
-    const key = id ? String(id) : `${table}:${merged.length}`;
-    if (seen.has(key)) continue;
-    seen.add(key);
-    merged.push(row);
-  }
-  return merged;
+  const { data, error } = await db.from(table).select(select).eq('company_id', companyId);
+  if (error) throw new Error(`${table}: ${error.message}`);
+  return (data ?? []) as T[];
 }
 
 function extractDocumentField(extraction: unknown, key: string): string {
@@ -326,6 +302,7 @@ function extractDocumentField(extraction: unknown, key: string): string {
 
 async function loadDocumentSupplierHints(
   db: SupabaseClient,
+  companyId: string,
   documentIds: string[],
 ): Promise<Map<string, { ice?: string; ifFiscal?: string; name?: string }>> {
   const unique = [...new Set(documentIds.map(String).filter(Boolean))];
@@ -334,6 +311,7 @@ async function loadDocumentSupplierHints(
   const { data, error } = await db
     .from('atlas_documents')
     .select('id, extraction_json')
+    .eq('company_id', companyId)
     .in('id', unique);
 
   if (error) {
@@ -538,6 +516,7 @@ export async function computeTvaPeriod(
   const supplierById = new Map(supplierInvoices.map((row) => [String(row.id), row]));
   const docHints = await loadDocumentSupplierHints(
     db,
+    companyId,
     suggestions.map((row) => row.source_document_id),
   );
 

@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { requireApiCompanyAccess } from '@/app/lib/atlas-api-company-guard';
 import { atlasDataBackend } from '@/app/lib/atlas-data-source';
 import { requireAgentsRouteDb } from '@/app/lib/atlas-agents-route-db';
 import { filterPostgresUuids } from '@/app/lib/atlas-id-validation';
@@ -27,11 +28,16 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: 'company_required' }, { status: 400, headers: NO_STORE_HEADERS });
   }
 
+  const access = await requireApiCompanyAccess(ctx.db, ctx.userId, companyId);
+  if (!access.ok) {
+    return NextResponse.json({ error: access.error }, { status: 403, headers: NO_STORE_HEADERS });
+  }
+
   const yearParam = request.nextUrl.searchParams.get('year');
   const year = yearParam ? Number(yearParam) : undefined;
 
   try {
-    const history = await listTvaHistory(ctx.db, ctx.userId, companyId, { year });
+    const history = await listTvaHistory(ctx.db, ctx.userId, access.companyId, { year });
     return NextResponse.json(history, { headers: NO_STORE_HEADERS });
   } catch (err) {
     const message = err instanceof Error ? err.message : 'history_failed';
@@ -64,6 +70,11 @@ export async function DELETE(request: NextRequest) {
     return NextResponse.json({ error: 'company_and_ids_required' }, { status: 400, headers: NO_STORE_HEADERS });
   }
 
+  const access = await requireApiCompanyAccess(ctx.db, ctx.userId, companyId);
+  if (!access.ok) {
+    return NextResponse.json({ error: access.error }, { status: 403, headers: NO_STORE_HEADERS });
+  }
+
   if (uuidIds.length === 0) {
     return NextResponse.json(
       { ok: true, deleted: 0, skipped: skippedIds.length, skippedIds },
@@ -72,7 +83,7 @@ export async function DELETE(request: NextRequest) {
   }
 
   try {
-    const deleted = await deleteTvaPeriodRecords(ctx.db, ctx.userId, companyId, uuidIds);
+    const deleted = await deleteTvaPeriodRecords(ctx.db, ctx.userId, access.companyId, uuidIds);
     return NextResponse.json(
       { ok: true, deleted, skipped: skippedIds.length, skippedIds },
       { headers: NO_STORE_HEADERS },

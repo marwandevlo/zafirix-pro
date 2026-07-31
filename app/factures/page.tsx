@@ -18,6 +18,7 @@ import type { AtlasPayment } from '@/app/types/atlas-payment';
 import { listAtlasPayments, upsertAtlasPayment } from '@/app/lib/atlas-payments-repository';
 import { fetchAi } from '@/app/lib/fetch-ai';
 import { getActiveAtlasCompany, getActiveCompanyDbRowId, resolveClientIdByName } from '@/app/lib/atlas-active-company';
+import { onCompanySwitched } from '@/app/lib/atlas-company-switch-event';
 import type { AtlasCompany } from '@/app/types/atlas-company';
 import { createInvoicePdfDoc, downloadInvoicePdf, invoicePdfFilename } from '@/app/lib/atlas-invoice-pdf';
 import {
@@ -185,6 +186,19 @@ export default function FacturesPage() {
   useEffect(() => {
     void loadPageData();
   }, [loadPageData]);
+
+  useEffect(() => {
+    const off = onCompanySwitched(() => {
+      resetInvoiceUiState();
+      setInvoices([]);
+      setPayments([]);
+      setDeliveriesByInvoice({});
+      setActiveCompanyId(null);
+      setLoadError(null);
+      void loadPageData();
+    });
+    return off;
+  }, [loadPageData, resetInvoiceUiState]);
 
   const addFacture = async () => {
     if (!form.numero || !form.client || !form.montantHT) return;
