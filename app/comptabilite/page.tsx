@@ -28,8 +28,13 @@ import {
   pruneSelectedIds,
   runOptimisticBulkDelete,
 } from '@/app/components/data-grid/global-table-id';
-import { postBulkDelete } from '@/app/lib/atlas-bulk-delete';
-import { partitionAccountingEntryDeleteIds } from '@/app/lib/atlas-id-validation';
+import { postBulkDelete, formatBulkDeleteError } from '@/app/lib/atlas-bulk-delete';
+import {
+  getAccountingEntrySelectionId,
+  partitionAccountingEntryDeleteIds,
+  resolveToPostgresUuid,
+} from '@/app/lib/atlas-id-validation';
+import { showAtlasErrorToast } from '@/app/lib/atlas-toast';
 import { exportTable } from '@/app/lib/atlas-table-export';
 import { openWhatsAppShare } from '@/app/lib/atlas-quick-share';
 
@@ -135,7 +140,7 @@ export default function ComptabilitePage() {
   const journalExportRows = useMemo(
     () =>
       ecritures.map((e) => ({
-        id: e.rowId ?? String(e.id),
+        id: getAccountingEntrySelectionId(e),
         date: e.date,
         libelle: e.libelle,
         compte: e.compte,
@@ -167,7 +172,7 @@ export default function ComptabilitePage() {
     (): JournalTableRow[] =>
       normalizeGlobalTableRows(
         ecritures.map((e) => ({
-          id: e.rowId ?? String(e.id),
+          id: getAccountingEntrySelectionId(e),
           date: e.date,
           libelle: e.libelle,
           compte: e.compte,
@@ -177,6 +182,7 @@ export default function ComptabilitePage() {
           sourceDocumentType: e.sourceDocumentType,
           validationStatus: e.validationStatus,
           rowId: e.rowId,
+          localId: e.id,
         })) as Record<string, unknown>[],
       ) as JournalTableRow[],
     [ecritures],
@@ -292,17 +298,48 @@ export default function ComptabilitePage() {
     setShowForm(false);
   };
 
-  const deleteEcriture = async (rowId: string) => {
-    const res = await fetch(`/api/accounting/entries/${encodeURIComponent(rowId)}`, {
-      method: 'DELETE',
-      credentials: 'include',
-    });
-    if (!res.ok) return false;
-    setEcritures((prev) => prev.filter((e) => e.rowId !== rowId));
-    return true;
+  const deleteEcriture = async (selectionId: string): Promise<boolean> => {
+    console.debug('[Comptabilité] deleteEcriture', { selectionId });
+    const { uuidIds, localIds, skippedIds } = partitionAccountingEntryDeleteIds([selectionId]);
+
+    if (uuidIds.length === 0 && localIds.length === 0) {
+      console.warn('[Comptabilité] deleteEcriture — identifiant invalide', { selectionId, skippedIds });
+      showAtlasErrorToast(`Identifiant invalide : ${selectionId}`);
+      return false;
+    }
+
+    try {
+      if (isAtlasSupabaseDataEnabled() && uuidIds.length > 0) {
+        const res = await fetch(`/api/accounting/entries/${encodeURIComponent(uuidIds[0])}`, {
+          method: 'DELETE',
+          credentials: 'include',
+        });
+        if (!res.ok) {
+          const data = (await res.json().catch(() => ({}))) as { error?: string };
+          throw new Error(data.error ?? `HTTP ${res.status}`);
+        }
+      } else {
+        const targetId = localIds[0] ?? uuidIds[0];
+        const result = await deleteAtlasAccountingEntryBySelectionId(targetId);
+        if (!result.ok) throw new Error(result.error);
+      }
+
+      setEcritures((prev) =>
+        prev.filter((e) => getAccountingEntrySelectionId(e) !== selectionId),
+      );
+      return true;
+    } catch (err) {
+      console.error('[Comptabilité] deleteEcriture failed', err);
+      showAtlasErrorToast(formatBulkDeleteError(err));
+      return false;
+    }
   };
 
-  const updateEcriture = async (rowId: string, values: Record<string, string>) => {
+  const updateEcriture = async (selectionId: string, values: Record<string, string>) => {
+    const { uuidIds } = partitionAccountingEntryDeleteIds([selectionId]);
+    const rowId = uuidIds[0] ?? resolveToPostgresUuid(selectionId);
+    if (!rowId) return false;
+
     const res = await fetch(`/api/accounting/entries/${encodeURIComponent(rowId)}`, {
       method: 'PATCH',
       credentials: 'include',
@@ -352,10 +389,13 @@ export default function ComptabilitePage() {
     [supplierInvoices],
   );
 
-  const ecritureByRowId = useMemo(
-    () => new Map(ecritures.filter((e) => e.rowId).map((e) => [e.rowId!, e])),
-    [ecritures],
-  );
+  const ecritureBySelectionId = useMemo(() => {
+    const map = new Map<string, Ecriture>();
+    for (const e of ecritures) {
+      map.set(getAccountingEntrySelectionId(e), e);
+    }
+    return map;
+  }, [ecritures]);
 
   const supplierTableColumns = useMemo((): GlobalTableColumn<SupplierTableRow>[] => [
     { header: 'N°', accessor: 'invoiceNumber', render: (row) => row.invoiceNumber || '—' },
@@ -455,16 +495,17 @@ export default function ComptabilitePage() {
       accessor: 'id',
       className: 'text-right',
       render: (row) => {
-        const e = ecritureByRowId.get(row.id);
-        if (!e?.rowId) return null;
+        const e = ecritureBySelectionId.get(row.id);
+        if (!e) return null;
+        const selectionId = getAccountingEntrySelectionId(e);
         return (
           <div className="relative inline-flex justify-end">
             <RowActions
-              entityId={e.rowId}
+              entityId={selectionId}
               entityLabel={e.libelle}
               entityType="écriture comptable"
               exportData={{
-                id: e.rowId,
+                id: selectionId,
                 date: e.date,
                 libelle: e.libelle,
                 compte: e.compte,
@@ -488,15 +529,15 @@ export default function ComptabilitePage() {
                 { key: 'debit', label: 'Débit (MAD)', type: 'number', value: String(e.debit || '') },
                 { key: 'credit', label: 'Crédit (MAD)', type: 'number', value: String(e.credit || '') },
               ]}
-              onEditSave={(values) => updateEcriture(e.rowId!, values)}
-              onDelete={() => deleteEcriture(e.rowId!)}
+              onEditSave={(values) => updateEcriture(selectionId, values)}
+              onDelete={() => deleteEcriture(selectionId)}
               hideDelete={!!e.sourceDocumentId && e.validationStatus === 'validated'}
             />
           </div>
         );
       },
     },
-  ], [ecritureByRowId]);
+  ], [ecritureBySelectionId]);
 
   return (
     <div className="flex h-screen bg-gray-50">
@@ -743,13 +784,17 @@ export default function ComptabilitePage() {
                     onDelete={(ids) => {
                       void runOptimisticBulkDelete({
                         ids,
+                        debugLabel: 'comptabilite-journal',
                         skipConfirm: true,
                         onOptimistic: () => {
                           setSelectedJournalIds([]);
-                          setEcritures((prev) => prev.filter((e) => !ids.includes(e.rowId ?? String(e.id))));
+                          setEcritures((prev) =>
+                            prev.filter((e) => !ids.includes(getAccountingEntrySelectionId(e))),
+                          );
                         },
                         onPersist: async (deleteIds) => {
                           const { uuidIds, localIds, skippedIds } = partitionAccountingEntryDeleteIds(deleteIds);
+                          console.debug('[Comptabilité] bulk delete journal', { uuidIds, localIds, skippedIds });
 
                           if (uuidIds.length > 0 && isAtlasSupabaseDataEnabled()) {
                             await postBulkDelete('/api/accounting/entries/bulk-delete', uuidIds);
@@ -760,12 +805,12 @@ export default function ComptabilitePage() {
                             if (!result.ok) throw new Error(result.error);
                           }
 
+                          if (skippedIds.length > 0) {
+                            showAtlasErrorToast(`${skippedIds.length} identifiant(s) ignoré(s) (format invalide).`);
+                          }
+
                           if (uuidIds.length === 0 && localIds.length === 0) {
-                            throw new Error(
-                              skippedIds.length > 0
-                                ? 'Aucun identifiant valide à supprimer.'
-                                : 'ids_required',
-                            );
+                            throw new Error('Aucun identifiant valide à supprimer.');
                           }
                         },
                         onRollback: () => {

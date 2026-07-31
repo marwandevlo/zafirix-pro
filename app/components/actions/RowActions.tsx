@@ -7,6 +7,7 @@ import { ConfirmDeleteDialog } from '@/app/components/actions/ConfirmDeleteDialo
 import { EditRecordModal, type EditField } from '@/app/components/actions/EditRecordModal';
 import { exportTable } from '@/app/lib/atlas-table-export';
 import type { ExportColumn } from '@/app/lib/atlas-table-export';
+import { showAtlasErrorToast } from '@/app/lib/atlas-toast';
 
 export type RowActionsProps = {
   entityId: string;
@@ -66,11 +67,18 @@ export function RowActions({
     setDeleting(true);
     try {
       const ok = await onDelete();
-      if (ok) setDeleteOpen(false);
+      if (ok) {
+        setDeleteOpen(false);
+      } else {
+        console.warn('[RowActions] delete returned false', { entityId, entityLabel });
+      }
+    } catch (err) {
+      console.error('[RowActions] delete threw', err, { entityId, entityLabel });
+      showAtlasErrorToast(err instanceof Error ? err.message : 'La suppression a échoué.');
     } finally {
       setDeleting(false);
     }
-  }, [onDelete]);
+  }, [onDelete, entityId, entityLabel]);
 
   if (!canExport && !canEdit && !canDelete) return null;
 

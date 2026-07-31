@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useState, type ReactNode } from 'react';
+import { useMemo, useRef, useState, type ReactNode } from 'react';
 import { Download, Edit3, MoreVertical, Share2, Trash2 } from 'lucide-react';
 import { ConfirmDeleteDialog } from '@/app/components/actions/ConfirmDeleteDialog';
 import { normalizeGlobalTableRows } from '@/app/components/data-grid/global-table-id';
@@ -95,6 +95,7 @@ export default function GlobalTable<T extends GlobalTableRow = GlobalTableRow>({
 
   const [openMenuId, setOpenMenuId] = useState<string | null>(null);
   const [bulkDeleteOpen, setBulkDeleteOpen] = useState(false);
+  const pendingDeleteIdsRef = useRef<string[]>([]);
 
   const isAllSelected =
     normalizedData.length > 0 &&
@@ -122,14 +123,19 @@ export default function GlobalTable<T extends GlobalTableRow = GlobalTableRow>({
 
   const requestBulkDelete = () => {
     if (!onDelete || selectedIds.length === 0) return;
+    pendingDeleteIdsRef.current = [...selectedIds];
+    console.debug('[GlobalTable] bulk delete requested', { ids: pendingDeleteIdsRef.current });
     setBulkDeleteOpen(true);
   };
 
   const confirmBulkDelete = () => {
-    if (onDelete && selectedIds.length > 0) {
-      onDelete(selectedIds);
+    const idsToDelete = pendingDeleteIdsRef.current;
+    if (onDelete && idsToDelete.length > 0) {
+      console.debug('[GlobalTable] bulk delete confirmed', { ids: idsToDelete });
+      onDelete(idsToDelete);
       if (clearSelectionOnDelete) setSelectedIds([]);
     }
+    pendingDeleteIdsRef.current = [];
     setBulkDeleteOpen(false);
   };
 

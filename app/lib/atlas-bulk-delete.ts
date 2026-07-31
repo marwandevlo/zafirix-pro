@@ -1,5 +1,5 @@
 import { showAtlasErrorToast, showAtlasSuccessToast, showAtlasWarningToast } from '@/app/lib/atlas-toast';
-import { isSyntheticTableRowId } from '@/app/lib/atlas-id-validation';
+import { isPersistableSelectionId } from '@/app/lib/atlas-id-validation';
 
 const DEFAULT_BATCH_SIZE = 20;
 
@@ -41,7 +41,17 @@ export function formatBulkDeleteError(err: unknown): string {
 export function filterPersistableIds(ids: string[]): string[] {
   return ids
     .map((id) => String(id).trim())
-    .filter((id) => !isSyntheticTableRowId(id));
+    .filter((id) => isPersistableSelectionId(id));
+}
+
+export function logBulkDeleteStage(
+  label: string,
+  stage: string,
+  payload: Record<string, unknown>,
+): void {
+  if (typeof console !== 'undefined' && console.debug) {
+    console.debug(`[BulkDelete:${label}] ${stage}`, payload);
+  }
 }
 
 export async function runInBatches<T>(
@@ -81,6 +91,8 @@ export async function postBulkDelete(apiPath: string, ids: string[]): Promise<nu
 
 export type OptimisticBulkDeleteOptions = {
   ids: string[];
+  /** Label for console.debug traces (e.g. "comptabilite-journal"). */
+  debugLabel?: string;
   confirmMessage?: string;
   /** When true, skip window.confirm (e.g. GlobalTable already confirmed). */
   skipConfirm?: boolean;
@@ -96,10 +108,16 @@ export type OptimisticBulkDeleteOptions = {
  * Confirm → optimistic UI → persist with rollback + toast feedback on failure.
  */
 export async function runOptimisticBulkDelete(options: OptimisticBulkDeleteOptions): Promise<boolean> {
+  const label = options.debugLabel ?? 'default';
+  logBulkDeleteStage(label, 'start', { rawIds: options.ids });
+
   const persistableIds = filterPersistableIds(options.ids);
   const skipped = options.ids.length - persistableIds.length;
 
+  logBulkDeleteStage(label, 'filtered', { persistableIds, skipped });
+
   if (persistableIds.length === 0) {
+    console.warn(`[BulkDelete:${label}] Aucun identifiant persistable`, { rawIds: options.ids });
     showAtlasErrorToast('Aucun identifiant valide à supprimer.');
     return false;
   }
@@ -133,7 +151,9 @@ export async function runOptimisticBulkDelete(options: OptimisticBulkDeleteOptio
   }
 
   try {
+    logBulkDeleteStage(label, 'persist', { persistableIds });
     await options.onPersist(persistableIds);
+    logBulkDeleteStage(label, 'success', { count: persistableIds.length });
     options.onSuccess?.(persistableIds);
     const successText =
       typeof options.successMessage === 'function'
@@ -142,7 +162,7 @@ export async function runOptimisticBulkDelete(options: OptimisticBulkDeleteOptio
     showAtlasSuccessToast(successText);
     return true;
   } catch (err) {
-    console.error('Bulk delete failed:', err);
+    console.error(`[BulkDelete:${label}] failed`, err, { persistableIds });
     options.onRollback?.();
     options.onPersistError?.(err);
     showAtlasErrorToast(formatBulkDeleteError(err));

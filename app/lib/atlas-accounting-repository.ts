@@ -1,5 +1,5 @@
 import type { AtlasAccountingEntry } from '@/app/types/atlas-accounting';
-import { isPostgresUuid } from '@/app/lib/atlas-id-validation';
+import { resolveToPostgresUuid } from '@/app/lib/atlas-id-validation';
 import { supabase } from '@/app/lib/supabase';
 import { ATLAS_STORAGE_KEYS } from '@/app/lib/atlas-storage-keys';
 import { isAtlasSupabaseDataEnabled } from '@/app/lib/atlas-data-source';
@@ -135,15 +135,19 @@ export async function deleteAtlasAccountingEntryBySelectionId(
   if (!id) return { ok: false, error: 'invalid_id' };
 
   if (!isAtlasSupabaseDataEnabled()) {
+    const uuid = resolveToPostgresUuid(id);
     writeAccountingToLocalStorage(
       readAccountingFromLocalStorage().filter(
-        (e) => e.rowId !== id && String(e.id) !== id,
+        (e) =>
+          (e.rowId && (e.rowId === id || e.rowId === uuid)) ||
+          String(e.id) !== id,
       ),
     );
     return { ok: true };
   }
 
-  if (!isPostgresUuid(id)) {
+  const uuid = resolveToPostgresUuid(id);
+  if (!uuid) {
     return { ok: false, error: 'invalid_id' };
   }
 
@@ -153,7 +157,7 @@ export async function deleteAtlasAccountingEntryBySelectionId(
   const { error } = await supabase
     .from('atlas_accounting_entries')
     .delete()
-    .eq('id', id)
+    .eq('id', uuid)
     .eq('user_id', auth.userId);
 
   if (error) return { ok: false, error: error.message };

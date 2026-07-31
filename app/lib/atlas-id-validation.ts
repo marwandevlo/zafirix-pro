@@ -17,9 +17,9 @@ export function isSyntheticTableRowId(id: string): boolean {
   return trimmed.length === 0 || trimmed.startsWith('__row-');
 }
 
-/** Strip module-specific display prefixes before UUID checks. */
+/** Strip module-specific display prefixes and normalizeGlobalTableRows duplicate suffixes. */
 export function stripKnownDisplayIdPrefix(id: string): string {
-  const trimmed = id.trim();
+  const trimmed = id.trim().replace(/__\d+$/, '');
   if (trimmed.startsWith('acc-')) return trimmed.slice(4);
   if (trimmed.startsWith('tva-')) return trimmed.slice(4);
   return trimmed;
@@ -27,11 +27,29 @@ export function stripKnownDisplayIdPrefix(id: string): string {
 
 /** Resolve a raw selection id to a backend UUID when possible. */
 export function resolveToPostgresUuid(id: string): string | null {
-  const trimmed = id.trim();
+  const trimmed = id.trim().replace(/__\d+$/, '');
   if (isSyntheticTableRowId(trimmed)) return null;
   if (isPostgresUuid(trimmed)) return trimmed;
   const stripped = stripKnownDisplayIdPrefix(trimmed);
   return isPostgresUuid(stripped) ? stripped : null;
+}
+
+/** True when the id can be used for table selection / delete routing (not a synthetic fallback). */
+export function isPersistableSelectionId(id: string): boolean {
+  const trimmed = id.trim();
+  if (isSyntheticTableRowId(trimmed)) return false;
+  if (isPostgresUuid(trimmed)) return true;
+  if (/^\d+$/.test(trimmed)) return true;
+  if (trimmed.startsWith('acc-') || trimmed.startsWith('tva-')) return true;
+  return resolveToPostgresUuid(trimmed) != null;
+}
+
+/** Accounting journal selection id → rowId ?? String(id). */
+export function getAccountingEntrySelectionId(entry: {
+  id: number;
+  rowId?: string | null;
+}): string {
+  return entry.rowId?.trim() ? entry.rowId.trim() : String(entry.id);
 }
 
 export type TvaLineIdSource = {

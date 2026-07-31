@@ -29,8 +29,9 @@ import {
   pruneSelectedIds,
   runOptimisticBulkDelete,
 } from '@/app/components/data-grid/global-table-id';
-import { postBulkDelete } from '@/app/lib/atlas-bulk-delete';
+import { postBulkDelete, formatBulkDeleteError } from '@/app/lib/atlas-bulk-delete';
 import { resolveTvaLineBackendId } from '@/app/lib/atlas-id-validation';
+import { showAtlasErrorToast, showAtlasWarningToast } from '@/app/lib/atlas-toast';
 import { exportTable } from '@/app/lib/atlas-table-export';
 import { openWhatsAppShare } from '@/app/lib/atlas-quick-share';
 import type { AtlasTvaLineItem } from '@/app/types/atlas-tva';
@@ -126,11 +127,44 @@ const TVA_HISTORY_EXPORT_COLUMNS: ExportColumn[] = [
   { key: 'status', label: 'Statut' },
 ];
 
+function buildTvaLineLookupMap(
+  visibleLines: AtlasTvaPeriodRecord['lines'],
+  tableRows: (AtlasTvaLineItem & GlobalTableRow)[],
+): Map<string, AtlasTvaPeriodRecord['lines'][number]> {
+  const map = new Map<string, AtlasTvaPeriodRecord['lines'][number]>();
+  for (const line of visibleLines) {
+    map.set(line.id, line);
+  }
+  for (const row of tableRows) {
+    map.set(row.id, row);
+    const baseId = row.id.replace(/__\d+$/, '');
+    if (baseId !== row.id) map.set(baseId, row);
+  }
+  return map;
+}
+
+function resolveTvaLineFromSelection(
+  selectionId: string,
+  lineById: Map<string, AtlasTvaPeriodRecord['lines'][number]>,
+): AtlasTvaPeriodRecord['lines'][number] | undefined {
+  const direct = lineById.get(selectionId);
+  if (direct) return direct;
+  const baseId = selectionId.replace(/__\d+$/, '');
+  return lineById.get(baseId);
+}
+
 async function deleteTvaSourceLine(line: AtlasTvaPeriodRecord['lines'][number]): Promise<boolean> {
-  if (line.source === 'tva_suggestion') return false;
+  if (line.source === 'tva_suggestion') {
+    showAtlasWarningToast('Les suggestions TVA ne peuvent pas être supprimées depuis ce tableau.');
+    return false;
+  }
 
   const backendId = resolveTvaLineBackendId(line);
-  if (!backendId) return false;
+  if (!backendId) {
+    console.warn('[TVA] deleteTvaSourceLine — backend id introuvable', { lineId: line.id, source: line.source });
+    showAtlasErrorToast(`Identifiant invalide pour la suppression : ${line.id}`);
+    return false;
+  }
 
   const path =
     line.source === 'supplier_invoice' ? `/api/supplier-invoices/${backendId}` :
@@ -138,8 +172,16 @@ async function deleteTvaSourceLine(line: AtlasTvaPeriodRecord['lines'][number]):
     line.source === 'accounting_entry' ? `/api/accounting/entries/${backendId}` :
     null;
   if (!path) return false;
+
+  console.debug('[TVA] deleteTvaSourceLine', { selectionId: line.id, backendId, source: line.source });
   const res = await fetch(path, { method: 'DELETE', credentials: 'include' });
-  return res.ok;
+  if (!res.ok) {
+    const data = (await res.json().catch(() => ({}))) as { error?: string };
+    console.error('[TVA] deleteTvaSourceLine failed', { backendId, error: data.error, status: res.status });
+    showAtlasErrorToast(formatBulkDeleteError(data.error ?? `HTTP ${res.status}`));
+    return false;
+  }
+  return true;
 }
 
 async function bulkDeleteTvaSourceLines(
@@ -149,26 +191,49 @@ async function bulkDeleteTvaSourceLines(
   const supplierIds: string[] = [];
   const invoiceIds: string[] = [];
   const entryIds: string[] = [];
+  let notFound = 0;
+  let notDeletable = 0;
 
   for (const id of deleteIds) {
-    const line = lineById.get(id);
-    if (!line) continue;
+    const line = resolveTvaLineFromSelection(id, lineById);
+    if (!line) {
+      notFound += 1;
+      continue;
+    }
 
     const backendId = resolveTvaLineBackendId(line);
-    if (!backendId) continue;
+    if (!backendId) {
+      notDeletable += 1;
+      continue;
+    }
 
     if (line.source === 'supplier_invoice') supplierIds.push(backendId);
     else if (line.source === 'invoice') invoiceIds.push(backendId);
     else if (line.source === 'accounting_entry') entryIds.push(backendId);
   }
 
+  console.debug('[TVA] bulkDeleteTvaSourceLines', {
+    deleteIds,
+    supplierIds,
+    invoiceIds,
+    entryIds,
+    notFound,
+    notDeletable,
+  });
+
   if (supplierIds.length === 0 && invoiceIds.length === 0 && entryIds.length === 0) {
-    throw new Error('Aucune ligne supprimable (identifiants invalides ou suggestions TVA).');
+    throw new Error(
+      `Aucune ligne supprimable (${notFound} introuvable(s), ${notDeletable} non supprimable(s) — ex. suggestions TVA).`,
+    );
   }
 
   if (supplierIds.length) await postBulkDelete('/api/supplier-invoices/bulk-delete', supplierIds);
   if (invoiceIds.length) await postBulkDelete('/api/invoices/bulk-delete', invoiceIds);
   if (entryIds.length) await postBulkDelete('/api/accounting/entries/bulk-delete', entryIds);
+
+  if (notFound + notDeletable > 0) {
+    showAtlasWarningToast(`${notFound + notDeletable} ligne(s) ignorée(s) (introuvable ou non supprimable).`);
+  }
 }
 
 async function updateTvaSourceLine(line: AtlasTvaPeriodRecord['lines'][number], values: Record<string, string>): Promise<boolean> {
@@ -723,7 +788,10 @@ function InvoiceTable({
     setSelectedIds((prev) => pruneSelectedIds(prev, tableRows));
   }, [tableRows]);
 
-  const lineById = useMemo(() => new Map(tableRows.map((row) => [row.id, row])), [tableRows]);
+  const lineById = useMemo(
+    () => buildTvaLineLookupMap(visibleLines, tableRows),
+    [visibleLines, tableRows],
+  );
 
   const columns = useMemo((): GlobalTableColumn<(typeof tableRows)[number]>[] => [
     { header: 'Réf.', accessor: 'reference', render: (row) => row.reference || '—' },
@@ -816,6 +884,7 @@ function InvoiceTable({
   const handleBulkDelete = (ids: string[]) => {
     void runOptimisticBulkDelete({
       ids,
+      debugLabel: `tva-${counterpartyLabel.toLowerCase()}`,
       skipConfirm: true,
       onOptimistic: () => {
         setHiddenIds((prev) => new Set([...prev, ...ids]));
@@ -950,6 +1019,7 @@ function TvaHistoryTable({
   const handleBulkDelete = (ids: string[]) => {
     void runOptimisticBulkDelete({
       ids,
+      debugLabel: 'tva-history',
       skipConfirm: true,
       onOptimistic: () => {
         onHistoryChange(history.filter((period) => !ids.includes(period.id)));
