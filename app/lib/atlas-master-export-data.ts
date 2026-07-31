@@ -5,7 +5,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import type { AtlasIsDraft } from '@/app/types/atlas-payroll';
 import type { DgiReleveDeductionRow } from '@/app/lib/atlas-tva-dgi';
-import { buildDgiReleveRows, formatDgiIce, resolveDgiCompanyIdentifiers } from '@/app/lib/atlas-tva-dgi';
+import { buildDgiReleveRows, formatDgiIce, formatDgiIdentifiantFiscal, resolveDgiCompanyIdentifiers } from '@/app/lib/atlas-tva-dgi';
 import {
   buildBankExportRows,
   type BankExportRow,
@@ -23,6 +23,7 @@ export type MasterSupplierInvoiceRow = {
   invoiceNumber: string;
   supplierName: string;
   supplierIce: string;
+  supplierIf: string;
   invoiceDate: string;
   amountHT: number;
   vatRate: number;
@@ -125,7 +126,7 @@ export async function loadMasterExportData(
     getIsDraftForYear(admin, userId, companyId, fiscalYear),
     admin
       .from('atlas_supplier_invoices')
-      .select('invoice_number, supplier_name, supplier_ice, invoice_date, amount_ht, vat_amount, amount_ttc, vat_rate, status')
+      .select('invoice_number, supplier_name, supplier_ice, supplier_if, invoice_date, amount_ht, vat_amount, amount_ttc, vat_rate, status')
       .eq('user_id', userId)
       .eq('company_id', companyId)
       .order('invoice_date', { ascending: false })
@@ -202,6 +203,7 @@ export async function loadMasterExportData(
     invoiceNumber: String(row.invoice_number ?? ''),
     supplierName: String(row.supplier_name ?? 'Fournisseur'),
     supplierIce: formatDgiIce(row.supplier_ice as string | null | undefined),
+    supplierIf: formatDgiIdentifiantFiscal(row.supplier_if as string | null | undefined),
     invoiceDate: String(row.invoice_date ?? ''),
     amountHT: Number(row.amount_ht ?? 0),
     vatRate: Number(row.vat_rate ?? 0),

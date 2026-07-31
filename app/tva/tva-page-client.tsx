@@ -52,12 +52,32 @@ import { isAtlasSupabaseDataEnabled } from '@/app/lib/atlas-data-source';
 import {
   dgiDeclarationRegime,
   generateTvaDeclarationXml,
-  resolveDgiIdentifiantFiscal,
   validateTvaDgiExport,
+  type TvaDgiExportCompanySources,
 } from '@/app/lib/atlas-tva-xml';
 import type { AtlasTvaDashboard, AtlasTvaPeriodRecord } from '@/app/types/atlas-tva';
 
 type Tab = 'dashboard' | 'ventes' | 'achats' | 'historique' | 'audit';
+
+type TvaCompanyExportInfo = {
+  ice: string | null;
+  if_fiscal: string | null;
+  if_number: string | null;
+};
+
+function buildTvaExportCompanySources(
+  companyExportInfo: TvaCompanyExportInfo | null,
+): TvaDgiExportCompanySources {
+  const activeCompany = readActiveCompanyFromLocalStorage();
+  return {
+    if_fiscal: companyExportInfo?.if_fiscal ?? activeCompany?.if_fiscal ?? null,
+    if_number:
+      companyExportInfo?.if_number ??
+      (activeCompany as { if_number?: string } | null)?.if_number ??
+      null,
+    ice: companyExportInfo?.ice ?? activeCompany?.ice ?? null,
+  };
+}
 
 type TvaQuarterSelection = 'T1' | 'T2' | 'T3' | 'T4' | 'AN';
 
@@ -282,6 +302,7 @@ type TvaHistoryTableRow = GlobalTableRow & {
 export default function TvaPageClient() {
   const [tab, setTab] = useState<Tab>('dashboard');
   const [companyId, setCompanyId] = useState<string | null>(null);
+  const [companyExportInfo, setCompanyExportInfo] = useState<TvaCompanyExportInfo | null>(null);
   const [dashboard, setDashboard] = useState<AtlasTvaDashboard | null>(null);
   const [history, setHistory] = useState<AtlasTvaPeriodRecord[]>([]);
   const [loading, setLoading] = useState(true);
@@ -306,6 +327,7 @@ export default function TvaPageClient() {
         setCompanyId(cid);
         if (!supabaseEnabled || !cid) {
           setDashboard(null);
+          setCompanyExportInfo(null);
           setHistory([]);
           return;
         }
@@ -322,9 +344,11 @@ export default function TvaPageClient() {
         }
 
         const [dashRes, histRes] = await Promise.all([
-          tvaFetch<{ dashboard?: AtlasTvaDashboard; error?: string }>(
-            `/api/tva/dashboard?${dashParams.toString()}`,
-          ),
+          tvaFetch<{
+            dashboard?: AtlasTvaDashboard;
+            companyExportInfo?: TvaCompanyExportInfo | null;
+            error?: string;
+          }>(`/api/tva/dashboard?${dashParams.toString()}`),
           tvaFetch<{ periods?: AtlasTvaPeriodRecord[]; error?: string }>(
             `/api/tva/history?${historyParams.toString()}`,
           ),
@@ -333,9 +357,11 @@ export default function TvaPageClient() {
         if (!dashRes.ok) {
           setError(dashRes.data.error ?? 'Impossible de charger la TVA.');
           setDashboard(null);
+          setCompanyExportInfo(null);
         } else {
           const dash = dashRes.data.dashboard ?? null;
           setDashboard(dash);
+          setCompanyExportInfo(dashRes.data.companyExportInfo ?? null);
           if (opts?.detectLatest && dash?.selectedPeriodKey) {
             const parsed = parsePeriodKey(dash.selectedPeriodKey);
             if (parsed) {
@@ -409,15 +435,8 @@ export default function TvaPageClient() {
 
   const downloadXml = () => {
     if (!current || !dashboard) return;
-    const activeCompany = readActiveCompanyFromLocalStorage();
-    const identifiantFiscal = resolveDgiIdentifiantFiscal(
-      activeCompany?.if_fiscal,
-      (activeCompany as { if_number?: string } | null)?.if_number,
-    );
-    const validation = validateTvaDgiExport(current, {
-      identifiantFiscal,
-      companyIce: activeCompany?.ice,
-    });
+    const company = buildTvaExportCompanySources(companyExportInfo);
+    const validation = validateTvaDgiExport(current, { company });
     if (!validation.ok) {
       setError(validation.message ?? 'Export XML impossible.');
       return;
@@ -425,7 +444,7 @@ export default function TvaPageClient() {
     if (!confirmTvaExportWarnings(validation.warnings)) return;
 
     const xml = generateTvaDeclarationXml(current, {
-      identifiantFiscal,
+      company,
       regime: dgiDeclarationRegime(),
     });
     const blob = new Blob([xml], { type: 'application/xml' });
@@ -440,15 +459,8 @@ export default function TvaPageClient() {
 
   const downloadExcel = async () => {
     if (!current || !companyId) return;
-    const activeCompany = readActiveCompanyFromLocalStorage();
-    const identifiantFiscal = resolveDgiIdentifiantFiscal(
-      activeCompany?.if_fiscal,
-      (activeCompany as { if_number?: string } | null)?.if_number,
-    );
-    const validation = validateTvaDgiExport(current, {
-      identifiantFiscal,
-      companyIce: activeCompany?.ice,
-    });
+    const company = buildTvaExportCompanySources(companyExportInfo);
+    const validation = validateTvaDgiExport(current, { company });
     if (!validation.ok) {
       setError(validation.message ?? 'Export Excel impossible.');
       return;

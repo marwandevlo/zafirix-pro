@@ -3,10 +3,7 @@ import { atlasDataBackend } from '@/app/lib/atlas-data-source';
 import { requireAgentsRouteDb } from '@/app/lib/atlas-agents-route-db';
 import { generateTvaReleveExcelBuffer, tvaReleveExcelFilename } from '@/app/lib/atlas-tva-excel';
 import { getTvaDashboard, loadCompanyTvaExportInfo } from '@/app/lib/atlas-tva-server';
-import {
-  resolveDgiIdentifiantFiscal,
-  validateTvaDgiExport,
-} from '@/app/lib/atlas-tva-xml';
+import { validateTvaDgiExport } from '@/app/lib/atlas-tva-xml';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -45,11 +42,7 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: 'company_not_found' }, { status: 404, headers: NO_STORE_HEADERS });
     }
 
-    const identifiantFiscal = resolveDgiIdentifiantFiscal(company.if_fiscal, company.if_number);
-    const validation = validateTvaDgiExport(dashboard.current, {
-      identifiantFiscal,
-      companyIce: company.ice,
-    });
+    const validation = validateTvaDgiExport(dashboard.current, { company });
     if (!validation.ok) {
       return NextResponse.json(
         { error: validation.error, message: validation.message },

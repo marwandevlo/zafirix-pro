@@ -18,6 +18,9 @@ export type AtlasTvaLineItem = {
   designation?: string;
   paymentMode?: string;
   paymentDate?: string;
+  /** Linked supplier invoice UUID (suggestions / traceability) */
+  sourceInvoiceId?: string;
+  sourceDocumentId?: string;
 };
 
 export type AtlasTvaPeriodCalculation = {

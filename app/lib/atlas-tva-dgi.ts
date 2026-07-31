@@ -34,8 +34,17 @@ const PAYMENT_MODE_LABELS: Record<number, string> = {
 /** DGI declaration regime: 1 = Débit / Encaissement standard. */
 export const DGI_DECLARATION_REGIME_STANDARD = 1;
 
+export type TvaDgiExportCompanySources = {
+  if_fiscal?: string | null;
+  if_number?: string | null;
+  ice?: string | null;
+  company_json?: Record<string, unknown> | null;
+};
+
 export type DgiTvaXmlOptions = {
-  identifiantFiscal: string;
+  identifiantFiscal?: string | null;
+  /** Company profile fields used when identifiantFiscal is omitted. */
+  company?: TvaDgiExportCompanySources | null;
   /** DGI regime code — default 1 (Débit / Encaissement standard). */
   regime?: number;
 };
@@ -45,6 +54,72 @@ export type DgiReleveSupplierRef = {
   nom: string;
   ice: string;
 };
+
+/** Index built from supplier invoices for ICE/IF fallback by invoice id or name. */
+export type SupplierIdentityIndex = {
+  byInvoiceId: Map<string, DgiReleveSupplierRef>;
+  byNormalizedName: Map<string, DgiReleveSupplierRef>;
+};
+
+function normalizeSupplierNameKey(name: string | null | undefined): string {
+  return sanitizeDgiNomFournisseur(name).toLowerCase();
+}
+
+function mergeSupplierIdentity(
+  existing: DgiReleveSupplierRef | undefined,
+  incoming: DgiReleveSupplierRef,
+): DgiReleveSupplierRef {
+  return {
+    nom: incoming.nom || existing?.nom || 'Fournisseur',
+    ice: incoming.ice || existing?.ice || '',
+    ifFiscal: incoming.ifFiscal || existing?.ifFiscal || '',
+  };
+}
+
+/** Build lookup tables from supplier invoice rows (DB or TVA lines). */
+export function buildSupplierIdentityIndex(
+  invoices: Array<{
+    id: string;
+    supplier_name?: string | null;
+    supplier_ice?: string | null;
+    supplier_if?: string | null;
+  }>,
+): SupplierIdentityIndex {
+  const byInvoiceId = new Map<string, DgiReleveSupplierRef>();
+  const byNormalizedName = new Map<string, DgiReleveSupplierRef>();
+
+  for (const inv of invoices) {
+    const record: DgiReleveSupplierRef = {
+      ifFiscal: formatDgiIdentifiantFiscal(inv.supplier_if),
+      ice: formatDgiIce(inv.supplier_ice),
+      nom: sanitizeDgiNomFournisseur(inv.supplier_name),
+    };
+
+    byInvoiceId.set(String(inv.id), record);
+
+    const nameKey = normalizeSupplierNameKey(record.nom);
+    if (!nameKey) continue;
+
+    const existing = byNormalizedName.get(nameKey);
+    byNormalizedName.set(nameKey, mergeSupplierIdentity(existing, record));
+  }
+
+  return { byInvoiceId, byNormalizedName };
+}
+
+/** Build supplier index from TVA period supplier_invoice lines. */
+export function buildSupplierIdentityIndexFromPeriod(record: AtlasTvaPeriodRecord): SupplierIdentityIndex {
+  return buildSupplierIdentityIndex(
+    record.lines
+      .filter((line) => line.source === 'supplier_invoice')
+      .map((line) => ({
+        id: line.id,
+        supplier_name: line.counterparty,
+        supplier_ice: line.supplierIce,
+        supplier_if: line.supplierIf,
+      })),
+  );
+}
 
 /** Official DGI SIMPL-TVA relevé row (Cahier des charges EDI). */
 export type DgiReleveDeductionRow = {
@@ -239,6 +314,39 @@ export function resolveDgiIdentifiantFiscal(...sources: Array<string | null | un
   return '';
 }
 
+function companyJsonIfSources(json: Record<string, unknown> | null | undefined): Array<string | null | undefined> {
+  if (!json) return [];
+  return [
+    json.if_fiscal as string | null | undefined,
+    json.if_number as string | null | undefined,
+    json.identifiant_fiscal as string | null | undefined,
+    json.identifiantFiscal as string | null | undefined,
+  ];
+}
+
+/** Resolve declaring company IF from explicit value, profile columns, and company_json. */
+export function resolveTvaDeclarationIdentifiantFiscal(
+  company?: TvaDgiExportCompanySources | null,
+  explicitIf?: string | null,
+): string {
+  const json = company?.company_json;
+  return resolveDgiIdentifiantFiscal(
+    explicitIf,
+    company?.if_fiscal,
+    company?.if_number,
+    ...companyJsonIfSources(json),
+  );
+}
+
+/** Resolve declaring company ICE from explicit value, profile columns, and company_json. */
+export function resolveTvaDeclarationCompanyIce(
+  company?: TvaDgiExportCompanySources | null,
+  explicitIce?: string | null,
+): string {
+  const json = company?.company_json;
+  return resolveDgiIce(explicitIce, company?.ice, json?.ice as string | null | undefined);
+}
+
 /** Sanitize RC for export — blank when missing or placeholder digits only. */
 export function formatDgiRc(rc: string | null | undefined): string {
   const trimmed = formatTaxIdentifier(rc);
@@ -302,36 +410,74 @@ export function isDeductiblePurchaseLine(line: AtlasTvaLineItem): boolean {
 }
 
 /** Build sanitized supplier reference for DGI `<refF>` nodes. */
-export function resolveDgiSupplierRef(sources: {
-  counterparty?: string | null;
-  supplierIce?: string | null;
-  supplierIf?: string | null;
-}): DgiReleveSupplierRef {
+export function resolveDgiSupplierRef(
+  sources: {
+    counterparty?: string | null;
+    supplierIce?: string | null;
+    supplierIf?: string | null;
+    sourceInvoiceId?: string | null;
+  },
+  index?: SupplierIdentityIndex | null,
+): DgiReleveSupplierRef {
+  let rawIce = sources.supplierIce;
+  let rawIf = sources.supplierIf;
+  let rawNom = sources.counterparty;
+
+  if (index) {
+    if (sources.sourceInvoiceId) {
+      const linked = index.byInvoiceId.get(String(sources.sourceInvoiceId));
+      if (linked) {
+        rawIce = rawIce || linked.ice || null;
+        rawIf = rawIf || linked.ifFiscal || null;
+        rawNom = rawNom || linked.nom || null;
+      }
+    }
+
+    const nameKey = normalizeSupplierNameKey(rawNom);
+    if (nameKey) {
+      const byName = index.byNormalizedName.get(nameKey);
+      if (byName) {
+        rawIce = rawIce || byName.ice || null;
+        rawIf = rawIf || byName.ifFiscal || null;
+        rawNom = rawNom || byName.nom || null;
+      }
+    }
+  }
+
   return {
-    ifFiscal: resolveDgiIdentifiantFiscal(sources.supplierIf),
-    nom: sanitizeDgiNomFournisseur(sources.counterparty),
-    ice: resolveDgiIce(sources.supplierIce),
+    ifFiscal: resolveDgiIdentifiantFiscal(rawIf),
+    nom: sanitizeDgiNomFournisseur(rawNom),
+    ice: resolveDgiIce(rawIce),
   };
 }
 
-export function buildDgiReleveRows(record: AtlasTvaPeriodRecord): DgiReleveDeductionRow[] {
-  return record.lines.filter(isDeductiblePurchaseLine).map((line, index) => {
+export function buildDgiReleveRows(
+  record: AtlasTvaPeriodRecord,
+  index?: SupplierIdentityIndex | null,
+): DgiReleveDeductionRow[] {
+  const supplierIndex = index ?? buildSupplierIdentityIndexFromPeriod(record);
+
+  return record.lines.filter(isDeductiblePurchaseLine).map((line, rowIndex) => {
     const modePaiementCode = dgiPaymentModeCode(line.paymentMode);
     const issueDate = formatDgiDateYmd(line.issueDate);
     const paymentDate = formatDgiDateYmd(line.paymentDate || line.issueDate, issueDate);
 
     return {
-      ord: index + 1,
-      num: sanitizeDgiNumFacture(line.reference || String(index + 1)),
+      ord: rowIndex + 1,
+      num: sanitizeDgiNumFacture(line.reference || String(rowIndex + 1)),
       des: sanitizeDgiDesignation(line.designation),
       mht: roundDgiAmount(line.amountHT),
       tva: roundDgiAmount(line.vatAmount),
       ttc: roundDgiAmount(line.totalTTC),
-      refF: resolveDgiSupplierRef({
-        counterparty: line.counterparty,
-        supplierIce: line.supplierIce,
-        supplierIf: line.supplierIf,
-      }),
+      refF: resolveDgiSupplierRef(
+        {
+          counterparty: line.counterparty,
+          supplierIce: line.supplierIce,
+          supplierIf: line.supplierIf,
+          sourceInvoiceId: line.sourceInvoiceId ?? (line.source === 'supplier_invoice' ? line.id : undefined),
+        },
+        supplierIndex,
+      ),
       tx: formatDgiVatRate(line.vatRate),
       mp: modePaiementCode,
       dpai: paymentDate,

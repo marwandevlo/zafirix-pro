@@ -9,7 +9,10 @@ import type {
 } from '@/app/types/atlas-tva';
 import { asRecord } from '@/app/lib/atlas-json';
 import { filterPostgresUuids } from '@/app/lib/atlas-id-validation';
-import { resolveDgiIce, resolveDgiIdentifiantFiscal } from '@/app/lib/atlas-tva-dgi';
+import {
+  buildSupplierIdentityIndex,
+  sanitizeDgiNomFournisseur,
+} from '@/app/lib/atlas-tva-dgi';
 
 const MONTH_NAMES = [
   'Janvier', 'Février', 'Mars', 'Avril', 'Mai', 'Juin',
@@ -304,6 +307,103 @@ async function fetchCompanyScopedRows<T>(
   return merged;
 }
 
+function extractDocumentField(extraction: unknown, key: string): string {
+  const rec = asRecord(extraction);
+  if (!rec) return '';
+  const field = rec[key];
+  if (field == null) return '';
+  if (typeof field === 'object') {
+    const obj = field as { value?: unknown; user_corrected_value?: unknown };
+    const val = obj.user_corrected_value ?? obj.value;
+    return val != null ? String(val).trim() : '';
+  }
+  return String(field).trim();
+}
+
+async function loadDocumentSupplierHints(
+  db: SupabaseClient,
+  documentIds: string[],
+): Promise<Map<string, { ice?: string; ifFiscal?: string; name?: string }>> {
+  const unique = [...new Set(documentIds.map(String).filter(Boolean))];
+  if (unique.length === 0) return new Map();
+
+  const { data, error } = await db
+    .from('atlas_documents')
+    .select('id, extraction_json')
+    .in('id', unique);
+
+  if (error) {
+    console.warn('[TVA Server] document supplier hints load failed', error.message);
+    return new Map();
+  }
+
+  const map = new Map<string, { ice?: string; ifFiscal?: string; name?: string }>();
+  for (const row of data ?? []) {
+    const ext = (row as { extraction_json?: unknown }).extraction_json;
+    map.set(String((row as { id: string }).id), {
+      ice: extractDocumentField(ext, 'supplier_ice') || undefined,
+      ifFiscal: extractDocumentField(ext, 'supplier_if') || undefined,
+      name:
+        extractDocumentField(ext, 'supplier_name') ||
+        extractDocumentField(ext, 'customer_name') ||
+        undefined,
+    });
+  }
+  return map;
+}
+
+function resolveSupplierIdentityFromSources(
+  sources: {
+    supplierIce?: string | null;
+    supplierIf?: string | null;
+    counterparty?: string | null;
+    sourceInvoiceId?: string | null;
+  },
+  supplierIndex: ReturnType<typeof buildSupplierIdentityIndex>,
+  supplierById: Map<string, SupplierRow>,
+  docHint?: { ice?: string; ifFiscal?: string; name?: string },
+): { supplierIce?: string; supplierIf?: string; counterparty?: string } {
+  let ice = sources.supplierIce ? String(sources.supplierIce).trim() : undefined;
+  let ifF = sources.supplierIf ? String(sources.supplierIf).trim() : undefined;
+  let name = sources.counterparty ? String(sources.counterparty).trim() : undefined;
+
+  if (sources.sourceInvoiceId) {
+    const inv = supplierById.get(String(sources.sourceInvoiceId));
+    if (inv) {
+      ice = ice || (inv.supplier_ice ? String(inv.supplier_ice).trim() : undefined);
+      ifF = ifF || (inv.supplier_if ? String(inv.supplier_if).trim() : undefined);
+      name = name || (inv.supplier_name ? String(inv.supplier_name).trim() : undefined);
+    }
+    const indexed = supplierIndex.byInvoiceId.get(String(sources.sourceInvoiceId));
+    if (indexed) {
+      ice = ice || indexed.ice || undefined;
+      ifF = ifF || indexed.ifFiscal || undefined;
+      name = name || indexed.nom || undefined;
+    }
+  }
+
+  if (docHint) {
+    ice = ice || docHint.ice;
+    ifF = ifF || docHint.ifFiscal;
+    name = name || docHint.name;
+  }
+
+  const nameKey = sanitizeDgiNomFournisseur(name).toLowerCase();
+  if (nameKey) {
+    const byName = supplierIndex.byNormalizedName.get(nameKey);
+    if (byName) {
+      ice = ice || byName.ice || undefined;
+      ifF = ifF || byName.ifFiscal || undefined;
+    }
+  }
+
+  return {
+    supplierIce: ice || undefined,
+    supplierIf: ifF || undefined,
+    counterparty: name,
+  };
+}
+
 export async function computeTvaPeriod(
   db: SupabaseClient,
   companyId: string,
@@ -343,6 +443,20 @@ export async function computeTvaPeriod(
       userId,
     ),
   ]);
+
+  const supplierIndex = buildSupplierIdentityIndex(
+    supplierInvoices.map((row) => ({
+      id: String(row.id),
+      supplier_name: row.supplier_name,
+      supplier_ice: row.supplier_ice,
+      supplier_if: row.supplier_if,
+    })),
+  );
+  const supplierById = new Map(supplierInvoices.map((row) => [String(row.id), row]));
+  const docHints = await loadDocumentSupplierHints(
+    db,
+    suggestions.map((row) => row.source_document_id),
+  );
 
   const lines: AtlasTvaLineItem[] = [];
   let tvaCollectee = 0;
@@ -399,19 +513,32 @@ export async function computeTvaPeriod(
     achatsHT += amountHT;
     purchasesCount += 1;
     countedInvoiceIds.add(String(row.id));
+
+    const identity = resolveSupplierIdentityFromSources(
+      {
+        supplierIce: row.supplier_ice,
+        supplierIf: row.supplier_if,
+        counterparty: row.supplier_name,
+        sourceInvoiceId: row.id,
+      },
+      supplierIndex,
+      supplierById,
+    );
+
     lines.push({
       id: String(row.id),
       kind: 'purchase',
       reference: String(row.invoice_number ?? row.id.slice(0, 8)),
-      counterparty: String(row.supplier_name ?? ''),
+      counterparty: identity.counterparty ?? String(row.supplier_name ?? ''),
       issueDate,
       amountHT,
       vatAmount,
       totalTTC,
       vatRate: row.vat_rate != null ? Number(row.vat_rate) : undefined,
       source: 'supplier_invoice',
-      supplierIce: resolveDgiIce(row.supplier_ice) || undefined,
-      supplierIf: resolveDgiIdentifiantFiscal(row.supplier_if) || undefined,
+      sourceInvoiceId: String(row.id),
+      supplierIce: identity.supplierIce,
+      supplierIf: identity.supplierIf,
       designation: row.category ? String(row.category) : 'Achats / Services',
       paymentMode: row.payment_method ? String(row.payment_method) : undefined,
       paymentDate: issueDate,
@@ -443,17 +570,34 @@ export async function computeTvaPeriod(
       salesCount += 1;
     }
 
+    const suggestionIdentity = isDeductible
+      ? resolveSupplierIdentityFromSources(
+          {
+            counterparty: row.supplier_name,
+            sourceInvoiceId: row.source_invoice_id,
+          },
+          supplierIndex,
+          supplierById,
+          docHints.get(row.source_document_id),
+        )
+      : {};
+
     lines.push({
       id: `tva-${row.id}`,
       kind: isDeductible ? 'purchase' : 'sale',
       reference: String(row.invoice_number ?? row.source_document_id.slice(0, 8)),
-      counterparty: String(row.supplier_name ?? 'Suggestion TVA'),
+      counterparty: suggestionIdentity.counterparty ?? String(row.supplier_name ?? 'Suggestion TVA'),
       issueDate,
       amountHT,
       vatAmount,
       totalTTC: amountHT + vatAmount,
       vatRate: row.rate != null ? Number(row.rate) : undefined,
       source: 'tva_suggestion',
+      sourceInvoiceId: row.source_invoice_id ?? undefined,
+      sourceDocumentId: row.source_document_id,
+      supplierIce: suggestionIdentity.supplierIce,
+      supplierIf: suggestionIdentity.supplierIf,
+      designation: 'Achats / Services',
     });
   }
 
@@ -632,7 +776,12 @@ export async function loadCompanyTvaExportInfo(
     ice: row.ice == null ? (json?.ice == null ? null : String(json.ice)) : String(row.ice),
     if_fiscal:
       row.if_fiscal == null ? (json?.if_fiscal == null ? null : String(json.if_fiscal)) : String(row.if_fiscal),
-    if_number: row.if_number == null ? null : String(row.if_number),
+    if_number:
+      row.if_number == null
+        ? json?.if_number == null
+          ? null
+          : String(json.if_number)
+        : String(row.if_number),
     rc: row.rc == null ? (json?.rc == null ? null : String(json.rc)) : String(row.rc),
   };
 }

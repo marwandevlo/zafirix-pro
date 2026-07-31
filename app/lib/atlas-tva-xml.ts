@@ -1,6 +1,7 @@
 import type { AtlasTvaPeriodRecord } from '@/app/types/atlas-tva';
 import {
   buildDgiReleveRows,
+  buildSupplierIdentityIndexFromPeriod,
   DGI_DECLARATION_REGIME_STANDARD,
   escapeDgiXml,
   formatDgiAmount,
@@ -8,14 +9,20 @@ import {
   formatDgiIdentifiantFiscal,
   isDeductiblePurchaseLine,
   parseDgiPeriodFromKey,
+  resolveTvaDeclarationCompanyIce,
+  resolveTvaDeclarationIdentifiantFiscal,
+  sanitizeDgiNomFournisseur,
   type DgiReleveDeductionRow,
   type DgiTvaXmlOptions,
+  type TvaDgiExportCompanySources,
 } from '@/app/lib/atlas-tva-dgi';
 
-export type { DgiTvaXmlOptions } from '@/app/lib/atlas-tva-dgi';
+export type { DgiTvaXmlOptions, TvaDgiExportCompanySources } from '@/app/lib/atlas-tva-dgi';
 export {
   buildDgiClientInfo,
   buildDgiReleveRows,
+  buildSupplierIdentityIndex,
+  buildSupplierIdentityIndexFromPeriod,
   dgiDeclarationRegime,
   dgiPaymentModeCode,
   dgiRegimeCode,
@@ -33,7 +40,10 @@ export {
   resolveDgiIdentifiantFiscal,
   resolveDgiRc,
   resolveDgiSupplierRef,
+  resolveTvaDeclarationCompanyIce,
+  resolveTvaDeclarationIdentifiantFiscal,
   sanitizeDgiDesignation,
+  sanitizeDgiNomFournisseur,
   sanitizeDgiNumFacture,
 } from '@/app/lib/atlas-tva-dgi';
 
@@ -44,32 +54,40 @@ export type TvaDgiExportValidation = {
   warnings?: string[];
 };
 
-/** Validate company IF/ICE and supplier ICE rows before SIMPL-TVA export. */
+export type TvaDgiExportValidationOptions = {
+  identifiantFiscal?: string | null;
+  companyIce?: string | null;
+  company?: TvaDgiExportCompanySources | null;
+};
+
+/** Validate supplier ICE rows before SIMPL-TVA export; company IF/ICE are advisory only. */
 export function validateTvaDgiExport(
   record: AtlasTvaPeriodRecord,
-  opts: { identifiantFiscal?: string | null; companyIce?: string | null },
+  opts: TvaDgiExportValidationOptions,
 ): TvaDgiExportValidation {
-  const identifiantFiscal = formatDgiIdentifiantFiscal(opts.identifiantFiscal);
+  const warnings: string[] = [];
+  const identifiantFiscal = resolveTvaDeclarationIdentifiantFiscal(opts.company, opts.identifiantFiscal);
   if (!identifiantFiscal) {
-    return {
-      ok: false,
-      error: 'missing_if',
-      message:
-        "Identifiant Fiscal (IF) manquant ou invalide. Complétez le profil société (Paramètres) avant l'export DGI.",
-    };
+    warnings.push(
+      "Identifiant Fiscal (IF) société absent du profil — l'export s'appuie sur les IF/ICE des factures et fournisseurs.",
+    );
   }
 
-  const warnings: string[] = [];
-  if (!formatDgiIce(opts.companyIce)) {
+  if (!resolveTvaDeclarationCompanyIce(opts.company, opts.companyIce)) {
     warnings.push("ICE société manquant ou invalide dans le profil entreprise.");
   }
 
-  const rows = buildDgiReleveRows(record);
+  const supplierIndex = buildSupplierIdentityIndexFromPeriod(record);
+  const rows = buildDgiReleveRows(record, supplierIndex);
   const missingSupplierIce = rows.filter((row) => !row.refF.ice).length;
   if (missingSupplierIce > 0) {
-    warnings.push(
-      `${missingSupplierIce} ligne(s) d'achat sans ICE fournisseur valide — SIMPL-TVA peut rejeter le relevé.`,
-    );
+    return {
+      ok: false,
+      error: 'missing_supplier_ice',
+      message:
+        `${missingSupplierIce} ligne(s) d'achat sans ICE fournisseur valide (15 chiffres). ` +
+        'Complétez les factures fournisseur (ICE/IF) avant export DGI — les zéros factices sont rejetés par SIMPL-TVA.',
+    };
   }
 
   const missingSupplierIf = rows.filter((row) => !row.refF.ifFiscal).length;
@@ -79,15 +97,25 @@ export function validateTvaDgiExport(
     );
   }
 
+  const missingSupplierName = rows.filter((row) => !row.refF.nom || row.refF.nom === 'Fournisseur').length;
+  if (missingSupplierName > 0) {
+    warnings.push(`${missingSupplierName} ligne(s) avec nom fournisseur générique — vérifiez les libellés.`);
+  }
+
   return { ok: true, warnings: warnings.length > 0 ? warnings : undefined };
 }
 
 function buildRefFXml(ref: DgiReleveDeductionRow['refF']): string[] {
+  // DGI SIMPL-TVA: refF/if, refF/nom, refF/ice — never emit padded zero placeholders.
+  const ice = formatDgiIce(ref.ice);
+  const ifFiscal = formatDgiIdentifiantFiscal(ref.ifFiscal);
+  const nom = sanitizeDgiNomFournisseur(ref.nom);
+
   return [
     '      <refF>',
-    `        <if>${escapeDgiXml(ref.ifFiscal)}</if>`,
-    `        <nom>${escapeDgiXml(ref.nom)}</nom>`,
-    `        <ice>${ref.ice}</ice>`,
+    `        <if>${escapeDgiXml(ifFiscal)}</if>`,
+    `        <nom>${escapeDgiXml(nom)}</nom>`,
+    `        <ice>${escapeDgiXml(ice)}</ice>`,
     '      </refF>',
   ];
 }
@@ -123,11 +151,24 @@ export function generateTvaDeclarationXml(
 ): string {
   const { annee, periode } = parseDgiPeriodFromKey(record.periodKey);
   const regime = opts.regime ?? DGI_DECLARATION_REGIME_STANDARD;
-  const identifiantFiscal = formatDgiIdentifiantFiscal(opts.identifiantFiscal);
-  if (!identifiantFiscal) {
-    throw new Error('missing_if');
+  const identifiantFiscal = resolveTvaDeclarationIdentifiantFiscal(opts.company, opts.identifiantFiscal);
+
+  const supplierIndex = buildSupplierIdentityIndexFromPeriod(record);
+  const rows = buildDgiReleveRows(record, supplierIndex).filter((row) => {
+    const valid = Boolean(row.refF.ice);
+    if (!valid) {
+      console.warn('[TVA XML] Ligne exclue — ICE fournisseur manquant', {
+        num: row.num,
+        nom: row.refF.nom,
+      });
+    }
+    return valid;
+  });
+
+  if (rows.length === 0 && record.lines.some(isDeductiblePurchaseLine)) {
+    throw new Error('missing_supplier_ice');
   }
-  const rows = buildDgiReleveRows(record);
+
   const rdBlocks = rows.map(buildRdXmlBlock).join('\n');
 
   const lines = [

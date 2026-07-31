@@ -1,7 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { atlasDataBackend } from '@/app/lib/atlas-data-source';
 import { requireAgentsRouteDb } from '@/app/lib/atlas-agents-route-db';
-import { getTvaDashboard, findLatestTvaPeriodKeyWithData } from '@/app/lib/atlas-tva-server';
+import {
+  findLatestTvaPeriodKeyWithData,
+  getTvaDashboard,
+  loadCompanyTvaExportInfo,
+} from '@/app/lib/atlas-tva-server';
 
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
@@ -36,10 +40,13 @@ export async function GET(request: NextRequest) {
       resolvedPeriodKey =
         (await findLatestTvaPeriodKeyWithData(ctx.db, ctx.userId, companyId, year)) ?? undefined;
     }
-    const dashboard = await getTvaDashboard(ctx.db, ctx.userId, companyId, {
-      periodKey: resolvedPeriodKey,
-    });
-    return NextResponse.json({ dashboard }, { headers: NO_STORE_HEADERS });
+    const [dashboard, companyExportInfo] = await Promise.all([
+      getTvaDashboard(ctx.db, ctx.userId, companyId, {
+        periodKey: resolvedPeriodKey,
+      }),
+      loadCompanyTvaExportInfo(ctx.db, companyId),
+    ]);
+    return NextResponse.json({ dashboard, companyExportInfo }, { headers: NO_STORE_HEADERS });
   } catch (err) {
     const message = err instanceof Error ? err.message : 'dashboard_failed';
     return NextResponse.json({ error: message }, { status: 500, headers: NO_STORE_HEADERS });
