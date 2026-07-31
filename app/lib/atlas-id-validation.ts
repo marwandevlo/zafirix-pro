@@ -72,6 +72,17 @@ export function resolveTvaLineBackendId(line: TvaLineIdSource): string | null {
   return null;
 }
 
+/** TVA suggestion grid id (`tva-{uuid}`) → zafirix_tva_suggestions UUID. */
+export function resolveTvaSuggestionBackendId(line: TvaLineIdSource): string | null {
+  if (line.source !== 'tva_suggestion') return null;
+  const trimmed = line.id.trim().replace(/__\d+$/, '');
+  if (trimmed.startsWith('tva-')) {
+    const uuid = trimmed.slice(4);
+    return isPostgresUuid(uuid) ? uuid : null;
+  }
+  return resolveToPostgresUuid(trimmed);
+}
+
 export type AccountingDeletePartition = {
   uuidIds: string[];
   localIds: string[];

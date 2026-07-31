@@ -21,7 +21,7 @@ import type { ExportColumn } from '@/app/components/ExportMenu';
 import { EntityAuditTable } from '@/app/components/history/EntityAuditTable';
 import { RowActions } from '@/app/components/actions';
 import { EditRecordModal } from '@/app/components/actions/EditRecordModal';
-import { runBulkSupplierInvoiceIdentityUpdate } from '@/app/lib/atlas-bulk-update';
+import { runBulkTvaLineIdentityUpdate } from '@/app/lib/atlas-bulk-update';
 import { isValidIce, isValidIf } from '@/app/lib/atlas-morocco-compliance';
 import GlobalTable from '@/app/components/data-grid/GlobalTable';
 import type { GlobalTableColumn, GlobalTableRow } from '@/app/components/data-grid/GlobalTable';
@@ -32,7 +32,7 @@ import {
   runOptimisticBulkDelete,
 } from '@/app/components/data-grid/global-table-id';
 import { postBulkDelete, formatBulkDeleteError } from '@/app/lib/atlas-bulk-delete';
-import { resolveTvaLineBackendId } from '@/app/lib/atlas-id-validation';
+import { resolveTvaLineBackendId, resolveTvaSuggestionBackendId } from '@/app/lib/atlas-id-validation';
 import { showAtlasErrorToast, showAtlasWarningToast } from '@/app/lib/atlas-toast';
 import { exportTable } from '@/app/lib/atlas-table-export';
 import { openWhatsAppShare } from '@/app/lib/atlas-quick-share';
@@ -259,32 +259,49 @@ async function bulkDeleteTvaSourceLines(
   }
 }
 
-function resolveBulkSupplierInvoiceIds(
+function resolveBulkEditableIdentityTargets(
   selectionIds: string[],
   lineById: Map<string, AtlasTvaPeriodRecord['lines'][number]>,
-): { supplierIds: string[]; skipped: number } {
-  const supplierIds: string[] = [];
-  const seen = new Set<string>();
+): { supplierInvoiceIds: string[]; tvaSuggestionIds: string[]; skipped: number } {
+  const supplierInvoiceIds: string[] = [];
+  const tvaSuggestionIds: string[] = [];
+  const seenSupplier = new Set<string>();
+  const seenSuggestion = new Set<string>();
   let skipped = 0;
 
   for (const id of selectionIds) {
     const line = resolveTvaLineFromSelection(id, lineById);
-    if (!line || line.source !== 'supplier_invoice') {
+    if (!line) {
       skipped += 1;
       continue;
     }
 
-    const backendId = resolveTvaLineBackendId(line);
-    if (!backendId || seen.has(backendId)) {
-      skipped += 1;
+    if (line.source === 'supplier_invoice') {
+      const backendId = resolveTvaLineBackendId(line);
+      if (!backendId || seenSupplier.has(backendId)) {
+        skipped += 1;
+        continue;
+      }
+      seenSupplier.add(backendId);
+      supplierInvoiceIds.push(backendId);
       continue;
     }
 
-    seen.add(backendId);
-    supplierIds.push(backendId);
+    if (line.source === 'tva_suggestion') {
+      const backendId = resolveTvaSuggestionBackendId(line);
+      if (!backendId || seenSuggestion.has(backendId)) {
+        skipped += 1;
+        continue;
+      }
+      seenSuggestion.add(backendId);
+      tvaSuggestionIds.push(backendId);
+      continue;
+    }
+
+    skipped += 1;
   }
 
-  return { supplierIds, skipped };
+  return { supplierInvoiceIds, tvaSuggestionIds, skipped };
 }
 
 async function updateTvaSourceLine(line: AtlasTvaPeriodRecord['lines'][number], values: Record<string, string>): Promise<boolean> {
@@ -304,7 +321,39 @@ async function updateTvaSourceLine(line: AtlasTvaPeriodRecord['lines'][number], 
         supplierIf: values.supplierIf,
       }),
     });
-    return res.ok;
+    if (!res.ok) {
+      const data = (await res.json().catch(() => ({}))) as { error?: string; message?: string };
+      showAtlasErrorToast(data.message ?? data.error ?? 'La mise à jour a échoué.');
+      return false;
+    }
+    return true;
+  }
+  if (line.source === 'tva_suggestion') {
+    const backendId = resolveTvaSuggestionBackendId(line);
+    if (!backendId) {
+      showAtlasErrorToast('Identifiant suggestion TVA invalide.');
+      return false;
+    }
+    const res = await fetch(`/api/tva/suggestions/${backendId}`, {
+      method: 'PATCH',
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        reference: values.reference,
+        counterparty: values.counterparty,
+        issueDate: values.issueDate,
+        amountHT: parseFloat(values.amountHT) || 0,
+        vatAmount: parseFloat(values.vatAmount) || 0,
+        supplierIce: values.supplierIce,
+        supplierIf: values.supplierIf,
+      }),
+    });
+    if (!res.ok) {
+      const data = (await res.json().catch(() => ({}))) as { error?: string; message?: string };
+      showAtlasErrorToast(data.message ?? data.error ?? 'La mise à jour a échoué.');
+      return false;
+    }
+    return true;
   }
   if (line.source === 'accounting_entry') {
     const res = await fetch(`/api/accounting/entries/${line.id}`, {
@@ -886,8 +935,12 @@ function InvoiceTable({
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [hiddenIds, setHiddenIds] = useState<Set<string>>(() => new Set());
   const [bulkEditOpen, setBulkEditOpen] = useState(false);
-  const [bulkEditIds, setBulkEditIds] = useState<string[]>([]);
+  const [bulkEditTargets, setBulkEditTargets] = useState<{
+    supplierInvoiceIds: string[];
+    tvaSuggestionIds: string[];
+  }>({ supplierInvoiceIds: [], tvaSuggestionIds: [] });
   const isSupplierTable = counterpartyLabel === 'Fournisseur';
+  const bulkEditCount = bulkEditTargets.supplierInvoiceIds.length + bulkEditTargets.tvaSuggestionIds.length;
 
   useEffect(() => {
     setHiddenIds(new Set());
@@ -974,7 +1027,7 @@ function InvoiceTable({
               exportColumns={TVA_LINE_EXPORT_COLUMNS}
               exportFilename="ligne_tva"
               exportTitle={title}
-              hideEdit={f.source === 'tva_suggestion' || f.source === 'invoice'}
+              hideEdit={f.source === 'invoice'}
               hideDelete={f.source === 'tva_suggestion'}
               editFields={[
                 { key: 'reference', label: 'Référence', value: f.reference ?? '' },
@@ -1041,27 +1094,30 @@ function InvoiceTable({
   const handleBulkModify = (ids: string[]) => {
     if (!isSupplierTable) return;
 
-    const { supplierIds, skipped } = resolveBulkSupplierInvoiceIds(ids, lineById);
-    if (supplierIds.length === 0) {
+    const { supplierInvoiceIds, tvaSuggestionIds, skipped } = resolveBulkEditableIdentityTargets(ids, lineById);
+    const editableCount = supplierInvoiceIds.length + tvaSuggestionIds.length;
+
+    if (editableCount === 0) {
       showAtlasWarningToast(
         skipped > 0
-          ? 'Seules les factures fournisseur peuvent être modifiées en masse (ICE / IF).'
-          : 'Aucune facture fournisseur sélectionnée.',
+          ? 'Seules les factures fournisseur et suggestions TVA peuvent être modifiées en masse (ICE / IF).'
+          : 'Aucune ligne modifiable sélectionnée.',
       );
       return;
     }
 
     if (skipped > 0) {
-      showAtlasWarningToast(`${skipped} ligne(s) ignorée(s) — seules les factures fournisseur sont modifiables.`);
+      showAtlasWarningToast(`${skipped} ligne(s) ignorée(s) — source non modifiable en masse.`);
     }
 
-    setBulkEditIds(supplierIds);
+    setBulkEditTargets({ supplierInvoiceIds, tvaSuggestionIds });
     setBulkEditOpen(true);
   };
 
   const handleBulkEditSave = async (values: Record<string, string>): Promise<boolean> => {
-    const ok = await runBulkSupplierInvoiceIdentityUpdate({
-      ids: bulkEditIds,
+    const ok = await runBulkTvaLineIdentityUpdate({
+      supplierInvoiceIds: bulkEditTargets.supplierInvoiceIds,
+      tvaSuggestionIds: bulkEditTargets.tvaSuggestionIds,
       supplierIce: values.supplierIce,
       supplierIf: values.supplierIf,
       onSuccess: () => {
@@ -1069,7 +1125,7 @@ function InvoiceTable({
         onRefresh?.();
       },
     });
-    if (ok) setBulkEditIds([]);
+    if (ok) setBulkEditTargets({ supplierInvoiceIds: [], tvaSuggestionIds: [] });
     return ok;
   };
 
@@ -1144,7 +1200,7 @@ function InvoiceTable({
       {isSupplierTable && (
         <EditRecordModal
           open={bulkEditOpen}
-          title={`Modifier ICE / IF — ${bulkEditIds.length} facture(s) fournisseur`}
+          title={`Modifier ICE / IF — ${bulkEditCount} ligne(s)`}
           fields={[
             {
               key: 'supplierIce',
@@ -1166,7 +1222,7 @@ function InvoiceTable({
           onSave={handleBulkEditSave}
           onClose={() => {
             setBulkEditOpen(false);
-            setBulkEditIds([]);
+            setBulkEditTargets({ supplierInvoiceIds: [], tvaSuggestionIds: [] });
           }}
         />
       )}

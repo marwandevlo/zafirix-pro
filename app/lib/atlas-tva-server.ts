@@ -267,6 +267,8 @@ type TvaSuggestionRow = {
   invoice_date: string | null;
   invoice_number: string | null;
   supplier_name: string | null;
+  supplier_ice?: string | null;
+  supplier_if?: string | null;
   source_document_id: string;
   source_invoice_id: string | null;
   validation_status: string;
@@ -525,7 +527,7 @@ export async function computeTvaPeriod(
     fetchCompanyScopedRows<TvaSuggestionRow>(
       db,
       'zafirix_tva_suggestions',
-      'id, tva_type, amount, rate, base_ht, period_key, invoice_date, invoice_number, supplier_name, source_document_id, source_invoice_id, validation_status, created_at, updated_at',
+      'id, tva_type, amount, rate, base_ht, period_key, invoice_date, invoice_number, supplier_name, supplier_ice, supplier_if, source_document_id, source_invoice_id, validation_status, created_at, updated_at',
       companyId,
       userId,
     ),
@@ -661,6 +663,8 @@ export async function computeTvaPeriod(
     const suggestionIdentity = isDeductible
       ? resolveSupplierIdentityFromSources(
           {
+            supplierIce: row.supplier_ice,
+            supplierIf: row.supplier_if,
             counterparty: row.supplier_name,
             sourceInvoiceId: row.source_invoice_id,
           },

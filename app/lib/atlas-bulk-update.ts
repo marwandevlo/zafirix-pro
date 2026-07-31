@@ -56,6 +56,68 @@ export async function postBulkSupplierInvoiceUpdate(
   return typeof data.updated === 'number' ? data.updated : ids.length;
 }
 
+export async function postBulkTvaSuggestionUpdate(
+  ids: string[],
+  fields: { supplierIce: string; supplierIf: string },
+): Promise<number> {
+  const res = await fetch('/api/tva/suggestions/bulk-update', {
+    method: 'POST',
+    credentials: 'include',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      ids,
+      supplierIce: fields.supplierIce,
+      supplierIf: fields.supplierIf,
+    }),
+  });
+
+  const data = (await res.json().catch(() => ({}))) as {
+    ok?: boolean;
+    updated?: number;
+    error?: string;
+    message?: string;
+  };
+
+  if (!res.ok) {
+    throw new Error(data.message ?? data.error ?? `HTTP ${res.status}`);
+  }
+
+  return typeof data.updated === 'number' ? data.updated : ids.length;
+}
+
+export async function runBulkTvaLineIdentityUpdate(options: {
+  supplierInvoiceIds: string[];
+  tvaSuggestionIds: string[];
+  supplierIce: string;
+  supplierIf: string;
+  onSuccess?: () => void;
+}): Promise<boolean> {
+  const totalTargets = options.supplierInvoiceIds.length + options.tvaSuggestionIds.length;
+  if (totalTargets === 0) return false;
+
+  try {
+    let updated = 0;
+    if (options.supplierInvoiceIds.length) {
+      updated += await postBulkSupplierInvoiceUpdate(options.supplierInvoiceIds, {
+        supplierIce: options.supplierIce,
+        supplierIf: options.supplierIf,
+      });
+    }
+    if (options.tvaSuggestionIds.length) {
+      updated += await postBulkTvaSuggestionUpdate(options.tvaSuggestionIds, {
+        supplierIce: options.supplierIce,
+        supplierIf: options.supplierIf,
+      });
+    }
+    showAtlasSuccessToast(`${updated} ligne(s) mise(s) à jour (ICE / IF).`);
+    options.onSuccess?.();
+    return true;
+  } catch (err) {
+    showAtlasErrorToast(formatBulkUpdateError(err));
+    return false;
+  }
+}
+
 export async function runBulkSupplierInvoiceIdentityUpdate(options: {
   ids: string[];
   supplierIce: string;
