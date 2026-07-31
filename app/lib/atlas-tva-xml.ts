@@ -108,62 +108,37 @@ function validateDgiReleveRowFields(row: DgiReleveDeductionRow): string | null {
   return null;
 }
 
-/**
- * Schema-safe sentinel values for missing supplier identifiers in XML only.
- * Non-zero 15-digit ICE / 8-digit IF satisfy DGI mandatory `ifreff` / ICE field rules;
- * UI and Excel exports keep the raw (possibly empty) values from `refF`.
- */
-const DGI_XML_FALLBACK_SUPPLIER_ICE = '999999999999999';
-const DGI_XML_FALLBACK_SUPPLIER_IF = '99999999';
-
-function appendMissingSupplierIceWarnings(
-  warnings: string[],
+function validateSupplierIdentifiersForXml(
   purchaseRows: DgiReleveDeductionRow[],
-): void {
-  const invalidIceRows = purchaseRows.filter((row) => !row.refF.ice);
-  if (invalidIceRows.length === 0) return;
+): TvaDgiExportValidation | null {
+  const missingIce = purchaseRows.filter((row) => !row.refF.ice);
+  const missingIf = purchaseRows.filter((row) => !row.refF.ifFiscal);
+  if (missingIce.length === 0 && missingIf.length === 0) return null;
 
-  const samples = invalidIceRows
-    .slice(0, 5)
-    .map((row) => `${row.num} (${row.refF.nom})`)
-    .join(', ');
-  warnings.push(
-    `${invalidIceRows.length} ligne(s) d'achat sans ICE fournisseur valide (15 chiffres) — ` +
-      `identifiant de remplacement utilisé dans l'export XML pour : ${samples}${invalidIceRows.length > 5 ? '…' : ''}. ` +
-      'Complétez les profils fournisseur avec l\'ICE réel avant dépôt SIMPL-TVA.',
-  );
-}
+  const formatSamples = (rows: DgiReleveDeductionRow[]) =>
+    rows
+      .slice(0, 5)
+      .map((row) => `${row.refF.nom} (facture ${row.num})`)
+      .join(', ');
 
-function appendMissingSupplierIfWarnings(
-  warnings: string[],
-  purchaseRows: DgiReleveDeductionRow[],
-): void {
-  const invalidIfRows = purchaseRows.filter((row) => !row.refF.ifFiscal);
-  if (invalidIfRows.length === 0) return;
+  const parts: string[] = [];
+  if (missingIce.length > 0) {
+    parts.push(
+      `ICE manquant ou invalide (15 chiffres) — ${formatSamples(missingIce)}${missingIce.length > 5 ? '…' : ''}`,
+    );
+  }
+  if (missingIf.length > 0) {
+    parts.push(
+      `IF manquant ou invalide (7-8 chiffres) — ${formatSamples(missingIf)}${missingIf.length > 5 ? '…' : ''}`,
+    );
+  }
 
-  const samples = invalidIfRows
-    .slice(0, 5)
-    .map((row) => `${row.num} (${row.refF.nom})`)
-    .join(', ');
-  warnings.push(
-    `${invalidIfRows.length} ligne(s) sans IF fournisseur valide (7-8 chiffres) — ` +
-      `identifiant de remplacement utilisé dans l'export XML pour : ${samples}${invalidIfRows.length > 5 ? '…' : ''}. ` +
-      'Complétez les profils fournisseur avec l\'IF réel si la DGI le contrôle.',
-  );
-}
-
-/** Resolve supplier ref for XML — never emit empty `<if>` / `<ice>` (DGI `ifreff` mandatory). */
-function resolveDgiXmlSupplierRef(ref: DgiReleveDeductionRow['refF']): {
-  ifFiscal: string;
-  nom: string;
-  ice: string;
-} {
-  const ice = formatDgiIce(ref.ice) || DGI_XML_FALLBACK_SUPPLIER_ICE;
-  const ifFiscal = formatDgiIdentifiantFiscal(ref.ifFiscal) || DGI_XML_FALLBACK_SUPPLIER_IF;
   return {
-    ifFiscal,
-    nom: sanitizeDgiNomFournisseur(ref.nom),
-    ice,
+    ok: false,
+    error: 'missing_supplier_identifiers',
+    message:
+      `Export XML bloqué — identifiants fiscaux fournisseur incomplets. ${parts.join(' · ')}. ` +
+      'Complétez ICE et IF sur chaque facture fournisseur (TVA → Achats ou Comptabilité).',
   };
 }
 
@@ -247,7 +222,7 @@ export function validateTvaDgiExport(
 
 /**
  * SIMPL-TVA pre-flight for XML EDI export.
- * Blocks on invalid company IF, period/year, or regime; missing supplier IF/ICE emit XML fallbacks + warnings.
+ * Blocks on invalid company IF/ICE, period/year, regime, or missing supplier identifiers.
  */
 export function validateTvaDgiXmlExport(
   record: AtlasTvaPeriodRecord,
@@ -288,10 +263,20 @@ export function validateTvaDgiXmlExport(
     };
   }
 
+  if (!resolveTvaDeclarationCompanyIce(opts.company, opts.companyIce)) {
+    return {
+      ok: false,
+      error: 'missing_company_ice',
+      message:
+        'ICE société manquant ou invalide (15 chiffres requis). ' +
+        'Complétez Paramètres → Identifiants fiscaux avant export SIMPL-TVA.',
+    };
+  }
+
   const supplierIndex = opts.supplierIndex ?? buildSupplierIdentityIndexFromPeriod(record);
   const purchaseRows = collectExportRows(record, supplierIndex);
-  appendMissingSupplierIceWarnings(warnings, purchaseRows);
-  appendMissingSupplierIfWarnings(warnings, purchaseRows);
+  const supplierIdError = validateSupplierIdentifiersForXml(purchaseRows);
+  if (supplierIdError) return supplierIdError;
 
   for (const row of purchaseRows) {
     const rowError = validateDgiReleveRowFields(row);
@@ -309,21 +294,19 @@ export function validateTvaDgiXmlExport(
     warnings.push(`${genericNames} ligne(s) avec nom fournisseur générique — vérifiez les libellés.`);
   }
 
-  if (!resolveTvaDeclarationCompanyIce(opts.company, opts.companyIce)) {
-    warnings.push('ICE société (15 chiffres) absent du profil — recommandé pour la cohérence SIMPL-TVA.');
-  }
-
   return { ok: true, warnings: warnings.length > 0 ? warnings : undefined };
 }
 
 function buildRefFXml(ref: DgiReleveDeductionRow['refF']): string[] {
-  const resolved = resolveDgiXmlSupplierRef(ref);
+  const ice = formatDgiIce(ref.ice);
+  const ifFiscal = formatDgiIdentifiantFiscal(ref.ifFiscal);
+  const nom = sanitizeDgiNomFournisseur(ref.nom);
 
   return [
     '      <refF>',
-    `        <if>${escapeDgiXml(resolved.ifFiscal)}</if>`,
-    `        <nom>${escapeDgiXml(resolved.nom)}</nom>`,
-    `        <ice>${escapeDgiXml(resolved.ice)}</ice>`,
+    `        <if>${escapeDgiXml(ifFiscal)}</if>`,
+    `        <nom>${escapeDgiXml(nom)}</nom>`,
+    `        <ice>${escapeDgiXml(ice)}</ice>`,
     '      </refF>',
   ];
 }
@@ -358,6 +341,9 @@ export function assertValidTvaDgiXmlOutput(xml: string): void {
 
   if (/<ice>\s*0+\s*<\/ice>/i.test(xml)) {
     throw new Error('placeholder_supplier_ice');
+  }
+  if (/<ice>9{15}<\/ice>/.test(xml) || /<if>9{8}<\/if>/.test(xml)) {
+    throw new Error('placeholder_supplier_identifiers');
   }
 
   const rdBlocks = xml.match(/<rd>[\s\S]*?<\/rd>/g) ?? [];
@@ -400,7 +386,7 @@ function buildRdXmlBlock(row: DgiReleveDeductionRow, ord: number): string {
 
 /**
  * Generate DGI SIMPL-TVA Relevé de déductions XML.
- * All purchase lines are included; missing supplier IF/ICE use XML-only schema fallbacks (see warnings).
+ * All purchase lines are included; export blocked when supplier or company identifiers are invalid.
  */
 export function generateTvaDeclarationXml(
   record: AtlasTvaPeriodRecord,

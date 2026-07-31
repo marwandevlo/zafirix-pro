@@ -19,6 +19,9 @@ export type AtlasSupplierInvoice = {
   totalTTC?: number;
   vatRate?: number;
 
+  supplierIce?: string;
+  supplierIf?: string;
+
   paidAt?: string;
   paidAmount?: number;
 

@@ -31,7 +31,7 @@ import { addDaysYmd, todayYmd } from '@/app/lib/atlas-dates';
 import { normalizePaymentTerms } from '@/app/types/atlas-payment-terms';
 
 const SUPPLIER_INVOICE_SELECT =
-  'id, user_id, company_id, document_id, source_page, supplier_name, invoice_number, invoice_date, amount_ht, vat_amount, amount_ttc, vat_rate, status, metadata, created_at, updated_at';
+  'id, user_id, company_id, document_id, source_page, supplier_name, supplier_ice, supplier_if, invoice_number, invoice_date, amount_ht, vat_amount, amount_ttc, vat_rate, status, metadata, created_at, updated_at';
 
 type AtlasSupplierInvoiceRow = {
   id: string;
@@ -40,6 +40,8 @@ type AtlasSupplierInvoiceRow = {
   document_id: string | null;
   source_page: number | null;
   supplier_name: string;
+  supplier_ice: string | null;
+  supplier_if: string | null;
   invoice_number: string | null;
   invoice_date: string | null;
   amount_ht: number | string | null;
@@ -79,6 +81,8 @@ function rowToSupplierInvoice(row: AtlasSupplierInvoiceRow): AtlasSupplierInvoic
     companyId: row.company_id ? String(row.company_id) : undefined,
     documentId: row.document_id ? String(row.document_id) : undefined,
     supplierName: String(row.supplier_name ?? '').trim(),
+    supplierIce: row.supplier_ice ? String(row.supplier_ice) : undefined,
+    supplierIf: row.supplier_if ? String(row.supplier_if) : undefined,
     invoiceNumber: row.invoice_number ?? undefined,
     issueDate,
     paymentTerms: normalizePaymentTerms({ kind: 'preset', days: 60 }),

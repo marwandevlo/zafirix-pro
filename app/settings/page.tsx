@@ -87,6 +87,14 @@ export default function SettingsPage() {
 
   const handleSave = async () => {
     setSaveError('');
+    if (!company.if_fiscal?.trim()) {
+      setSaveError("L'identifiant fiscal (IF) est obligatoire pour les déclarations DGI.");
+      return;
+    }
+    if (!company.ice?.trim()) {
+      setSaveError("L'ICE est obligatoire pour les déclarations DGI.");
+      return;
+    }
     const moroccoCheck = validateMoroccoCompanyProfile({
       ice: company.ice,
       if_fiscal: company.if_fiscal,

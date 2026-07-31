@@ -4,7 +4,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { documentUploadSessionUserId } from '@/app/lib/atlas-document-upload-auth';
 import { getSupabaseServiceRoleClient } from '@/app/lib/supabase-admin';
-import { isValidIce, isValidMoroccoVatRate } from '@/app/lib/atlas-morocco-compliance';
+import { isValidIce, isValidIf, isValidMoroccoVatRate } from '@/app/lib/atlas-morocco-compliance';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -42,6 +42,12 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
       { status: 400 },
     );
   }
+  if (body.supplierIf != null && String(body.supplierIf).trim() && !isValidIf(String(body.supplierIf))) {
+    return NextResponse.json(
+      { error: 'invalid_if', message: "IF fournisseur invalide (7 à 8 chiffres requis)." },
+      { status: 400 },
+    );
+  }
   if (body.vatRate != null && !isValidMoroccoVatRate(Number(body.vatRate))) {
     return NextResponse.json(
       { error: 'invalid_vat_rate', message: 'Taux TVA non conforme DGI (0, 7, 10, 14 ou 20 %).' },
@@ -54,6 +60,7 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
   if (body.invoiceNumber != null) patch.invoice_number = String(body.invoiceNumber).trim();
   if (body.issueDate != null) patch.invoice_date = String(body.issueDate);
   if (body.supplierIce != null) patch.supplier_ice = String(body.supplierIce).replace(/\D/g, '');
+  if (body.supplierIf != null) patch.supplier_if = String(body.supplierIf).replace(/\D/g, '');
   if (body.amountHT != null) patch.amount_ht = Number(body.amountHT);
   if (body.vatAmount != null) patch.vat_amount = Number(body.vatAmount);
   if (body.totalTTC != null) patch.amount_ttc = Number(body.totalTTC);
@@ -64,7 +71,7 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
     .update(patch)
     .eq('id', id)
     .eq('user_id', userId)
-    .select('id, supplier_name, invoice_number, invoice_date, amount_ht, vat_amount, amount_ttc, supplier_ice, vat_rate')
+    .select('id, supplier_name, invoice_number, invoice_date, amount_ht, vat_amount, amount_ttc, supplier_ice, supplier_if, vat_rate')
     .maybeSingle();
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });

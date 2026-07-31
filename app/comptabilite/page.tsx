@@ -19,7 +19,7 @@ import { ExportMenu } from '@/app/components/ExportMenu';
 import type { ExportColumn } from '@/app/components/ExportMenu';
 import { EntityAuditTable } from '@/app/components/history/EntityAuditTable';
 import { RowActions } from '@/app/components/actions';
-import { isValidPcgeAccount } from '@/app/lib/atlas-morocco-compliance';
+import { isValidPcgeAccount, isValidIce, isValidIf } from '@/app/lib/atlas-morocco-compliance';
 import GlobalTable from '@/app/components/data-grid/GlobalTable';
 import type { GlobalTableColumn, GlobalTableRow } from '@/app/components/data-grid/GlobalTable';
 import {
@@ -70,6 +70,8 @@ type Ecriture = AtlasAccountingEntry;
 type SupplierTableRow = GlobalTableRow & {
   invoiceNumber: string;
   supplierName: string;
+  supplierIce: string;
+  supplierIf: string;
   issueDate: string;
   status: string;
   totalTTC: number | null;
@@ -159,6 +161,8 @@ export default function ComptabilitePage() {
           id: String(inv.id),
           invoiceNumber: inv.invoiceNumber ?? '',
           supplierName: inv.supplierName ?? '',
+          supplierIce: inv.supplierIce ?? '',
+          supplierIf: inv.supplierIf ?? '',
           issueDate: inv.issueDate ?? '',
           status: inv.status ?? '',
           totalTTC: inv.totalTTC,
@@ -377,6 +381,8 @@ export default function ComptabilitePage() {
         supplierName: values.supplierName,
         issueDate: values.issueDate,
         totalTTC: parseFloat(values.totalTTC) || 0,
+        supplierIce: values.supplierIce,
+        supplierIf: values.supplierIf,
       }),
     });
     if (!res.ok) return false;
@@ -400,6 +406,24 @@ export default function ComptabilitePage() {
   const supplierTableColumns = useMemo((): GlobalTableColumn<SupplierTableRow>[] => [
     { header: 'N°', accessor: 'invoiceNumber', render: (row) => row.invoiceNumber || '—' },
     { header: 'Fournisseur', accessor: 'supplierName' },
+    {
+      header: 'ICE',
+      accessor: 'supplierIce',
+      render: (row) => (
+        <span className={`text-xs font-mono ${row.supplierIce ? 'text-gray-700' : 'text-red-600'}`}>
+          {row.supplierIce || '—'}
+        </span>
+      ),
+    },
+    {
+      header: 'IF',
+      accessor: 'supplierIf',
+      render: (row) => (
+        <span className={`text-xs font-mono ${row.supplierIf ? 'text-gray-700' : 'text-red-600'}`}>
+          {row.supplierIf || '—'}
+        </span>
+      ),
+    },
     { header: 'Date', accessor: 'issueDate' },
     {
       header: 'Statut',
@@ -448,6 +472,20 @@ export default function ComptabilitePage() {
               editFields={[
                 { key: 'invoiceNumber', label: 'N° Facture', value: inv.invoiceNumber ?? '' },
                 { key: 'supplierName', label: 'Fournisseur', value: inv.supplierName ?? '', required: true },
+                {
+                  key: 'supplierIce',
+                  label: 'ICE fournisseur *',
+                  value: inv.supplierIce ?? '',
+                  required: true,
+                  validate: (v) => (isValidIce(v) ? null : 'ICE obligatoire (15 chiffres)'),
+                },
+                {
+                  key: 'supplierIf',
+                  label: 'IF fournisseur *',
+                  value: inv.supplierIf ?? '',
+                  required: true,
+                  validate: (v) => (isValidIf(v) ? null : 'IF obligatoire (7-8 chiffres)'),
+                },
                 { key: 'issueDate', label: 'Date', type: 'date', value: inv.issueDate ?? '' },
                 { key: 'totalTTC', label: 'TTC (MAD)', type: 'number', value: String(inv.totalTTC ?? '') },
               ]}

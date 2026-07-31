@@ -20,7 +20,7 @@ import { ExportMenu } from '@/app/components/ExportMenu';
 import type { ExportColumn } from '@/app/components/ExportMenu';
 import { EntityAuditTable } from '@/app/components/history/EntityAuditTable';
 import { RowActions } from '@/app/components/actions';
-import { isValidIce } from '@/app/lib/atlas-morocco-compliance';
+import { isValidIce, isValidIf } from '@/app/lib/atlas-morocco-compliance';
 import GlobalTable from '@/app/components/data-grid/GlobalTable';
 import type { GlobalTableColumn, GlobalTableRow } from '@/app/components/data-grid/GlobalTable';
 import {
@@ -271,6 +271,7 @@ async function updateTvaSourceLine(line: AtlasTvaPeriodRecord['lines'][number], 
         vatAmount: parseFloat(values.vatAmount) || 0,
         totalTTC: parseFloat(values.totalTTC) || 0,
         supplierIce: values.supplierIce,
+        supplierIf: values.supplierIf,
       }),
     });
     return res.ok;
@@ -707,6 +708,23 @@ export default function TvaPageClient() {
 
           {!loading && companyId && dashboard && tab === 'dashboard' && (
             <>
+              <div className="rounded-xl border border-gray-200 bg-white px-4 py-3 text-sm">
+                <p className="font-semibold text-gray-800">Identifiants société (export DGI)</p>
+                <dl className="grid grid-cols-2 gap-3 mt-2 text-xs">
+                  <div>
+                    <dt className="text-gray-400">IF déclarant</dt>
+                    <dd className={`font-mono mt-0.5 ${companyExportInfo?.if_fiscal ? 'text-gray-800' : 'text-red-600'}`}>
+                      {companyExportInfo?.if_fiscal || 'Manquant — Paramètres'}
+                    </dd>
+                  </div>
+                  <div>
+                    <dt className="text-gray-400">ICE société</dt>
+                    <dd className={`font-mono mt-0.5 ${companyExportInfo?.ice ? 'text-gray-800' : 'text-red-600'}`}>
+                      {companyExportInfo?.ice || 'Manquant — Paramètres'}
+                    </dd>
+                  </div>
+                </dl>
+              </div>
               <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
                 <div className="bg-white rounded-xl p-5 shadow-sm border border-gray-100">
                   <p className="text-xs text-gray-400">Période sélectionnée</p>
@@ -868,6 +886,34 @@ function InvoiceTable({
     { header: 'HT', accessor: 'amountHT', className: 'text-right', render: (row) => formatMad(row.amountHT) },
     { header: 'TVA', accessor: 'vatAmount', className: 'text-right', render: (row) => formatMad(row.vatAmount) },
     { header: 'TTC', accessor: 'totalTTC', className: 'text-right', render: (row) => formatMad(row.totalTTC) },
+    ...(counterpartyLabel === 'Fournisseur'
+      ? [
+          {
+            header: 'ICE',
+            accessor: 'supplierIce' as const,
+            render: (row: (typeof tableRows)[number]) => {
+              const ice = lineById.get(row.id)?.supplierIce;
+              return (
+                <span className={`text-xs font-mono ${ice ? 'text-gray-700' : 'text-red-600'}`}>
+                  {ice || '—'}
+                </span>
+              );
+            },
+          },
+          {
+            header: 'IF',
+            accessor: 'supplierIf' as const,
+            render: (row: (typeof tableRows)[number]) => {
+              const ifFiscal = lineById.get(row.id)?.supplierIf;
+              return (
+                <span className={`text-xs font-mono ${ifFiscal ? 'text-gray-700' : 'text-red-600'}`}>
+                  {ifFiscal || '—'}
+                </span>
+              );
+            },
+          },
+        ]
+      : []),
     { header: 'Source', accessor: 'source', render: (row) => <span className="text-xs text-gray-400">{row.source}</span> },
     {
       header: 'Actions',
@@ -905,12 +951,22 @@ function InvoiceTable({
                 { key: 'vatAmount', label: 'TVA (MAD)', type: 'number', value: String(f.vatAmount) },
                 { key: 'totalTTC', label: 'TTC (MAD)', type: 'number', value: String(f.totalTTC) },
                 ...(counterpartyLabel === 'Fournisseur'
-                  ? [{
-                      key: 'supplierIce',
-                      label: 'ICE',
-                      value: f.supplierIce ?? '',
-                      validate: (v: string) => (!v.trim() || isValidIce(v) ? null : 'ICE invalide (15 chiffres)'),
-                    }]
+                  ? [
+                      {
+                        key: 'supplierIce',
+                        label: 'ICE fournisseur *',
+                        value: f.supplierIce ?? '',
+                        required: true,
+                        validate: (v: string) => (isValidIce(v) ? null : 'ICE obligatoire (15 chiffres)'),
+                      },
+                      {
+                        key: 'supplierIf',
+                        label: 'IF fournisseur *',
+                        value: f.supplierIf ?? '',
+                        required: true,
+                        validate: (v: string) => (isValidIf(v) ? null : 'IF obligatoire (7-8 chiffres)'),
+                      },
+                    ]
                   : []),
               ]}
               onEditSave={async (values) => {
