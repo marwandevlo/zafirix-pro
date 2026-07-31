@@ -104,11 +104,15 @@ function validateDgiReleveRowFields(row: DgiReleveDeductionRow): string | null {
   return null;
 }
 
+function isExportableDgiReleveRow(row: DgiReleveDeductionRow): boolean {
+  return Boolean(row.refF.ice);
+}
+
 function appendMissingSupplierIceWarnings(
   warnings: string[],
   purchaseRows: DgiReleveDeductionRow[],
 ): void {
-  const invalidIceRows = purchaseRows.filter((row) => !row.refF.ice);
+  const invalidIceRows = purchaseRows.filter((row) => !isExportableDgiReleveRow(row));
   if (invalidIceRows.length === 0) return;
 
   const samples = invalidIceRows
@@ -117,8 +121,8 @@ function appendMissingSupplierIceWarnings(
     .join(', ');
   warnings.push(
     `${invalidIceRows.length} ligne(s) d'achat sans ICE fournisseur valide (15 chiffres) — ` +
-      `Factures : ${samples}${invalidIceRows.length > 5 ? '…' : ''}. ` +
-      "L'export inclura ces lignes avec un champ ICE vide ; complétez les profils fournisseur avant dépôt SIMPL-TVA.",
+      `Factures exclues de l'export XML : ${samples}${invalidIceRows.length > 5 ? '…' : ''}. ` +
+      'Complétez les profils fournisseur pour les inclure dans une prochaine déclaration.',
   );
 }
 
@@ -206,7 +210,8 @@ export function validateTvaDgiXmlExport(
   const purchaseRows = collectExportRows(record, supplierIndex);
   appendMissingSupplierIceWarnings(warnings, purchaseRows);
 
-  for (const row of purchaseRows) {
+  const exportableRows = purchaseRows.filter(isExportableDgiReleveRow);
+  for (const row of exportableRows) {
     const rowError = validateDgiReleveRowFields(row);
     if (rowError) {
       return {
@@ -283,7 +288,7 @@ export function assertValidTvaDgiXmlOutput(xml: string): void {
   const rdBlocks = xml.match(/<rd>[\s\S]*?<\/rd>/g) ?? [];
   for (const block of rdBlocks) {
     const iceMatch = block.match(/<ice>(\d*)<\/ice>/);
-    if (iceMatch && iceMatch[1].length > 0 && iceMatch[1].length !== 15) {
+    if (!iceMatch || iceMatch[1].length !== 15) {
       throw new Error('invalid_supplier_ice_in_xml');
     }
     const ifMatch = block.match(/<if>(\d*)<\/if>/);
@@ -320,7 +325,7 @@ function buildRdXmlBlock(row: DgiReleveDeductionRow, ord: number): string {
 
 /**
  * Generate DGI SIMPL-TVA Relevé de déductions XML.
- * Header/period/regime must pass validateTvaDgiXmlExport(); supplier ICE gaps emit empty tags + warnings.
+ * Header/period/regime must pass validateTvaDgiXmlExport(); lines without valid supplier ICE are omitted (see warnings).
  */
 export function generateTvaDeclarationXml(
   record: AtlasTvaPeriodRecord,
@@ -342,7 +347,7 @@ export function generateTvaDeclarationXml(
   const identifiantFiscal = resolveTvaDeclarationIdentifiantFiscal(opts.company, opts.identifiantFiscal);
 
   const supplierIndex = opts.supplierIndex ?? buildSupplierIdentityIndexFromPeriod(record);
-  const rows = collectExportRows(record, supplierIndex);
+  const rows = collectExportRows(record, supplierIndex).filter(isExportableDgiReleveRow);
 
   const rdBlocks = rows.map((row, index) => buildRdXmlBlock(row, index + 1)).join('\n');
 
