@@ -1,6 +1,7 @@
 /**
  * Supabase Storage helpers for Documents IA (Sprint D-alt).
  * Path layout: {userId}/{companyId}/{documentId}/{safeFilename}
+ * Legacy layout (still accepted): {userId}/{documentId}/{safeFilename}
  * Working copy: {userId}/{companyId}/{documentId}/working/ocr-ready.jpg
  */
 
@@ -61,40 +62,143 @@ export function sanitizeDocumentFilename(name: string): string {
 
 export type ParsedAtlasDocumentStoragePath = {
   userId: string;
-  companyId: string;
+  companyId: string | null;
   documentId: string;
   filename: string;
 };
 
-/** Parse `{userId}/{companyId}/{documentId}/{filename}` storage keys. */
+export type StoragePathValidationExpected = {
+  userId: string;
+  companyId?: string | null;
+  documentId?: string;
+};
+
+export type StoragePathValidationFailure = {
+  ok: false;
+  code: 'storage_path_forbidden';
+  reason: 'parse_failed' | 'user_id_mismatch' | 'document_id_mismatch';
+  expected: StoragePathValidationExpected;
+  received: {
+    storagePath: string;
+    normalizedPath: string;
+    parsed: ParsedAtlasDocumentStoragePath | null;
+  };
+};
+
+export type StoragePathValidationSuccess = {
+  ok: true;
+  parsed: ParsedAtlasDocumentStoragePath;
+  normalizedPath: string;
+};
+
+export type StoragePathValidationResult = StoragePathValidationSuccess | StoragePathValidationFailure;
+
+function normalizeIdSegment(value: string): string {
+  return value.trim().toLowerCase();
+}
+
+function idsEqual(a: string | null | undefined, b: string | null | undefined): boolean {
+  if (!a || !b) return false;
+  return normalizeIdSegment(a) === normalizeIdSegment(b);
+}
+
+/** Strip bucket prefix, slashes, and normalize separators before parsing. */
+export function normalizeAtlasDocumentStoragePath(storagePath: string): string {
+  let normalized = storagePath.replace(/\\/g, '/').trim();
+  normalized = normalized.replace(/^\/+/, '').replace(/\/+$/, '');
+  if (normalized.startsWith(`${ATLAS_DOCUMENTS_BUCKET}/`)) {
+    normalized = normalized.slice(`${ATLAS_DOCUMENTS_BUCKET}/`.length);
+  }
+  return normalized;
+}
+
+/**
+ * Parse `{userId}/{companyId}/{documentId}/{filename}` or legacy `{userId}/{documentId}/{filename}`.
+ * UUID segments are normalized to lowercase.
+ */
 export function parseAtlasDocumentStoragePath(storagePath: string): ParsedAtlasDocumentStoragePath | null {
-  const normalized = storagePath.replace(/\\/g, '/').replace(/^\/+|\/+$/g, '');
+  const normalized = normalizeAtlasDocumentStoragePath(storagePath);
   if (!normalized || normalized.includes('..')) return null;
 
   const segments = normalized.split('/').filter(Boolean);
-  if (segments.length < 4) return null;
+  if (segments.length < 3 || segments.some((segment) => !segment.trim())) return null;
 
-  const [userId, companyId, documentId, ...rest] = segments;
+  if (segments.length >= 4) {
+    const [userId, companyId, documentId, ...rest] = segments;
+    const filename = rest.join('/');
+    if (!userId || !companyId || !documentId || !filename) return null;
+    return {
+      userId: normalizeIdSegment(userId),
+      companyId: normalizeIdSegment(companyId),
+      documentId: normalizeIdSegment(documentId),
+      filename,
+    };
+  }
+
+  const [userId, documentId, ...rest] = segments;
   const filename = rest.join('/');
-  if (!userId || !companyId || !documentId || !filename) return null;
+  if (!userId || !documentId || !filename) return null;
 
-  return { userId, companyId, documentId, filename };
+  return {
+    userId: normalizeIdSegment(userId),
+    companyId: null,
+    documentId: normalizeIdSegment(documentId),
+    filename,
+  };
 }
 
+/**
+ * Validate a storage path for the current uploader.
+ * Company id in the path is authoritative for workspace scoping; body companyId mismatches do not fail here.
+ */
 export function validateAtlasDocumentStoragePath(
   storagePath: string,
-  expected: { userId: string; companyId?: string; documentId?: string },
-): { ok: true; parsed: ParsedAtlasDocumentStoragePath } | { ok: false; code: 'storage_path_forbidden' } {
+  expected: StoragePathValidationExpected,
+): StoragePathValidationResult {
+  const normalizedPath = normalizeAtlasDocumentStoragePath(storagePath);
   const parsed = parseAtlasDocumentStoragePath(storagePath);
-  if (!parsed) return { ok: false, code: 'storage_path_forbidden' };
-  if (parsed.userId !== expected.userId) return { ok: false, code: 'storage_path_forbidden' };
-  if (expected.companyId && parsed.companyId !== expected.companyId) {
-    return { ok: false, code: 'storage_path_forbidden' };
+  const baseReceived = { storagePath, normalizedPath, parsed };
+
+  if (!parsed) {
+    return {
+      ok: false,
+      code: 'storage_path_forbidden',
+      reason: 'parse_failed',
+      expected,
+      received: baseReceived,
+    };
   }
-  if (expected.documentId && parsed.documentId !== expected.documentId) {
-    return { ok: false, code: 'storage_path_forbidden' };
+
+  if (!idsEqual(parsed.userId, expected.userId)) {
+    return {
+      ok: false,
+      code: 'storage_path_forbidden',
+      reason: 'user_id_mismatch',
+      expected,
+      received: baseReceived,
+    };
   }
-  return { ok: true, parsed };
+
+  if (expected.documentId && !idsEqual(parsed.documentId, expected.documentId)) {
+    return {
+      ok: false,
+      code: 'storage_path_forbidden',
+      reason: 'document_id_mismatch',
+      expected,
+      received: baseReceived,
+    };
+  }
+
+  return { ok: true, parsed, normalizedPath };
+}
+
+/** Temporary diagnostic logging when path validation fails. */
+export function logStoragePathValidationFailure(failure: StoragePathValidationFailure): void {
+  console.error('[atlas-documents] storage_path_forbidden', {
+    reason: failure.reason,
+    expected: failure.expected,
+    received: failure.received,
+  });
 }
 
 export function buildAtlasDocumentStoragePath(
@@ -103,7 +207,7 @@ export function buildAtlasDocumentStoragePath(
   documentId: string,
   filename: string,
 ): string {
-  return `${userId}/${companyId}/${documentId}/${sanitizeDocumentFilename(filename)}`;
+  return `${normalizeIdSegment(userId)}/${normalizeIdSegment(companyId)}/${normalizeIdSegment(documentId)}/${sanitizeDocumentFilename(filename)}`;
 }
 
 export function buildAtlasDocumentWorkingStoragePath(
@@ -111,7 +215,14 @@ export function buildAtlasDocumentWorkingStoragePath(
   companyId: string,
   documentId: string,
 ): string {
-  return `${userId}/${companyId}/${documentId}/working/ocr-ready.jpg`;
+  return `${normalizeIdSegment(userId)}/${normalizeIdSegment(companyId)}/${normalizeIdSegment(documentId)}/working/ocr-ready.jpg`;
+}
+
+/** RLS requires the uploading user's id as the first path segment (case-insensitive). */
+export function storagePathOwnedByUser(storagePath: string, userId: string): boolean {
+  const parsed = parseAtlasDocumentStoragePath(storagePath);
+  if (!parsed) return false;
+  return idsEqual(parsed.userId, userId);
 }
 
 export function isAllowedDocumentMime(mime: string): boolean {

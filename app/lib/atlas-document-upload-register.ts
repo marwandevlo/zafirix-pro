@@ -5,7 +5,6 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { frenchMessageForRegisterCode } from '@/app/lib/atlas-document-register-errors';
 import {
-  assertStoragePathOwnedByUser,
   ensureCompanyStorageNamespace,
   logUploadStep,
   verifyStorageObjectExists,
@@ -17,8 +16,12 @@ import {
   buildAtlasDocumentWorkingStoragePath,
   documentUploadLimitExceededMessage,
   isPdfMimeType,
+  logStoragePathValidationFailure,
   maxUploadBytesForMime,
+  normalizeAtlasDocumentStoragePath,
+  parseAtlasDocumentStoragePath,
   sanitizeDocumentFilename,
+  storagePathOwnedByUser,
   validateAtlasDocumentStoragePath,
 } from '@/app/lib/atlas-document-storage';
 import { canAccessCompany } from '@/app/lib/atlas-permissions';
@@ -79,18 +82,49 @@ export async function registerStoredDocument(
   input: RegisterStoredDocumentInput,
 ): Promise<RegisterStoredDocumentResult> {
   const { userId, companyId, documentId, storagePath, filename, mimeType, sizeBytes, sha256Hash } = input;
-  const ctx: UploadLogContext = { userId, companyId, documentId, mimeType, fileSize: sizeBytes, storagePath };
+  const normalizedStoragePath = normalizeAtlasDocumentStoragePath(storagePath);
+  const ctx: UploadLogContext = {
+    userId,
+    companyId,
+    documentId,
+    mimeType,
+    fileSize: sizeBytes,
+    storagePath: normalizedStoragePath,
+  };
 
-  if (!assertStoragePathOwnedByUser(storagePath, userId)) {
+  if (!storagePathOwnedByUser(normalizedStoragePath, userId)) {
+    const parsed = parseAtlasDocumentStoragePath(normalizedStoragePath);
+    logStoragePathValidationFailure({
+      ok: false,
+      code: 'storage_path_forbidden',
+      reason: parsed ? 'user_id_mismatch' : 'parse_failed',
+      expected: { userId, companyId, documentId },
+      received: {
+        storagePath,
+        normalizedPath: normalizedStoragePath,
+        parsed,
+      },
+    });
     return registerFailure('storage_path_forbidden', undefined, 403, ctx, 'register_path');
   }
 
-  const pathValidation = validateAtlasDocumentStoragePath(storagePath, { userId, documentId });
+  const pathValidation = validateAtlasDocumentStoragePath(normalizedStoragePath, {
+    userId,
+    companyId,
+    documentId,
+  });
   if (!pathValidation.ok) {
-    return registerFailure('storage_path_forbidden', 'Path structure invalid', 403, ctx, 'register_path');
+    logStoragePathValidationFailure(pathValidation);
+    return registerFailure(
+      'storage_path_forbidden',
+      `Path validation failed (${pathValidation.reason})`,
+      403,
+      ctx,
+      'register_path',
+    );
   }
 
-  const effectiveCompanyId = pathValidation.parsed.companyId;
+  const effectiveCompanyId = pathValidation.parsed.companyId ?? companyId;
   if (companyId && companyId !== effectiveCompanyId) {
     logUploadStep('register_path', 'warn', 'company_id_body_path_mismatch_using_path', ctx, {
       bodyCompanyId: companyId,
@@ -124,7 +158,7 @@ export async function registerStoredDocument(
 
   await ensureCompanyStorageNamespace(admin, userId, effectiveCompanyId);
 
-  const verify = await verifyStorageObjectExists(admin, storagePath);
+  const verify = await verifyStorageObjectExists(admin, normalizedStoragePath);
   if (!verify.ok) {
     const httpStatus = verify.code === 'storage_object_missing' ? 400 : 502;
     return registerFailure(verify.code, verify.message, httpStatus, ctx, 'register_storage_verify');
@@ -189,7 +223,7 @@ export async function registerStoredDocument(
       note: 'Same document already processed — skipping duplicate insert',
     });
     // Remove the orphan storage object that was just uploaded for the new UUID
-    await admin.storage.from(ATLAS_DOCUMENTS_BUCKET).remove([storagePath]).catch(() => {});
+    await admin.storage.from(ATLAS_DOCUMENTS_BUCKET).remove([normalizedStoragePath]).catch(() => {});
     return {
       ok: true,
       document: {
@@ -198,7 +232,7 @@ export async function registerStoredDocument(
         filename: safeName,
         mimeType,
         sizeBytes,
-        storagePath: existingProcessed.storage_path ?? storagePath,
+        storagePath: existingProcessed.storage_path ?? normalizedStoragePath,
         processingStatus: 'processing',
         compressed: false,
       },
@@ -208,14 +242,14 @@ export async function registerStoredDocument(
   }
 
   let metadata: Record<string, unknown> = {
-    storage: { original_storage_path: storagePath },
+    storage: { original_storage_path: normalizedStoragePath },
   };
   let compressed = false;
 
   if (!isPdfMimeType(mimeType)) {
     const { data: fileBlob, error: downloadErr } = await admin.storage
       .from(ATLAS_DOCUMENTS_BUCKET)
-      .download(storagePath);
+      .download(normalizedStoragePath);
 
     if (downloadErr || !fileBlob) {
       const msg = downloadErr?.message ?? 'download failed';
@@ -243,7 +277,7 @@ export async function registerStoredDocument(
         compressed = true;
         metadata = {
           storage: {
-            original_storage_path: storagePath,
+            original_storage_path: normalizedStoragePath,
             working_storage_path: workingPath,
             compressed: true,
             original_bytes: prepared.originalBytes,
@@ -271,7 +305,7 @@ export async function registerStoredDocument(
     filename: safeName,
     mime_type: mimeType,
     size_bytes: sizeBytes,
-    storage_path: storagePath,
+    storage_path: normalizedStoragePath,
     processing_status: 'processing',
     sha256_hash: sha256Hash ?? null,
     metadata,
@@ -284,7 +318,7 @@ export async function registerStoredDocument(
   const row = {
     id: documentId,
     mime_type: mimeType,
-    storage_path: storagePath,
+    storage_path: normalizedStoragePath,
     filename: safeName,
     size_bytes: sizeBytes,
     metadata,
@@ -303,7 +337,7 @@ export async function registerStoredDocument(
       filename: safeName,
       mimeType,
       sizeBytes,
-      storagePath,
+      storagePath: normalizedStoragePath,
       processingStatus: 'processing',
       compressed,
     },

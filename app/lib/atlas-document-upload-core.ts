@@ -10,7 +10,10 @@ import {
   documentUploadLimitExceededMessage,
   isAllowedDocumentMime,
   maxUploadBytesForMime,
+  normalizeAtlasDocumentStoragePath,
+  parseAtlasDocumentStoragePath,
   sanitizeDocumentFilename,
+  storagePathOwnedByUser,
 } from '@/app/lib/atlas-document-storage';
 import { canAccessCompany } from '@/app/lib/atlas-permissions';
 
@@ -120,8 +123,7 @@ export async function prepareStorageUploadSlot(
 }
 
 export function assertStoragePathOwnedByUser(storagePath: string, userId: string): boolean {
-  const prefix = `${userId}/`;
-  return storagePath.startsWith(prefix) && !storagePath.includes('..');
+  return storagePathOwnedByUser(storagePath, userId);
 }
 
 /** Best-effort: Supabase creates folders implicitly on upload; touch namespace for new companies. */
@@ -130,7 +132,7 @@ export async function ensureCompanyStorageNamespace(
   userId: string,
   companyId: string,
 ): Promise<void> {
-  const markerPath = `${userId}/${companyId}/.atlas-namespace`;
+  const markerPath = `${userId.trim().toLowerCase()}/${companyId.trim().toLowerCase()}/.atlas-namespace`;
   try {
     await admin.storage.from(ATLAS_DOCUMENTS_BUCKET).upload(markerPath, Buffer.from('ok'), {
       contentType: 'text/plain',
@@ -146,12 +148,20 @@ export async function verifyStorageObjectExists(
   admin: SupabaseClient,
   storagePath: string,
 ): Promise<{ ok: true } | { ok: false; code: string; message: string }> {
-  const segments = storagePath.split('/').filter(Boolean);
-  if (segments.length < 4) {
+  const normalized = normalizeAtlasDocumentStoragePath(storagePath);
+  const parsed = parseAtlasDocumentStoragePath(normalized);
+  if (!parsed) {
+    console.error('[atlas-documents] verifyStorageObjectExists invalid path', {
+      storagePath,
+      normalized,
+    });
     return { ok: false, code: 'storage_path_forbidden', message: 'Invalid storage path' };
   }
-  const fileName = segments[segments.length - 1]!;
-  const folder = segments.slice(0, -1).join('/');
+
+  const folder = parsed.companyId
+    ? `${parsed.userId}/${parsed.companyId}/${parsed.documentId}`
+    : `${parsed.userId}/${parsed.documentId}`;
+  const fileName = parsed.filename;
 
   const attemptList = async () => {
     const { data, error } = await admin.storage.from(ATLAS_DOCUMENTS_BUCKET).list(folder, {
