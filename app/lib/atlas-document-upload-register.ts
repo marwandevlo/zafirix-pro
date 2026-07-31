@@ -6,6 +6,7 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import { frenchMessageForRegisterCode } from '@/app/lib/atlas-document-register-errors';
 import {
   assertStoragePathOwnedByUser,
+  ensureCompanyStorageNamespace,
   logUploadStep,
   verifyStorageObjectExists,
   type UploadLogContext,
@@ -18,7 +19,9 @@ import {
   isPdfMimeType,
   maxUploadBytesForMime,
   sanitizeDocumentFilename,
+  validateAtlasDocumentStoragePath,
 } from '@/app/lib/atlas-document-storage';
+import { canAccessCompany } from '@/app/lib/atlas-permissions';
 
 export type RegisterStoredDocumentInput = {
   userId: string;
@@ -82,31 +85,22 @@ export async function registerStoredDocument(
     return registerFailure('storage_path_forbidden', undefined, 403, ctx, 'register_path');
   }
 
-  const expectedPrefix = `${userId}/${companyId}/${documentId}/`;
-  if (!storagePath.startsWith(expectedPrefix)) {
-    return registerFailure('storage_path_forbidden', 'Path mismatch', 403, ctx, 'register_path');
+  const pathValidation = validateAtlasDocumentStoragePath(storagePath, { userId, documentId });
+  if (!pathValidation.ok) {
+    return registerFailure('storage_path_forbidden', 'Path structure invalid', 403, ctx, 'register_path');
+  }
+
+  const effectiveCompanyId = pathValidation.parsed.companyId;
+  if (companyId && companyId !== effectiveCompanyId) {
+    logUploadStep('register_path', 'warn', 'company_id_body_path_mismatch_using_path', ctx, {
+      bodyCompanyId: companyId,
+      pathCompanyId: effectiveCompanyId,
+    });
   }
 
   const maxBytes = maxUploadBytesForMime(mimeType);
   if (sizeBytes > maxBytes) {
     return registerFailure('file_too_large', documentUploadLimitExceededMessage(mimeType), 413, ctx, 'register_size');
-  }
-
-  const { data: companyRow, error: companyErr } = await supabase
-    .from('atlas_companies')
-    .select('id')
-    .eq('id', companyId)
-    .eq('user_id', userId)
-    .maybeSingle();
-
-  if (companyErr || !companyRow?.id) {
-    return registerFailure(
-      'company_not_found_or_forbidden',
-      companyErr?.message,
-      403,
-      ctx,
-      'register_company',
-    );
   }
 
   let admin: SupabaseClient;
@@ -116,6 +110,19 @@ export async function registerStoredDocument(
     const msg = err instanceof Error ? err.message : 'service_role_missing';
     return registerFailure('server_misconfigured', msg, 503, ctx, 'register_admin');
   }
+
+  const allowed = await canAccessCompany(admin, userId, effectiveCompanyId);
+  if (!allowed) {
+    return registerFailure(
+      'company_not_found_or_forbidden',
+      'Company access denied',
+      403,
+      { ...ctx, companyId: effectiveCompanyId },
+      'register_company',
+    );
+  }
+
+  await ensureCompanyStorageNamespace(admin, userId, effectiveCompanyId);
 
   const verify = await verifyStorageObjectExists(admin, storagePath);
   if (!verify.ok) {
@@ -133,7 +140,7 @@ export async function registerStoredDocument(
     const { data: hashMatch } = await admin
       .from('atlas_documents')
       .select('id, storage_path')
-      .eq('company_id', companyId)
+      .eq('company_id', effectiveCompanyId)
       .eq('user_id', userId)
       .eq('sha256_hash', sha256Hash)
       .eq('processing_status', 'processed')
@@ -149,7 +156,7 @@ export async function registerStoredDocument(
     const { data: nameMatch } = await admin
       .from('atlas_documents')
       .select('id, storage_path')
-      .eq('company_id', companyId)
+      .eq('company_id', effectiveCompanyId)
       .eq('user_id', userId)
       .eq('filename', safeName)
       .eq('size_bytes', sizeBytes)
@@ -166,7 +173,7 @@ export async function registerStoredDocument(
     const { data: sizeMatch } = await admin
       .from('atlas_documents')
       .select('id, storage_path')
-      .eq('company_id', companyId)
+      .eq('company_id', effectiveCompanyId)
       .eq('user_id', userId)
       .eq('size_bytes', sizeBytes)
       .eq('mime_type', mimeType)
@@ -190,7 +197,7 @@ export async function registerStoredDocument(
       ok: true,
       document: {
         id: existingProcessed.id,
-        companyId,
+        companyId: effectiveCompanyId,
         filename: safeName,
         mimeType,
         sizeBytes,
@@ -224,7 +231,7 @@ export async function registerStoredDocument(
       const bytes = Buffer.from(await fileBlob.arrayBuffer());
       const prepared = await prepareUploadedImageForOcr(bytes, mimeType);
       if (prepared.compressed) {
-        const workingPath = buildAtlasDocumentWorkingStoragePath(userId, companyId, documentId);
+        const workingPath = buildAtlasDocumentWorkingStoragePath(userId, effectiveCompanyId, documentId);
         const { error: workingErr } = await admin.storage
           .from(ATLAS_DOCUMENTS_BUCKET)
           .upload(workingPath, prepared.ocrBuffer, {
@@ -258,7 +265,7 @@ export async function registerStoredDocument(
   const { error: insertErr } = await admin.from('atlas_documents').insert({
     id: documentId,
     user_id: userId,
-    company_id: companyId,
+    company_id: effectiveCompanyId,
     type: 'ocr',
     title: safeName,
     kind: 'upload',

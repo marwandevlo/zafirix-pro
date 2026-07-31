@@ -12,6 +12,7 @@ import {
   maxUploadBytesForMime,
   sanitizeDocumentFilename,
 } from '@/app/lib/atlas-document-storage';
+import { canAccessCompany } from '@/app/lib/atlas-permissions';
 
 export type UploadLogContext = {
   userId: string;
@@ -71,18 +72,12 @@ export async function prepareStorageUploadSlot(
     };
   }
 
-  const { data: companyRow, error: companyErr } = await supabase
-    .from('atlas_companies')
-    .select('id')
-    .eq('id', companyId)
-    .eq('user_id', userId)
-    .maybeSingle();
-
-  if (companyErr || !companyRow?.id) {
+  const allowed = await canAccessCompany(supabase, userId, companyId);
+  if (!allowed) {
     return {
       ok: false,
       code: 'company_not_found_or_forbidden',
-      message: companyErr?.message ?? 'Company not owned',
+      message: 'Company not found or access denied',
       httpStatus: 403,
     };
   }
@@ -122,6 +117,23 @@ export function assertStoragePathOwnedByUser(storagePath: string, userId: string
   return storagePath.startsWith(prefix) && !storagePath.includes('..');
 }
 
+/** Best-effort: Supabase creates folders implicitly on upload; touch namespace for new companies. */
+export async function ensureCompanyStorageNamespace(
+  admin: SupabaseClient,
+  userId: string,
+  companyId: string,
+): Promise<void> {
+  const markerPath = `${userId}/${companyId}/.atlas-namespace`;
+  try {
+    await admin.storage.from(ATLAS_DOCUMENTS_BUCKET).upload(markerPath, Buffer.from('ok'), {
+      contentType: 'text/plain',
+      upsert: true,
+    });
+  } catch {
+    /* non-blocking — upload to nested path still creates folders */
+  }
+}
+
 /** Verify object exists without downloading (safe for large PDFs on Vercel). */
 export async function verifyStorageObjectExists(
   admin: SupabaseClient,
@@ -134,27 +146,24 @@ export async function verifyStorageObjectExists(
   const fileName = segments[segments.length - 1]!;
   const folder = segments.slice(0, -1).join('/');
 
-  const { data, error } = await admin.storage.from(ATLAS_DOCUMENTS_BUCKET).list(folder, {
-    limit: 100,
-    search: fileName,
-  });
+  const attemptList = async () => {
+    const { data, error } = await admin.storage.from(ATLAS_DOCUMENTS_BUCKET).list(folder, {
+      limit: 100,
+      search: fileName,
+    });
+    if (error) return { ok: false as const, code: 'storage_verify_failed', message: error.message };
+    const found = (data ?? []).some((obj) => obj.name === fileName);
+    return found
+      ? { ok: true as const }
+      : { ok: false as const, code: 'storage_object_missing', message: 'Object not found in atlas-documents' };
+  };
 
-  if (error) {
-    return {
-      ok: false,
-      code: 'storage_verify_failed',
-      message: error.message,
-    };
+  let result = await attemptList();
+  if (!result.ok && result.code === 'storage_object_missing') {
+    await new Promise((resolve) => setTimeout(resolve, 400));
+    result = await attemptList();
   }
 
-  const found = (data ?? []).some((obj) => obj.name === fileName);
-  if (!found) {
-    return {
-      ok: false,
-      code: 'storage_object_missing',
-      message: 'Object not found in atlas-documents',
-    };
-  }
-
-  return { ok: true };
+  if (result.ok) return { ok: true };
+  return result;
 }

@@ -184,7 +184,9 @@ export default function FacturesPage() {
   }, [searchParams, resetInvoiceUiState, clearUrlInvoiceId]);
 
   useEffect(() => {
-    void loadPageData();
+    queueMicrotask(() => {
+      void loadPageData();
+    });
   }, [loadPageData]);
 
   useEffect(() => {
@@ -367,9 +369,10 @@ export default function FacturesPage() {
     [filteredRows],
   );
 
-  useEffect(() => {
-    setSelectedInvoiceIds((prev) => pruneSelectedIds(prev, globalTableRows));
-  }, [globalTableRows]);
+  const visibleSelectedInvoiceIds = useMemo(
+    () => pruneSelectedIds(selectedInvoiceIds, globalTableRows),
+    [selectedInvoiceIds, globalTableRows],
+  );
 
   const copyInvoiceSecureLink = async (r: FactureRow) => {
     if (r.sourceDocumentId) {
@@ -606,9 +609,14 @@ export default function FacturesPage() {
     syncInvoiceUsageCount(updated.length);
   };
 
-  const archiveInvoice = async (id: AtlasInvoice['id']) => {
+  const archiveInvoice = useCallback(async (id: AtlasInvoice['id']) => {
     if (!isAtlasSupabaseDataEnabled()) {
-      removeInvoice(id);
+      setInvoices((prev) => {
+        const updated = prev.filter((inv) => inv.id !== id);
+        syncInvoiceUsageCount(updated.length);
+        return updated;
+      });
+      void deleteAtlasInvoice(id);
       return;
     }
     const res = await fetch(`/api/invoices/${String(id)}/archive`, {
@@ -618,10 +626,12 @@ export default function FacturesPage() {
     if (res.ok) {
       const body = (await res.json().catch(() => ({}))) as { ok?: boolean; not_found?: boolean };
       if (body.not_found) return;
-      setInvoices((prev) => prev.filter((inv) => inv.id !== id));
-      syncInvoiceUsageCount(Math.max(0, invoices.length - 1));
+      setInvoices((prev) => {
+        syncInvoiceUsageCount(Math.max(0, prev.length - 1));
+        return prev.filter((inv) => inv.id !== id);
+      });
     }
-  };
+  }, []);
 
   const findFactureRow = useCallback(
     (id: string) => filteredRows.find((r) => String(r.id) === id),
@@ -712,7 +722,7 @@ export default function FacturesPage() {
         );
       },
     },
-  ], [activeCompanyId, deliveriesByInvoice, findFactureRow]);
+  ], [activeCompanyId, archiveInvoice, deliveriesByInvoice, findFactureRow]);
 
   const handleBulkModify = useCallback((ids: string[]) => {
     if (ids.length === 1) {
@@ -1052,7 +1062,7 @@ export default function FacturesPage() {
                 <FacturesExportMenu
                   data={filteredRows as unknown as Record<string, unknown>[]}
                   columns={FACTURE_EXPORT_COLUMNS}
-                  selectedIds={selectedInvoiceIds}
+                  selectedIds={visibleSelectedInvoiceIds}
                   filters={{ statut: filter }}
                 />
                 <button onClick={() => setFilter('all')} className={`text-xs font-medium px-2.5 py-1 rounded-full border ${filter === 'all' ? 'bg-gray-900 text-white border-gray-900' : 'bg-white text-gray-600 border-gray-200 hover:bg-gray-50'}`}>
@@ -1075,7 +1085,7 @@ export default function FacturesPage() {
                 exportData={filteredRows as unknown as Record<string, unknown>[]}
                 columns={facturesTableColumns}
                 exportColumns={FACTURE_EXPORT_COLUMNS}
-                selectedIds={selectedInvoiceIds}
+                selectedIds={visibleSelectedInvoiceIds}
                 onSelectionChange={setSelectedInvoiceIds}
                 onModify={handleBulkModify}
                 onShare={handleBulkShare}

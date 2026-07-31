@@ -1200,7 +1200,7 @@ function InvoiceTable({
         );
       },
     },
-  ], [counterpartyLabel, isSupplierTable, lineById, mergedLines, onRefresh, refreshAfterEdit, title]);
+  ], [companyId, counterpartyLabel, isSupplierTable, lineById, mergedLines, onRefresh, refreshAfterEdit, title]);
 
   const handleBulkShare = (ids: string[]) => {
     const selected = filterRowsBySelectedIds(tableRows as unknown as Record<string, unknown>[], ids) as typeof tableRows;

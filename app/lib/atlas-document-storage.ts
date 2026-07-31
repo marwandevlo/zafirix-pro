@@ -59,6 +59,44 @@ export function sanitizeDocumentFilename(name: string): string {
   return cleaned.slice(0, 180) || 'document';
 }
 
+export type ParsedAtlasDocumentStoragePath = {
+  userId: string;
+  companyId: string;
+  documentId: string;
+  filename: string;
+};
+
+/** Parse `{userId}/{companyId}/{documentId}/{filename}` storage keys. */
+export function parseAtlasDocumentStoragePath(storagePath: string): ParsedAtlasDocumentStoragePath | null {
+  const normalized = storagePath.replace(/\\/g, '/').replace(/^\/+|\/+$/g, '');
+  if (!normalized || normalized.includes('..')) return null;
+
+  const segments = normalized.split('/').filter(Boolean);
+  if (segments.length < 4) return null;
+
+  const [userId, companyId, documentId, ...rest] = segments;
+  const filename = rest.join('/');
+  if (!userId || !companyId || !documentId || !filename) return null;
+
+  return { userId, companyId, documentId, filename };
+}
+
+export function validateAtlasDocumentStoragePath(
+  storagePath: string,
+  expected: { userId: string; companyId?: string; documentId?: string },
+): { ok: true; parsed: ParsedAtlasDocumentStoragePath } | { ok: false; code: 'storage_path_forbidden' } {
+  const parsed = parseAtlasDocumentStoragePath(storagePath);
+  if (!parsed) return { ok: false, code: 'storage_path_forbidden' };
+  if (parsed.userId !== expected.userId) return { ok: false, code: 'storage_path_forbidden' };
+  if (expected.companyId && parsed.companyId !== expected.companyId) {
+    return { ok: false, code: 'storage_path_forbidden' };
+  }
+  if (expected.documentId && parsed.documentId !== expected.documentId) {
+    return { ok: false, code: 'storage_path_forbidden' };
+  }
+  return { ok: true, parsed };
+}
+
 export function buildAtlasDocumentStoragePath(
   userId: string,
   companyId: string,

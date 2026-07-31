@@ -818,7 +818,7 @@ export default function DocumentsPage() {
     setOcrPageInfo('');
     setOcrProgress({ phase: 'storage', isPdf });
     try {
-      const companyId = activeCompanyId ?? (await getActiveCompanyDbRowId());
+      const companyId = (await getActiveCompanyDbRowId()) ?? activeCompanyId;
       if (!companyId) {
         setOcrProgress({ phase: 'idle' });
         setOcrError(atlasDocumentErrorMessage('company_required'));
