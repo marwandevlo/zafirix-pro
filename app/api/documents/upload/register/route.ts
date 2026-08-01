@@ -9,6 +9,10 @@ import {
 import { logUploadStep } from '@/app/lib/atlas-document-upload-core';
 import { registerStoredDocument, removeOrphanStorageObject } from '@/app/lib/atlas-document-upload-register';
 import { canAccessCompany, resolveCompanyRole } from '@/app/lib/atlas-permissions';
+import {
+  buildRegisterPathForbiddenLogPayload,
+  logRegisterStoragePathForbidden,
+} from '@/app/lib/atlas-document-storage-path-debug';
 import { checkWorkspaceRateLimit, rateLimitResponse } from '@/app/lib/atlas-rate-limit';
 import { meterFeatureUsage } from '@/app/lib/atlas-usage-meter';
 import { ensureWorkspaceSubscription } from '@/app/lib/atlas-billing-server';
@@ -130,9 +134,63 @@ export async function POST(request: NextRequest) {
   });
 
   if (!result.ok) {
+    if (result.code === 'storage_path_forbidden') {
+      const routeLog = result.forbiddenLog
+        ? {
+            ...result.forbiddenLog,
+            layer: 'api_route' as const,
+            step: 'register',
+            canAccessCompanyBodyCompany: allowed,
+            sessionUserRole: roleContext.role,
+            sessionUserCompanyOwned: roleContext.owned,
+            sessionUserWorkspaceId: roleContext.workspaceId,
+            extra: {
+              ...(result.forbiddenLog.extra ?? {}),
+              routeCanAccessCompany: allowed,
+              routeUserRole: roleContext.role,
+              routeCompanyOwned: roleContext.owned,
+              routeWorkspaceId: roleContext.workspaceId,
+              requestFilename: filename,
+              requestMimeType: mimeType,
+              requestSizeBytes: sizeBytes,
+              requestSha256Hash: sha256Hash ?? null,
+            },
+          }
+        : buildRegisterPathForbiddenLogPayload({
+            layer: 'api_route',
+            step: 'register',
+            trigger: 'register_path_validate',
+            failureReason: result.message,
+            request: {
+              sessionUserId: userId,
+              bodyCompanyId: companyId,
+              bodyDocumentId: documentId,
+              storagePathRaw: storagePath,
+              filename,
+              mimeType,
+              sizeBytes,
+              sha256Hash,
+            },
+            parsed: null,
+            permissions: {
+              effectiveCompanyId: companyId,
+              pathUserMatchesSession: false,
+              allowWorkspaceCompanyPath: false,
+              companyInPathMatches: null,
+              canAccessCompanySessionUser: allowed,
+              canAccessCompanyPathUser: null,
+              canAccessCompanyBodyCompany: allowed,
+              sessionRole: roleContext,
+            },
+            extra: { routeCanAccessCompany: allowed },
+          });
+      logRegisterStoragePathForbidden(routeLog);
+    }
+
     logUploadStep('register_failed', 'error', result.message, { userId, documentId, companyId, storagePath }, {
       code: result.code,
       ...(result.debug ? { storagePathDebug: result.debug } : {}),
+      ...(result.forbiddenLog ? { storagePathForbiddenLog: result.forbiddenLog } : {}),
     });
 
     if (result.code === 'storage_object_missing') {
@@ -142,6 +200,7 @@ export async function POST(request: NextRequest) {
     return uploadErrorResponse(result.httpStatus, 'register', result.code, result.message, {
       documentId,
       ...(result.debug ? { debug: result.debug } : {}),
+      ...(result.forbiddenLog ? { forbiddenLog: result.forbiddenLog } : {}),
     });
   }
 

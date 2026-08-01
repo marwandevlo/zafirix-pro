@@ -85,7 +85,9 @@ import {
   isAllowedDocumentMime,
   maxUploadBytesForMime,
 } from '@/app/lib/atlas-document-storage';
-import { uploadDocumentForOcr } from '@/app/lib/atlas-document-upload-client';
+import { uploadDocumentForOcr, type DocumentUploadErrorBody } from '@/app/lib/atlas-document-upload-client';
+import type { DocumentUploadErrorPresentation } from '@/app/lib/atlas-document-upload-error-ui';
+import { DocumentUploadErrorBanner } from '@/app/documents/components/DocumentUploadErrorBanner';
 import { frenchMessageForUploadHttpStatus, sanitizeUploadUserMessage } from '@/app/lib/atlas-upload-http-errors';
 import {
   formatOcrDevDiagnostics,
@@ -326,6 +328,7 @@ export default function DocumentsPage() {
   const [ocrDocuments, setOcrDocuments] = useState<AtlasDocument[]>([]);
   const [activeCompanyId, setActiveCompanyId] = useState<string | null>(null);
   const [ocrError, setOcrError] = useState('');
+  const [ocrErrorDetail, setOcrErrorDetail] = useState<DocumentUploadErrorPresentation | null>(null);
   const [ocrPageInfo, setOcrPageInfo] = useState('');
   const [ocrLoading, setOcrLoading] = useState(false);
   const [supplierInvoiceKeys, setSupplierInvoiceKeys] = useState<Set<string>>(new Set());
@@ -885,6 +888,7 @@ export default function DocumentsPage() {
     uploadQueueRef.current += 1;
     setAnalyzing(true);
     setOcrError('');
+    setOcrErrorDetail(null);
     setOcrPageInfo('');
     setOcrProgress({ phase: 'storage', isPdf });
     try {
@@ -915,7 +919,19 @@ export default function DocumentsPage() {
 
       if (!uploadResult.ok) {
         setOcrProgress({ phase: 'idle' });
-        setOcrError(formatDocumentsUploadError(uploadResult.status, uploadResult.body));
+        const body = uploadResult.body as DocumentUploadErrorBody;
+        if (body.code === 'storage_path_forbidden' && body.errorReportJson) {
+          setOcrError(body.message ?? 'Chemin de stockage invalide pour ce compte.');
+          setOcrErrorDetail({
+            message: body.message ?? 'Chemin de stockage invalide pour ce compte.',
+            hint: body.userHint,
+            reportJson: body.errorReportJson,
+            failureReason: body.failureReason,
+          });
+        } else {
+          setOcrErrorDetail(null);
+          setOcrError(formatDocumentsUploadError(uploadResult.status, body));
+        }
         return;
       }
 
@@ -1279,9 +1295,22 @@ export default function DocumentsPage() {
               </div>
             )}
             {ocrError && (
-              <div className="rounded-xl border border-red-100 bg-red-50 px-4 py-3 text-sm text-red-700">
-                {ocrError}
-              </div>
+              ocrErrorDetail?.reportJson ? (
+                <DocumentUploadErrorBanner
+                  message={ocrErrorDetail.message}
+                  hint={ocrErrorDetail.hint}
+                  reportJson={ocrErrorDetail.reportJson}
+                  failureReason={ocrErrorDetail.failureReason}
+                  onDismiss={() => {
+                    setOcrError('');
+                    setOcrErrorDetail(null);
+                  }}
+                />
+              ) : (
+                <div className="rounded-xl border border-red-100 bg-red-50 px-4 py-3 text-sm text-red-700">
+                  {ocrError}
+                </div>
+              )
             )}
             {ocrProgress.phase !== 'idle' && (
               <div className="rounded-xl border border-rose-100 bg-rose-50 px-4 py-3 text-sm text-rose-900 flex items-start gap-3">

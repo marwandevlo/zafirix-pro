@@ -11,6 +11,10 @@ import {
 import { logUploadDiagnostic } from '@/app/lib/atlas-document-upload-diagnostics';
 import { formatStorageErrorForUi, parseSupabaseStorageError } from '@/app/lib/atlas-storage-error';
 import { frenchMessageForRegisterCode } from '@/app/lib/atlas-document-register-errors';
+import {
+  presentStoragePathForbiddenUploadError,
+  type EnrichedDocumentUploadErrorBody,
+} from '@/app/lib/atlas-document-upload-error-ui';
 import { frenchMessageForUploadHttpStatus, sanitizeUploadUserMessage } from '@/app/lib/atlas-upload-http-errors';
 import { supabase } from '@/app/lib/supabase';
 
@@ -48,12 +52,7 @@ export type DocumentUploadResult = {
   ocrAccepted?: boolean;
 };
 
-export type DocumentUploadErrorBody = {
-  error?: string;
-  code?: string;
-  step?: string;
-  message?: string;
-};
+export type DocumentUploadErrorBody = EnrichedDocumentUploadErrorBody;
 
 type PrepareResponse = {
   documentId: string;
@@ -141,7 +140,11 @@ async function fetchJsonWithRetry<T>(
         return { ok: true, status: res.status, data };
       }
 
-      lastBody = apiErrorBody(res.status, data, step);
+      lastBody = {
+        ...apiErrorBody(res.status, data, step),
+        debug: (data as EnrichedDocumentUploadErrorBody).debug,
+        forbiddenLog: (data as EnrichedDocumentUploadErrorBody).forbiddenLog,
+      };
       logUploadDiagnostic({
         event: `${step}_failed`,
         step,
@@ -476,25 +479,44 @@ export async function uploadDocumentForOcr(
 
   if (!registerResult.ok) {
     await removeFailedStorageObject(prepareBody.storagePath);
-    const regBody = {
-      ...registerResult.body,
+    const rawBody = registerResult.body as EnrichedDocumentUploadErrorBody;
+    const regBody: DocumentUploadErrorBody = {
+      ...rawBody,
       step: 'register',
-      code: registerResult.body.code ?? registerResult.body.error ?? 'register_failed',
-      error: registerResult.body.error ?? registerResult.body.code ?? 'register_failed',
+      code: rawBody.code ?? rawBody.error ?? 'register_failed',
+      error: rawBody.error ?? rawBody.code ?? 'register_failed',
     };
-    if (!sanitizeUploadUserMessage(regBody.message)) {
-      regBody.message = frenchMessageForRegisterCode(regBody.code, regBody.message);
-    }
     const clientAuth = await supabase.auth.getUser().catch(() => ({ data: { user: null } }));
+
     if (regBody.code === 'storage_path_forbidden') {
+      const presentation = presentStoragePathForbiddenUploadError({
+        httpStatus: registerResult.status,
+        body: {
+          ...regBody,
+          debug: rawBody.debug,
+          forbiddenLog: rawBody.forbiddenLog,
+        },
+        clientSessionUserId: clientAuth.data.user?.id,
+        requestCompanyId: companyId,
+        requestDocumentId: prepareBody.documentId,
+        requestStoragePath: prepareBody.storagePath,
+      });
+      regBody.message = presentation.message;
+      regBody.userHint = presentation.hint;
+      regBody.errorReportJson = presentation.reportJson;
+      regBody.failureReason = presentation.failureReason;
       console.error('[atlas-documents/client] storage_path_forbidden', {
         companyId,
         documentId: prepareBody.documentId,
         storagePath: prepareBody.storagePath,
         clientSessionUserId: clientAuth.data.user?.id,
-        serverResponse: registerResult.body,
+        failureReason: presentation.failureReason,
+        serverResponse: rawBody,
       });
+    } else if (!sanitizeUploadUserMessage(regBody.message)) {
+      regBody.message = frenchMessageForRegisterCode(regBody.code ?? 'register_failed', regBody.message);
     }
+
     logUploadDiagnostic({
       event: 'register_failed_after_storage',
       step: 'register',

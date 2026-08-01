@@ -71,8 +71,13 @@ export type StoragePathValidationExpected = {
   userId: string;
   companyId?: string | null;
   documentId?: string;
-  /** Caller verified company workspace access; path[0] may differ from session userId. */
+  /**
+   * When true, skip path[0] vs session userId check.
+   * Set after canAccessCompany(sessionUserId, effectiveCompanyId) succeeds.
+   */
   allowWorkspaceCompanyPath?: boolean;
+  /** Alias: company access already verified — never fail on user_id prefix mismatch. */
+  companyAccessVerified?: boolean;
 };
 
 export type StoragePathValidationFailure = {
@@ -150,8 +155,8 @@ export function parseAtlasDocumentStoragePath(storagePath: string): ParsedAtlasD
 }
 
 /**
- * Validate a storage path for the current uploader.
- * Company id in the path is authoritative for workspace scoping; body companyId mismatches do not fail here.
+ * Validate a storage path for register after company access is confirmed.
+ * When companyAccessVerified/allowWorkspaceCompanyPath is set, path[0] may be any workspace member id.
  */
 export function validateAtlasDocumentStoragePath(
   storagePath: string,
@@ -160,6 +165,7 @@ export function validateAtlasDocumentStoragePath(
   const normalizedPath = normalizeAtlasDocumentStoragePath(storagePath);
   const parsed = parseAtlasDocumentStoragePath(storagePath);
   const baseReceived = { storagePath, normalizedPath, parsed };
+  const skipUserIdCheck = Boolean(expected.allowWorkspaceCompanyPath || expected.companyAccessVerified);
 
   if (!parsed) {
     return {
@@ -171,7 +177,7 @@ export function validateAtlasDocumentStoragePath(
     };
   }
 
-  if (!idsEqual(parsed.userId, expected.userId) && !expected.allowWorkspaceCompanyPath) {
+  if (!idsEqual(parsed.userId, expected.userId) && !skipUserIdCheck) {
     return {
       ok: false,
       code: 'storage_path_forbidden',
@@ -187,6 +193,38 @@ export function validateAtlasDocumentStoragePath(
       code: 'storage_path_forbidden',
       reason: 'document_id_mismatch',
       expected,
+      received: baseReceived,
+    };
+  }
+
+  return { ok: true, parsed, normalizedPath };
+}
+
+/** Register flow: parse + document id only; company access checked separately. */
+export function validateRegisterCompanyStoragePath(
+  storagePath: string,
+  expected: { documentId?: string },
+): StoragePathValidationResult {
+  const normalizedPath = normalizeAtlasDocumentStoragePath(storagePath);
+  const parsed = parseAtlasDocumentStoragePath(storagePath);
+  const baseReceived = { storagePath, normalizedPath, parsed };
+
+  if (!parsed) {
+    return {
+      ok: false,
+      code: 'storage_path_forbidden',
+      reason: 'parse_failed',
+      expected: { userId: '' },
+      received: baseReceived,
+    };
+  }
+
+  if (expected.documentId && !idsEqual(parsed.documentId, expected.documentId)) {
+    return {
+      ok: false,
+      code: 'storage_path_forbidden',
+      reason: 'document_id_mismatch',
+      expected: { userId: parsed.userId, documentId: expected.documentId },
       received: baseReceived,
     };
   }
