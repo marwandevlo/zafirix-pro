@@ -54,6 +54,23 @@ export function isValidRc(raw: string | null | undefined): boolean {
   return normalized.length >= 4 && normalized.length <= 20;
 }
 
+/** Patente / taxe professionnelle — numeric or city-prefixed registration (4–20 chars). */
+export function normalizePatente(raw: string | null | undefined): string {
+  const value = String(raw ?? '').trim();
+  if (!value || isPlaceholderTaxIdentifier(value)) return '';
+  const compact = value.replace(/\s+/g, '').toUpperCase();
+  if (/^\d{4,12}$/.test(compact.replace(/\D/g, ''))) {
+    return compact.replace(/\D/g, '');
+  }
+  if (/^[A-Z]{1,4}\d{3,12}$/.test(compact)) return compact;
+  if (compact.length >= 4 && compact.length <= 20) return compact;
+  return '';
+}
+
+export function isValidPatente(raw: string | null | undefined): boolean {
+  return Boolean(normalizePatente(raw));
+}
+
 /** Validates DGI-standard TVA rate (percent). */
 export function isValidMoroccoVatRate(rate: number | null | undefined): boolean {
   const pct = formatDgiVatRate(rate);

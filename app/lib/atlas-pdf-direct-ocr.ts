@@ -24,10 +24,16 @@ import {
   sanitizeClassificationReason,
 } from '@/app/lib/atlas-ai-json-parse';
 import { documentTypeLabel } from '@/app/lib/atlas-document-routing';
+import { applyMoroccoIdentifierNormalization } from '@/app/lib/atlas-morocco-ocr-identifiers';
 
 const PDF_OCR_SYSTEM = `Tu es un expert en analyse de documents financiers marocains (factures, relevés bancaires, bulletins de paie, contrats, déclarations fiscales).
 
-Analyse le document PDF fourni et retourne un JSON valide avec cette structure EXACTE :
+IMPORTANT — MODE VISION :
+Tu reçois le document PDF ou image DIRECTEMENT (pas de texte OCR pré-extrait, pas de bounding boxes).
+Analyse visuellement chaque page : tampons, cachets, signatures manuscrites, filigranes et qualité d'impression font partie du document.
+Lis le texte sous ou autour des éléments graphiques ; ne déclare un identifiant absent que s'il n'est vraiment pas visible.
+
+Analyse le document fourni et retourne un JSON valide avec cette structure EXACTE :
 
 {
   "classification": {
@@ -42,10 +48,11 @@ Analyse le document PDF fourni et retourne un JSON valide avec cette structure E
   "total_pages": <entier>,
   "extraction": {
     "supplier_name": { "value": "...", "confidence": 0.00, "source_page": 1, "raw_value": "..." },
-    "supplier_ice": { "value": "...", "confidence": 0.00, "source_page": 1 },
-    "supplier_if": { "value": "...", "confidence": 0.00, "source_page": 1 },
-    "supplier_rc": { "value": "...", "confidence": 0.00, "source_page": 1 },
-    "supplier_address": { "value": "...", "confidence": 0.00, "source_page": 1 },
+    "supplier_ice": { "value": "...", "confidence": 0.00, "source_page": 1, "raw_value": "..." },
+    "supplier_if": { "value": "...", "confidence": 0.00, "source_page": 1, "raw_value": "..." },
+    "supplier_rc": { "value": "...", "confidence": 0.00, "source_page": 1, "raw_value": "..." },
+    "supplier_patente": { "value": "...", "confidence": 0.00, "source_page": 1, "raw_value": "..." },
+    "supplier_address": { "value": "...", "confidence": 0.00, "source_page": 1, "raw_value": "..." },
     "customer_name": { "value": "...", "confidence": 0.00, "source_page": 1 },
     "customer_ice": { "value": "...", "confidence": 0.00, "source_page": 1 },
     "invoice_number": { "value": "...", "confidence": 0.00, "source_page": 1, "raw_value": "..." },
@@ -65,6 +72,12 @@ Analyse le document PDF fourni et retourne un JSON valide avec cette structure E
     "statement_period": { "value": "...", "confidence": 0.00, "source_page": 1 },
     "opening_balance": { "value": 0.00, "confidence": 0.00, "source_page": 1 },
     "closing_balance": { "value": 0.00, "confidence": 0.00, "source_page": 1 }
+  },
+  "morocco_supplier_ids": {
+    "ice": "<15 chiffres ou null>",
+    "if": "<7-8 chiffres ou null>",
+    "rc": "<registre de commerce ou null>",
+    "patente": "<n° patente / TP ou null>"
   },
   "transactions": [
     {
@@ -95,6 +108,29 @@ Analyse le document PDF fourni et retourne un JSON valide avec cette structure E
   ]
 }
 
+IDENTIFIANTS MAROCAINS DU FOURNISSEUR (priorité haute sur factures MA) :
+Cherche activement ces champs même partiellement masqués par cachet, tampon ou signature.
+
+1. ICE (Identifiant Commun de l'Entreprise) → supplier_ice + morocco_supplier_ids.ice
+   - Exactement 15 chiffres, très souvent commençant par 00.
+   - Libellés : ICE, I.C.E., Identifiant Commun, I C E.
+   - Erreurs fréquentes de lecture : ACE, ICF, ICE:, ICE N°, ICE N°.
+   - value = chiffres uniquement ; raw_value = texte tel qu'imprimé.
+
+2. IF (Identifiant Fiscal) → supplier_if + morocco_supplier_ids.if
+   - 7 à 8 chiffres.
+   - Libellés : IF, I.F., Identifiant Fiscal, N° IF, N° Fiscal, I.Fiscal.
+
+3. RC (Registre de Commerce) → supplier_rc + morocco_supplier_ids.rc
+   - Format courant : préfixe ville + chiffres (ex. Casablanca 123456) ou suite alphanumérique.
+   - Libellés : RC, R.C., Registre de Commerce, Reg. Commerce, R.C.M., N° RC.
+
+4. Patente / Taxe professionnelle → supplier_patente + morocco_supplier_ids.patente
+   - Libellés : Patente, N° Patente, TP, Taxe Prof., Taxe Professionnelle, N° TP.
+
+Pour chaque identifiant trouvé : remplir raw_value (texte visible), value (forme normalisée), confidence (abaisser si recouvert par tampon/signature).
+Si le libellé ressemble à ICE mais est mal lu (ACE, etc.), déduire quand même la valeur numérique adjacente.
+
 Types de documents acceptés pour detected_type :
 purchase_invoice, sales_invoice, receipt, bank_statement, payroll_slip,
 cnss_document, tax_declaration, vat_declaration, legal_contract,
@@ -103,6 +139,7 @@ company_statutes, legal_notice, hr_document, accounting_document, unknown
 Règles strictes :
 - confidence est entre 0.00 et 1.00
 - Si un champ est absent du document, mettre value: null et confidence: 0.00
+- morocco_supplier_ids : reprendre les valeurs normalisées (chiffres seuls pour ice/if) ou null si absent
 - Les montants sont des nombres (float), jamais des chaînes
 - Réponds UNIQUEMENT avec le JSON valide, sans texte supplémentaire ni markdown
 - Si plusieurs factures sont présentes, liste-les toutes dans invoices[]
@@ -188,6 +225,12 @@ type RawPdfResponse = {
   total_pages?: number;
   classification?: RawClassification;
   extraction?: Record<string, RawField>;
+  morocco_supplier_ids?: {
+    ice?: string | null;
+    if?: string | null;
+    rc?: string | null;
+    patente?: string | null;
+  };
   line_items?: RawLineItem[];
   invoices?: RawInvoice[];
   transactions?: RawBankTransaction[];
@@ -276,14 +319,23 @@ function buildField(raw?: RawField): AtlasExtractedField | undefined {
   };
 }
 
+function resolveRawField(rawExt: Record<string, RawField>, ...keys: string[]): RawField | undefined {
+  for (const key of keys) {
+    const field = rawExt[key];
+    if (field) return field;
+  }
+  return undefined;
+}
+
 function buildExtraction(rawExt?: Record<string, RawField>): AtlasStructuredExtraction {
   if (!rawExt) return {};
-  const f = (key: string) => buildField(rawExt[key]);
+  const f = (key: string, ...aliases: string[]) => buildField(resolveRawField(rawExt, key, ...aliases));
   return {
     supplier_name: f('supplier_name'),
-    supplier_ice: f('supplier_ice'),
-    supplier_if: f('supplier_if'),
-    supplier_rc: f('supplier_rc'),
+    supplier_ice: f('supplier_ice', 'ice', 'identifiant_ice'),
+    supplier_if: f('supplier_if', 'if', 'identifiant_fiscal'),
+    supplier_rc: f('supplier_rc', 'rc', 'registre_commerce'),
+    supplier_patente: f('supplier_patente', 'patente', 'taxe_professionnelle', 'tp'),
     supplier_address: f('supplier_address'),
     customer_name: f('customer_name'),
     customer_ice: f('customer_ice'),
@@ -398,7 +450,8 @@ function processOcrAiRawText(rawText: string): DirectPdfOcrResult {
   }
 
   const classification = buildClassification(parsed.classification);
-  const extraction = buildExtraction(parsed.extraction);
+  let extraction = buildExtraction(parsed.extraction);
+  extraction = applyMoroccoIdentifierNormalization(extraction, parsed.morocco_supplier_ids);
   const lineItems = buildLineItems(parsed.line_items);
   const invoices = buildInvoices(parsed);
   const bankTransactions = buildBankTransactions(parsed);

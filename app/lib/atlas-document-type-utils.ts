@@ -30,6 +30,8 @@ export const INVOICE_EXTRACTION_FIELD_KEYS = new Set([
   'supplier_name',
   'supplier_ice',
   'supplier_if',
+  'supplier_rc',
+  'supplier_patente',
   'customer_name',
   'invoice_number',
   'invoice_date',

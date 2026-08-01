@@ -88,6 +88,7 @@ const FIELD_LABELS: Record<string, string> = {
   supplier_ice: 'ICE Fournisseur',
   supplier_if: 'IF Fournisseur',
   supplier_rc: 'RC Fournisseur',
+  supplier_patente: 'Patente Fournisseur',
   supplier_address: 'Adresse fournisseur',
   customer_name: 'Client',
   customer_ice: 'ICE Client',

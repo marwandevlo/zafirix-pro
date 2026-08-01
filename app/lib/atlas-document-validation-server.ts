@@ -152,9 +152,11 @@ function extractNum(field?: { value?: string | number | null; user_corrected_val
   return 0;
 }
 
-function extractStr(field?: { value?: string | number | null; user_corrected_value?: string } | null): string {
+function extractStr(field?: { value?: string | number | null; normalized_value?: string; user_corrected_value?: string } | null): string {
   if (!field) return '';
-  const raw = field.user_corrected_value != null ? field.user_corrected_value : field.value;
+  const raw = field.user_corrected_value != null
+    ? field.user_corrected_value
+    : (field.normalized_value != null ? field.normalized_value : field.value);
   return raw != null ? String(raw).trim() : '';
 }
 
@@ -275,6 +277,7 @@ async function registerSinglePurchaseInvoice(
       supplier_ice: extractStr(extraction.supplier_ice) || null,
       supplier_if: extractStr(extraction.supplier_if) || null,
       supplier_rc: extractStr(extraction.supplier_rc) || null,
+      supplier_patente: extractStr(extraction.supplier_patente) || null,
       supplier_address: extractStr(extraction.supplier_address) || null,
       customer_name: extractStr(extraction.customer_name) || null,
       invoice_number: extractStr(extraction.invoice_number) || null,
@@ -297,6 +300,7 @@ async function registerSinglePurchaseInvoice(
         generated_by: 'documents_ia',
         generated_at: new Date().toISOString(),
         validated_at: new Date().toISOString(),
+        morocco_supplier_ids: extraction.morocco_supplier_ids ?? null,
         ...(sourcePage != null ? { source_page: sourcePage } : {}),
       },
     })

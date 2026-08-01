@@ -52,7 +52,15 @@ export type AtlasStructuredExtraction = {
   supplier_ice?: AtlasExtractedField;
   supplier_if?: AtlasExtractedField;
   supplier_rc?: AtlasExtractedField;
+  supplier_patente?: AtlasExtractedField;
   supplier_address?: AtlasExtractedField;
+  /** Strict DB-ready Moroccan supplier identifiers extracted from the invoice. */
+  morocco_supplier_ids?: {
+    ice: string | null;
+    if: string | null;
+    rc: string | null;
+    patente: string | null;
+  };
   customer_name?: AtlasExtractedField;
   customer_ice?: AtlasExtractedField;
   invoice_number?: AtlasExtractedField;
