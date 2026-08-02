@@ -1,12 +1,25 @@
 'use client';
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import dynamic from 'next/dynamic';
 import { Upload, FileText, CheckCircle, Clock, Trash2, Sparkles, ShieldCheck, Archive, History, Eye, Download, Share2, Wrench, Mail, Link2, FileJson, FileSpreadsheet, FileCode2, Package, CloudUpload, Loader2 as DriveLoader } from 'lucide-react';
 import { EntityActionMenu, ConfirmDeleteDialog, EntityHistoryDrawer } from '@/app/components/actions';
 import type { ActionItem } from '@/app/components/actions';
 import { RowShareActionBar, DriveSyncBadge, type DriveSyncState } from '@/app/components/share';
 import { downloadAuthenticatedExport, type ExportFormat } from '@/app/lib/atlas-export-engine';
 import { SendEmailModal } from '@/app/documents/components/SendEmailModal';
-import { ValidationCenter } from '@/app/documents/components/ValidationCenter';
+const ValidationCenter = dynamic(
+  () => import('@/app/documents/components/ValidationCenter').then((m) => ({ default: m.ValidationCenter })),
+  {
+    ssr: false,
+    loading: () => (
+      <div className="p-4 space-y-3 animate-pulse">
+        <div className="h-4 w-40 bg-gray-200 rounded" />
+        <div className="h-24 bg-gray-100 rounded-xl" />
+        <div className="h-24 bg-gray-100 rounded-xl" />
+      </div>
+    ),
+  },
+);
 import {
   classificationFromDocument,
   documentTypeFromDocument,
@@ -50,9 +63,12 @@ import {
 } from '@/app/lib/atlas-ocr-invoices-detect';
 import {
   atlasDocumentErrorMessage,
+  ATLAS_DOCUMENTS_PAGE_SIZE,
   deleteAtlasDocument,
-  getDocuments,
-  listAtlasOcrDocuments,
+  getAtlasDocumentById,
+  dedupeOcrDocumentsForDisplay,
+  listAtlasOcrDocumentsPaginated,
+  listAtlasDocumentsPaginated,
   ocrExtractionFromDocument,
   ocrInvoicesFromDocument,
   formatDocumentSizeBytes,
@@ -64,10 +80,11 @@ import {
   ocrTextPreviewFromDocument,
   ocrUiStatus,
   saveAtlasDocumentOcrResult,
-  searchDocuments,
+  searchDocumentsPaginated,
   bankTransactionsFromDocument,
   structuredExtractionFromDocument,
 } from '@/app/lib/atlas-documents-repository';
+import { DocumentsLibrarySidebar } from '@/app/documents/components/DocumentsLibrarySidebar';
 import { createAtlasLink } from '@/app/lib/atlas-links-repository';
 import { listAtlasCompanies } from '@/app/lib/atlas-companies-repository';
 import { listAtlasInvoices } from '@/app/lib/atlas-invoices-repository';
@@ -211,6 +228,7 @@ function formatDocumentsUploadError(status: number, body: UploadErrorBody): stri
 
 type OcrProgressPhase =
   | 'idle'
+  | 'compressing'
   | 'storage'
   | 'registered'
   | 'uploading'
@@ -230,6 +248,8 @@ type OcrProgressState = {
 
 function ocrProgressLabel(progress: OcrProgressState): string {
   switch (progress.phase) {
+    case 'compressing':
+      return 'Optimisation du fichier…';
     case 'storage':
     case 'uploading':
       return 'Téléversement vers le stockage…';
@@ -356,6 +376,16 @@ export default function DocumentsPage() {
   const [companies, setCompanies] = useState<{ id: string; name: string }[]>([]);
   const [invoices, setInvoices] = useState<{ id: string; title: string }[]>([]);
   const [workspaceMountKey, setWorkspaceMountKey] = useState(0);
+  const [libraryHasMore, setLibraryHasMore] = useState(false);
+  const [libraryTotal, setLibraryTotal] = useState(0);
+  const [libraryLoadingMore, setLibraryLoadingMore] = useState(false);
+  const [ocrHasMore, setOcrHasMore] = useState(false);
+  const [ocrTotal, setOcrTotal] = useState(0);
+  const [ocrLoadingMore, setOcrLoadingMore] = useState(false);
+  const [selectedDocDetail, setSelectedDocDetail] = useState<AtlasDocument | null>(null);
+  const [selectedDocDetailLoading, setSelectedDocDetailLoading] = useState(false);
+  const libraryOffsetRef = useRef(0);
+  const ocrOffsetRef = useRef(0);
 
   const supabaseMode = isAtlasSupabaseDataEnabled();
 
@@ -407,6 +437,13 @@ export default function DocumentsPage() {
     setInvoices([]);
     setLibraryQuery('');
     setLibraryType('');
+    setLibraryHasMore(false);
+    setLibraryTotal(0);
+    setOcrHasMore(false);
+    setOcrTotal(0);
+    setSelectedDocDetail(null);
+    libraryOffsetRef.current = 0;
+    ocrOffsetRef.current = 0;
     setWorkspaceMountKey((k) => k + 1);
   }, [stopOcrPoll]);
 
@@ -429,14 +466,17 @@ export default function DocumentsPage() {
         return;
       }
 
-      const [list, supplierResult] = await Promise.all([
-        listAtlasOcrDocuments(companyId),
+      const [ocrPage, supplierResult] = await Promise.all([
+        listAtlasOcrDocumentsPaginated(companyId, { limit: ATLAS_DOCUMENTS_PAGE_SIZE, offset: 0 }),
         listSupplierInvoicesWithMeta(companyId),
       ]);
 
       if (!isCurrentCompanyWorkspaceGeneration(scope)) return;
 
-      setOcrDocuments(filterDocumentsForCompany(list, companyId));
+      ocrOffsetRef.current = ocrPage.documents.length;
+      setOcrHasMore(ocrPage.hasMore);
+      setOcrTotal(ocrPage.total);
+      setOcrDocuments(filterDocumentsForCompany(ocrPage.documents, companyId));
       setSupplierTableMissing(supplierResult.tableMissing);
       setSupplierInvoiceKeys(supplierInvoiceKeysFromList(supplierResult.invoices));
     } finally {
@@ -541,16 +581,25 @@ export default function DocumentsPage() {
 
     activeCompanyIdRef.current = companyId ?? null;
     setActiveCompanyId(companyId ?? null);
+    libraryOffsetRef.current = 0;
 
-    const [docs, cs, invs] = await Promise.all([
-      getDocuments(companyId ? { companyId } : undefined),
+    const [docsPage, cs, invs] = await Promise.all([
+      listAtlasDocumentsPaginated({
+        companyId: companyId ?? undefined,
+        limit: ATLAS_DOCUMENTS_PAGE_SIZE,
+        offset: 0,
+        lightweight: true,
+      }),
       listAtlasCompanies(),
       listAtlasInvoices(companyId ? { companyId } : undefined),
     ]);
 
     if (!isCurrentCompanyWorkspaceGeneration(scope)) return;
 
-    const scopedDocs = filterDocumentsForCompany(docs, companyId);
+    const scopedDocs = filterDocumentsForCompany(docsPage.documents, companyId);
+    libraryOffsetRef.current = scopedDocs.length;
+    setLibraryHasMore(docsPage.hasMore);
+    setLibraryTotal(docsPage.total);
     setLibrary(scopedDocs);
     setCompanies(cs.map((c) => ({ id: String(c.dbRowId ?? c.id), name: c.raisonSociale })));
     setInvoices(invs.map((i) => ({ id: String(i.id), title: `${i.number} · ${i.clientName}` })));
@@ -559,6 +608,78 @@ export default function DocumentsPage() {
       return scopedDocs[0]?.id ? String(scopedDocs[0].id) : '';
     });
   }, []);
+
+  const loadMoreLibrary = useCallback(async () => {
+    if (libraryLoadingMore || !libraryHasMore) return;
+    const scope = getCompanyWorkspaceGeneration();
+    const companyId = isAtlasSupabaseDataEnabled() ? await getActiveCompanyDbRowId() : undefined;
+    if (!companyId) return;
+
+    setLibraryLoadingMore(true);
+    try {
+      const page = libraryQuery.trim() || libraryType
+        ? await searchDocumentsPaginated(libraryQuery, {
+            type: libraryType || undefined,
+            companyId,
+            limit: ATLAS_DOCUMENTS_PAGE_SIZE,
+            offset: libraryOffsetRef.current,
+          })
+        : await listAtlasDocumentsPaginated({
+            companyId,
+            limit: ATLAS_DOCUMENTS_PAGE_SIZE,
+            offset: libraryOffsetRef.current,
+            lightweight: true,
+          });
+
+      if (!isCurrentCompanyWorkspaceGeneration(scope)) return;
+
+      const scopedDocs = filterDocumentsForCompany(page.documents, companyId);
+      libraryOffsetRef.current += scopedDocs.length;
+      setLibraryHasMore(page.hasMore);
+      setLibraryTotal(page.total);
+      setLibrary((prev) => {
+        const seen = new Set(prev.map((d) => String(d.id)));
+        const merged = [...prev];
+        for (const doc of scopedDocs) {
+          if (!seen.has(String(doc.id))) merged.push(doc);
+        }
+        return merged;
+      });
+    } finally {
+      setLibraryLoadingMore(false);
+    }
+  }, [libraryHasMore, libraryLoadingMore, libraryQuery, libraryType]);
+
+  const loadMoreOcr = useCallback(async () => {
+    if (ocrLoadingMore || !ocrHasMore) return;
+    const scope = getCompanyWorkspaceGeneration();
+    const companyId = isAtlasSupabaseDataEnabled() ? await getActiveCompanyDbRowId() : undefined;
+    if (!companyId) return;
+
+    setOcrLoadingMore(true);
+    try {
+      const page = await listAtlasOcrDocumentsPaginated(companyId, {
+        limit: ATLAS_DOCUMENTS_PAGE_SIZE,
+        offset: ocrOffsetRef.current,
+      });
+      if (!isCurrentCompanyWorkspaceGeneration(scope)) return;
+
+      const scopedDocs = filterDocumentsForCompany(page.documents, companyId);
+      ocrOffsetRef.current += scopedDocs.length;
+      setOcrHasMore(page.hasMore);
+      setOcrTotal(page.total);
+      setOcrDocuments((prev) => {
+        const seen = new Set(prev.map((d) => String(d.id)));
+        const merged = [...prev];
+        for (const doc of scopedDocs) {
+          if (!seen.has(String(doc.id))) merged.push(doc);
+        }
+        return dedupeOcrDocumentsForDisplay(merged);
+      });
+    } finally {
+      setOcrLoadingMore(false);
+    }
+  }, [ocrHasMore, ocrLoadingMore]);
 
   useEffect(() => {
     if (tab !== 'ocr') return;
@@ -611,16 +732,50 @@ export default function DocumentsPage() {
       const companyId = supabaseMode ? await getActiveCompanyDbRowId() : undefined;
       if (!isCurrentCompanyWorkspaceGeneration(scope)) return;
 
-      const docs = await searchDocuments(libraryQuery, {
-        type: libraryType || undefined,
-        companyId: companyId ?? undefined,
-      });
+      libraryOffsetRef.current = 0;
+      const page = libraryQuery.trim() || libraryType
+        ? await searchDocumentsPaginated(libraryQuery, {
+            type: libraryType || undefined,
+            companyId: companyId ?? undefined,
+            limit: ATLAS_DOCUMENTS_PAGE_SIZE,
+            offset: 0,
+          })
+        : await listAtlasDocumentsPaginated({
+            companyId: companyId ?? undefined,
+            limit: ATLAS_DOCUMENTS_PAGE_SIZE,
+            offset: 0,
+            lightweight: true,
+          });
 
       if (!isCurrentCompanyWorkspaceGeneration(scope)) return;
-      setLibrary(filterDocumentsForCompany(docs, companyId));
+      const scopedDocs = filterDocumentsForCompany(page.documents, companyId);
+      libraryOffsetRef.current = scopedDocs.length;
+      setLibraryHasMore(page.hasMore);
+      setLibraryTotal(page.total);
+      setLibrary(scopedDocs);
     }, 150);
     return () => window.clearTimeout(t);
   }, [libraryQuery, libraryType, tab, supabaseMode]);
+
+  useEffect(() => {
+    if (tab !== 'library' || !selectedId || !supabaseMode) {
+      setSelectedDocDetail(null);
+      return;
+    }
+    let cancelled = false;
+    setSelectedDocDetailLoading(true);
+    void (async () => {
+      const companyId = await getActiveCompanyDbRowId();
+      const detail = await getAtlasDocumentById(selectedId, companyId ?? undefined);
+      if (!cancelled) {
+        setSelectedDocDetail(detail);
+        setSelectedDocDetailLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedId, tab, supabaseMode]);
 
   useEffect(() => {
     if (tab !== 'library') return;
@@ -629,7 +784,11 @@ export default function DocumentsPage() {
     }
   }, [library, selectedId, tab]);
 
-  const selectedDoc = useMemo(() => library.find((d) => String(d.id) === String(selectedId)) ?? null, [library, selectedId]);
+  const selectedDoc = useMemo(
+    () => library.find((d) => String(d.id) === String(selectedId)) ?? null,
+    [library, selectedId],
+  );
+  const selectedDocForPanel = selectedDocDetail ?? selectedDoc;
   const distinctTypes = useMemo(() => {
     const s = new Set<string>();
     for (const d of library) s.add(d.type);
@@ -907,7 +1066,9 @@ export default function DocumentsPage() {
       const uploadScope = getCompanyWorkspaceGeneration();
       const uploadResult = await uploadDocumentForOcr(file, companyId, {
         onProgress: (p) => {
-          if (p.phase === 'storage') {
+          if (p.phase === 'compressing') {
+            setOcrProgress({ phase: 'compressing', isPdf });
+          } else if (p.phase === 'storage') {
             setOcrProgress({ phase: 'storage', isPdf });
           } else if (p.phase === 'registered') {
             setOcrProgress({ phase: 'registered', isPdf });
@@ -1171,49 +1332,32 @@ export default function DocumentsPage() {
                   </div>
                 </div>
 
-                <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
-                  <div className="divide-y divide-gray-100">
-                    {library.map((d) => (
-                      <button
-                        key={String(d.id)}
-                        type="button"
-                        onClick={() => { setSelectedId(String(d.id)); setLinkStatus(''); }}
-                        className={`w-full text-left px-4 py-3 hover:bg-gray-50 ${String(d.id) === String(selectedId) ? 'bg-rose-50' : ''}`}
-                      >
-                        <p className="text-sm font-medium text-gray-800 truncate">{d.title}</p>
-                        <p className="text-xs text-gray-400 truncate">{d.type} · {new Date(d.createdAt).toLocaleString('fr-FR')}</p>
-                      </button>
-                    ))}
-                    {library.length === 0 && (
-                      <div className="p-4">
-                        <EmptyStateCta
-                          lang="fr"
-                          title="Aucun document"
-                          description="Importez un PDF ou une image depuis l’onglet OCR pour alimenter votre bibliothèque."
-                          primaryLabelFr="Ajouter maintenant"
-                          primaryLabelAr="ابدأ الآن"
-                          onPrimary={() => {
-                            setTab('ocr');
-                            fileRef.current?.click();
-                          }}
-                        />
-                      </div>
-                    )}
-                  </div>
-                </div>
+                <DocumentsLibrarySidebar
+                  documents={library}
+                  selectedId={selectedId}
+                  onSelect={(id) => { setSelectedId(id); setLinkStatus(''); }}
+                  onAddDocument={() => {
+                    setTab('ocr');
+                    fileRef.current?.click();
+                  }}
+                  hasMore={libraryHasMore}
+                  loadingMore={libraryLoadingMore}
+                  total={libraryTotal}
+                  onLoadMore={() => void loadMoreLibrary()}
+                />
               </div>
 
               <div className="col-span-12 lg:col-span-7 space-y-3">
                 <div className="bg-white rounded-xl p-4 shadow-sm border border-gray-100">
-                  {selectedDoc ? (
+                  {selectedDocForPanel ? (
                     <>
                       <div className="flex items-start justify-between gap-4">
                         <div className="min-w-0">
-                          <p className="text-lg font-bold text-gray-900 truncate">{selectedDoc.title}</p>
-                          <p className="text-xs text-gray-400">{selectedDoc.type} · {new Date(selectedDoc.createdAt).toLocaleString('fr-FR')}</p>
+                          <p className="text-lg font-bold text-gray-900 truncate">{selectedDocForPanel.title}</p>
+                          <p className="text-xs text-gray-400">{selectedDocForPanel.type} · {new Date(selectedDocForPanel.createdAt).toLocaleString('fr-FR')}</p>
                         </div>
                         {supabaseMode && (
-                          <DocumentExplainerButton documentId={String(selectedDoc.id)} companyId={linkCompanyId || undefined} />
+                          <DocumentExplainerButton documentId={String(selectedDocForPanel.id)} companyId={linkCompanyId || undefined} />
                         )}
                       </div>
 
@@ -1234,7 +1378,7 @@ export default function DocumentsPage() {
                               if (linkCompanyId) {
                                 await createAtlasLink({
                                   fromType: 'document',
-                                  fromId: String(selectedDoc.id),
+                                  fromId: String(selectedDocForPanel.id),
                                   toType: 'company',
                                   toId: String(linkCompanyId),
                                   relation: 'attached_to',
@@ -1244,7 +1388,7 @@ export default function DocumentsPage() {
                               if (linkInvoiceId) {
                                 await createAtlasLink({
                                   fromType: 'document',
-                                  fromId: String(selectedDoc.id),
+                                  fromId: String(selectedDocForPanel.id),
                                   toType: 'invoice',
                                   toId: String(linkInvoiceId),
                                   relation: 'attached_to',
@@ -1264,11 +1408,19 @@ export default function DocumentsPage() {
                       {linkStatus && <p className="mt-2 text-xs text-gray-500">{linkStatus}</p>}
 
                       <div className="mt-4 rounded-xl border border-gray-100 bg-gray-50 p-4">
-                        <pre className="text-xs text-gray-700 whitespace-pre-wrap wrap-break-word">
-                          {typeof selectedDoc.content === 'string'
-                            ? selectedDoc.content
-                            : JSON.stringify(selectedDoc.content ?? {}, null, 2)}
-                        </pre>
+                        {selectedDocDetailLoading ? (
+                          <div className="space-y-2 animate-pulse">
+                            <div className="h-3 bg-gray-200 rounded w-full" />
+                            <div className="h-3 bg-gray-200 rounded w-5/6" />
+                            <div className="h-3 bg-gray-200 rounded w-4/6" />
+                          </div>
+                        ) : (
+                          <pre className="text-xs text-gray-700 whitespace-pre-wrap wrap-break-word">
+                            {typeof selectedDocForPanel.content === 'string'
+                              ? selectedDocForPanel.content
+                              : JSON.stringify(selectedDocForPanel.content ?? selectedDocForPanel.metadata ?? {}, null, 2)}
+                          </pre>
+                        )}
                       </div>
                     </>
                   ) : (
@@ -1802,6 +1954,21 @@ export default function DocumentsPage() {
                   })}
                 </tbody>
               </table>
+              {supabaseMode && ocrHasMore && (
+                <div className="px-4 py-3 border-t border-gray-100 flex items-center justify-between">
+                  <span className="text-xs text-gray-400">
+                    {ocrDocuments.length}{ocrTotal ? ` / ${ocrTotal}` : ''} document(s)
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => void loadMoreOcr()}
+                    disabled={ocrLoadingMore}
+                    className="text-xs font-medium text-rose-600 hover:text-rose-700 disabled:opacity-50"
+                  >
+                    {ocrLoadingMore ? 'Chargement…' : 'Charger plus'}
+                  </button>
+                </div>
+              )}
             </div>
           )}
             </>

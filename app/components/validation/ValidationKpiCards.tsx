@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { memo, useEffect, useState } from 'react';
 import { FileCheck, Clock, XCircle, RefreshCw, CheckCircle2, TrendingUp } from 'lucide-react';
 
 type KpiData = {
@@ -56,7 +56,7 @@ type ValidationKpiCardsProps = {
   className?: string;
 };
 
-export function ValidationKpiCards({ className = '' }: ValidationKpiCardsProps) {
+export const ValidationKpiCards = memo(function ValidationKpiCards({ className = '' }: ValidationKpiCardsProps) {
   const [data, setData] = useState<KpiData | null>(null);
   const [loading, setLoading] = useState(true);
 
@@ -122,4 +122,4 @@ export function ValidationKpiCards({ className = '' }: ValidationKpiCardsProps) 
       />
     </div>
   );
-}
+});

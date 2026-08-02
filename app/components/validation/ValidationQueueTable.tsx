@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { memo, useEffect, useState } from 'react';
 import { ExternalLink, Loader2 } from 'lucide-react';
 
 type QueueSummaryRow = {
@@ -40,7 +40,7 @@ type ValidationQueueTableProps = {
   className?: string;
 };
 
-export function ValidationQueueTable({ compact = false, className = '' }: ValidationQueueTableProps) {
+export const ValidationQueueTable = memo(function ValidationQueueTable({ compact = false, className = '' }: ValidationQueueTableProps) {
   const [summary, setSummary] = useState<QueueSummaryRow[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -108,4 +108,4 @@ export function ValidationQueueTable({ compact = false, className = '' }: Valida
       </table>
     </div>
   );
-}
+});

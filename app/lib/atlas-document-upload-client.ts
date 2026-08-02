@@ -16,6 +16,7 @@ import {
   type EnrichedDocumentUploadErrorBody,
 } from '@/app/lib/atlas-document-upload-error-ui';
 import { frenchMessageForUploadHttpStatus, sanitizeUploadUserMessage } from '@/app/lib/atlas-upload-http-errors';
+import { prepareFileForUpload } from '@/app/lib/atlas-document-upload-compress';
 import { supabase } from '@/app/lib/supabase';
 
 /** Above this size, never use multipart `/api/documents/upload`. */
@@ -28,7 +29,7 @@ const SESSION_REFRESH_IF_EXPIRES_WITHIN_SEC = 300;
 const UPLOAD_MAX_ATTEMPTS = 3;
 const UPLOAD_RETRY_BASE_MS = 800;
 
-export type DocumentUploadProgressPhase = 'storage' | 'registered' | 'ocr' | 'idle';
+export type DocumentUploadProgressPhase = 'compressing' | 'storage' | 'registered' | 'ocr' | 'idle';
 
 export type DocumentUploadProgress = {
   phase: DocumentUploadProgressPhase;
@@ -383,8 +384,14 @@ export async function uploadDocumentForOcr(
     };
   }
 
+  onProgress?.({ phase: 'compressing', storagePercent: 0, attempt: 1 });
+
+  const prepared = await prepareFileForUpload(file);
+  const uploadFile = prepared.file;
+  const uploadMime = prepared.mimeType;
+
   // Compute SHA256 for deduplication (best-effort, non-blocking)
-  const sha256Hash = await computeFileSha256(file).catch(() => null);
+  const sha256Hash = await computeFileSha256(uploadFile).catch(() => null);
 
   onProgress?.({ phase: 'storage', storagePercent: 0, attempt: 1 });
 
@@ -395,9 +402,9 @@ export async function uploadDocumentForOcr(
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         companyId,
-        filename: file.name,
-        mimeType,
-        sizeBytes: file.size,
+        filename: uploadFile.name,
+        mimeType: uploadMime,
+        sizeBytes: uploadFile.size,
       }),
     },
     'prepare',
@@ -425,13 +432,13 @@ export async function uploadDocumentForOcr(
     documentId: prepareBody.documentId,
     storagePath: prepareBody.storagePath,
     bucket,
-    fileSize: file.size,
-    mimeType,
+    fileSize: uploadFile.size,
+    mimeType: uploadMime,
   });
 
   const storageResult = await uploadViaAuthenticatedClientWithRetry(
-    file,
-    mimeType,
+    uploadFile,
+    uploadMime,
     prepareBody.storagePath,
     bucket,
     companyId,
@@ -466,9 +473,9 @@ export async function uploadDocumentForOcr(
       body: JSON.stringify({
         documentId: prepareBody.documentId,
         companyId,
-        filename: file.name,
-        mimeType,
-        sizeBytes: file.size,
+        filename: uploadFile.name,
+        mimeType: uploadMime,
+        sizeBytes: uploadFile.size,
         storagePath: prepareBody.storagePath,
         sha256Hash,
       }),
@@ -550,8 +557,8 @@ export async function uploadDocumentForOcr(
     documentId: registerBody.document.id,
     storagePath: prepareBody.storagePath,
     bucket,
-    fileSize: file.size,
-    mimeType,
+    fileSize: uploadFile.size,
+    mimeType: uploadMime,
   });
 
   /* OCR + auto-pipeline run on server via scheduleVercelBackground — client polls progress. */
@@ -561,7 +568,10 @@ export async function uploadDocumentForOcr(
     data: {
       success: registerBody.success ?? true,
       documentId: registerBody.documentId ?? registerBody.document.id,
-      document: registerBody.document,
+      document: {
+        ...registerBody.document,
+        compressed: registerBody.document.compressed ?? prepared.compressed,
+      },
       ocrAccepted: registerBody.ocrAccepted ?? true,
     },
   };

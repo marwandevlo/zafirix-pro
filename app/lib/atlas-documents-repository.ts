@@ -41,6 +41,12 @@ import { ATLAS_DOCUMENTS_BUCKET } from '@/app/lib/atlas-document-storage';
 const DOCUMENT_SELECT =
   'id, user_id, company_id, type, title, content, kind, source, status, filename, mime_type, size_bytes, storage_path, extracted_text, processing_status, metadata, created_at, updated_at';
 
+/** List/table views — omits large text/json blobs for faster loads. */
+const DOCUMENT_LIST_SELECT =
+  'id, user_id, company_id, type, title, kind, source, status, filename, mime_type, size_bytes, storage_path, processing_status, metadata, created_at, updated_at';
+
+export const ATLAS_DOCUMENTS_PAGE_SIZE = 30;
+
 type AtlasDocumentRow = {
   id: string;
   user_id: string;
@@ -119,42 +125,170 @@ export type ListAtlasDocumentsOptions = {
   companyId?: string | null;
   source?: string;
   processingStatus?: AtlasDocumentProcessingStatus;
+  /** Server-side title/filename filter (ilike). */
+  query?: string;
+  type?: string;
+  limit?: number;
+  offset?: number;
+  /** When true (default for paginated calls), skip content + extracted_text. */
+  lightweight?: boolean;
 };
 
+export type PaginatedAtlasDocuments = {
+  documents: AtlasDocument[];
+  total: number;
+  limit: number;
+  offset: number;
+  hasMore: boolean;
+};
+
+function escapeIlikePattern(raw: string): string {
+  return raw.replace(/[%_\\]/g, '\\$&');
+}
+
 export async function listAtlasDocuments(opts?: ListAtlasDocumentsOptions): Promise<AtlasDocument[]> {
+  if (opts?.limit != null || opts?.offset != null) {
+    return (await listAtlasDocumentsPaginated(opts)).documents;
+  }
+
+  const batchSize = ATLAS_DOCUMENTS_PAGE_SIZE;
+  let offset = 0;
+  const all: AtlasDocument[] = [];
+  for (;;) {
+    const page = await listAtlasDocumentsPaginated({
+      ...opts,
+      limit: batchSize,
+      offset,
+      lightweight: opts?.lightweight ?? true,
+    });
+    all.push(...page.documents);
+    if (!page.hasMore) break;
+    offset += batchSize;
+    if (offset > 5000) break;
+  }
+  return all;
+}
+
+export async function listAtlasDocumentsPaginated(
+  opts?: ListAtlasDocumentsOptions,
+): Promise<PaginatedAtlasDocuments> {
   let companyId = opts?.companyId;
   if (companyId === undefined) {
     companyId = await getActiveCompanyDbRowId();
   }
-  if (!companyId) return [];
+  const empty: PaginatedAtlasDocuments = {
+    documents: [],
+    total: 0,
+    limit: opts?.limit ?? ATLAS_DOCUMENTS_PAGE_SIZE,
+    offset: opts?.offset ?? 0,
+    hasMore: false,
+  };
+  if (!companyId) return empty;
 
   if (!isAtlasSupabaseDataEnabled()) {
-    return readDocumentsFromLocalStorage().filter((d) => d.companyId === companyId);
+    let docs = readDocumentsFromLocalStorage().filter((d) => d.companyId === companyId);
+    if (opts?.source) docs = docs.filter((d) => d.source === opts.source);
+    if (opts?.processingStatus) docs = docs.filter((d) => d.processingStatus === opts.processingStatus);
+    if (opts?.type) docs = docs.filter((d) => d.type === opts.type);
+    const q = opts?.query?.trim().toLowerCase();
+    if (q) {
+      docs = docs.filter((d) => `${d.title} ${d.filename ?? ''}`.toLowerCase().includes(q));
+    }
+    docs.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+    const offset = opts?.offset ?? 0;
+    const limit = opts?.limit ?? docs.length;
+    const slice = docs.slice(offset, offset + limit);
+    return {
+      documents: slice,
+      total: docs.length,
+      limit,
+      offset,
+      hasMore: offset + slice.length < docs.length,
+    };
   }
 
   const auth = await requireSupabaseUser();
-  if (!auth.ok) return [];
+  if (!auth.ok) return empty;
 
   const allowed = await canAccessCompany(supabase, auth.userId, companyId);
-  if (!allowed) return [];
+  if (!allowed) return empty;
 
-  let query = supabase
-    .from('atlas_documents')
-    .select(DOCUMENT_SELECT)
+  const lightweight = opts?.lightweight ?? true;
+  const selectCols = lightweight ? DOCUMENT_LIST_SELECT : DOCUMENT_SELECT;
+  const limit = opts?.limit ?? ATLAS_DOCUMENTS_PAGE_SIZE;
+  const offset = opts?.offset ?? 0;
+
+  type DocumentListQuery = {
+    select: (cols: string, opts?: { count: 'exact' }) => DocumentListQuery;
+    eq: (col: string, val: string) => DocumentListQuery;
+    order: (col: string, opts: { ascending: boolean }) => DocumentListQuery;
+    or: (filters: string) => DocumentListQuery;
+    range: (from: number, to: number) => Promise<{
+      data: AtlasDocumentRow[] | null;
+      error: { message: string } | null;
+      count: number | null;
+    }>;
+  };
+
+  const table = supabase.from('atlas_documents') as unknown as DocumentListQuery;
+  let query = table
+    .select(selectCols, { count: 'exact' })
     .eq('company_id', companyId)
     .order('created_at', { ascending: false });
 
   if (opts?.source) query = query.eq('source', opts.source);
   if (opts?.processingStatus) query = query.eq('processing_status', opts.processingStatus);
+  if (opts?.type) query = query.eq('type', opts.type);
+  const needle = opts?.query?.trim();
+  if (needle) {
+    const pattern = `%${escapeIlikePattern(needle)}%`;
+    query = query.or(`title.ilike.${pattern},filename.ilike.${pattern}`);
+  }
 
-  const { data, error } = await query;
+  const { data, error, count } = await query.range(offset, offset + limit - 1);
 
   if (error) {
     logAtlasServerEvent('atlas_documents', 'error', 'list_failed', { message: error.message });
-    return [];
+    return empty;
   }
 
-  return (data ?? []).map((row) => rowToDocument(row as AtlasDocumentRow));
+  const total = count ?? (data?.length ?? 0);
+  const documents = (data ?? []).map((row) => rowToDocument(row as AtlasDocumentRow));
+
+  return {
+    documents,
+    total,
+    limit,
+    offset,
+    hasMore: offset + documents.length < total,
+  };
+}
+
+/** Fetch a single document with full payload (content + extracted_text). */
+export async function getAtlasDocumentById(
+  documentId: string,
+  companyId?: string | null,
+): Promise<AtlasDocument | null> {
+  if (!documentId) return null;
+
+  if (!isAtlasSupabaseDataEnabled()) {
+    const doc = readDocumentsFromLocalStorage().find((d) => String(d.id) === String(documentId));
+    return doc ?? null;
+  }
+
+  const auth = await requireSupabaseUser();
+  if (!auth.ok) return null;
+
+  let query = supabase.from('atlas_documents').select(DOCUMENT_SELECT).eq('id', documentId);
+  if (companyId) {
+    const allowed = await canAccessCompany(supabase, auth.userId, companyId);
+    if (!allowed) return null;
+    query = query.eq('company_id', companyId);
+  }
+
+  const { data, error } = await query.maybeSingle();
+  if (error || !data) return null;
+  return rowToDocument(data as AtlasDocumentRow);
 }
 
 const OCR_ERROR_TEXT_PREFIX = /^Impossible de lire le PDF/i;
@@ -230,9 +364,38 @@ export function ocrDebugFromDocument(doc: AtlasDocument): OcrDocumentDebugInfo {
 }
 
 /** OCR uploads for the active company (source=ocr), deduped for UI. */
-export async function listAtlasOcrDocuments(companyId: string): Promise<AtlasDocument[]> {
-  const rows = await listAtlasDocuments({ companyId, source: 'ocr' });
-  return dedupeOcrDocumentsForDisplay(rows);
+export async function listAtlasOcrDocuments(
+  companyId: string,
+  opts?: { limit?: number; offset?: number },
+): Promise<AtlasDocument[]> {
+  const page = await listAtlasOcrDocumentsPaginated(companyId, opts);
+  return page.documents;
+}
+
+export async function listAtlasOcrDocumentsPaginated(
+  companyId: string,
+  opts?: { limit?: number; offset?: number },
+): Promise<PaginatedAtlasDocuments> {
+  const limit = opts?.limit ?? ATLAS_DOCUMENTS_PAGE_SIZE;
+  const offset = opts?.offset ?? 0;
+  // Fetch a wider window before dedupe so pagination stays meaningful.
+  const fetchLimit = Math.max(limit * 3, ATLAS_DOCUMENTS_PAGE_SIZE);
+  const page = await listAtlasDocumentsPaginated({
+    companyId,
+    source: 'ocr',
+    limit: fetchLimit,
+    offset,
+    lightweight: true,
+  });
+  const deduped = dedupeOcrDocumentsForDisplay(page.documents);
+  const documents = deduped.slice(0, limit);
+  return {
+    documents,
+    total: page.total,
+    limit,
+    offset,
+    hasMore: offset + documents.length < page.total || page.hasMore,
+  };
 }
 
 export async function upsertAtlasDocument(doc: AtlasDocument): Promise<{ ok: true } | { ok: false; error: string }> {
@@ -548,14 +711,32 @@ export async function createDocument(input: {
   return { ok: true, id: String(data.id) };
 }
 
-export async function searchDocuments(q: string, opts?: { type?: string; companyId?: string }): Promise<AtlasDocument[]> {
-  const all = await listAtlasDocuments({ companyId: opts?.companyId });
-  const needle = (q ?? '').trim().toLowerCase();
-  return all.filter((d) => {
-    if (opts?.type && d.type !== opts.type) return false;
-    if (!needle) return true;
-    const hay = `${d.title} ${d.type} ${d.filename ?? ''} ${d.extractedText ?? ''}`.toLowerCase();
-    return hay.includes(needle);
+export async function searchDocuments(
+  q: string,
+  opts?: { type?: string; companyId?: string; limit?: number; offset?: number },
+): Promise<AtlasDocument[]> {
+  const page = await listAtlasDocumentsPaginated({
+    companyId: opts?.companyId,
+    query: q,
+    type: opts?.type,
+    limit: opts?.limit ?? ATLAS_DOCUMENTS_PAGE_SIZE,
+    offset: opts?.offset ?? 0,
+    lightweight: true,
+  });
+  return page.documents;
+}
+
+export async function searchDocumentsPaginated(
+  q: string,
+  opts?: { type?: string; companyId?: string; limit?: number; offset?: number },
+): Promise<PaginatedAtlasDocuments> {
+  return listAtlasDocumentsPaginated({
+    companyId: opts?.companyId,
+    query: q,
+    type: opts?.type,
+    limit: opts?.limit ?? ATLAS_DOCUMENTS_PAGE_SIZE,
+    offset: opts?.offset ?? 0,
+    lightweight: true,
   });
 }
 

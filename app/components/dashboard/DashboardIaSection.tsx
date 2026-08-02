@@ -1,18 +1,12 @@
 'use client';
 
-/**
- * DashboardIaSection
- *
- * Embeds ValidationKpiCards + ValidationQueueTable on the main dashboard.
- * Also shows quick action links to the Validation Center.
- */
-
+import { memo } from 'react';
 import { useRouter } from 'next/navigation';
 import { CheckCheck, ClipboardList, ArrowRight } from 'lucide-react';
 import { ValidationKpiCards } from '@/app/components/validation/ValidationKpiCards';
 import { ValidationQueueTable } from '@/app/components/validation/ValidationQueueTable';
 
-export function DashboardIaSection() {
+export const DashboardIaSection = memo(function DashboardIaSection() {
   const router = useRouter();
 
   return (
@@ -53,4 +47,4 @@ export function DashboardIaSection() {
       <ValidationQueueTable />
     </section>
   );
-}
+});

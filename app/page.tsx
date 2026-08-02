@@ -28,7 +28,6 @@ import { DashboardFunnelInsights } from '@/app/components/conversion/DashboardFu
 import { AppSidebar, AppSidebarMobileOverlay } from '@/app/components/shell/AppSidebar';
 import { ReferralDashboardCard } from '@/app/components/referral/ReferralDashboardCard';
 import { formatMadAmountLabel } from '@/app/lib/atlas-format';
-import { DashboardIaSection } from '@/app/components/dashboard/DashboardIaSection';
 import { LegalContractsWidget } from '@/app/components/dashboard/LegalContractsWidget';
 import { AuditStatsWidget } from '@/app/components/dashboard/AuditStatsWidget';
 import { AlertCenterWidget } from '@/app/components/dashboard/AlertCenterWidget';
@@ -54,6 +53,26 @@ const ReferralPostOnboardingModal = dynamic(
       default: m.ReferralPostOnboardingModal,
     })),
   { ssr: false },
+);
+
+const DashboardIaSection = dynamic(
+  () =>
+    import('@/app/components/dashboard/DashboardIaSection').then((m) => ({
+      default: m.DashboardIaSection,
+    })),
+  {
+    ssr: false,
+    loading: () => (
+      <div className="rounded-xl border border-gray-100 bg-white p-6 animate-pulse">
+        <div className="h-4 w-48 bg-gray-200 rounded" />
+        <div className="mt-4 grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-3">
+          {Array.from({ length: 6 }).map((_, i) => (
+            <div key={i} className="h-20 bg-gray-100 rounded-xl" />
+          ))}
+        </div>
+      </div>
+    ),
+  },
 );
 
 const modules = [
