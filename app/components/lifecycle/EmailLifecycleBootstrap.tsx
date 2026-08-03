@@ -3,7 +3,7 @@
 import { useEffect, useRef } from 'react';
 import { usePathname } from 'next/navigation';
 import { isAtlasSupabaseDataEnabled } from '@/app/lib/atlas-data-source';
-import { isOwnerEmail, OWNER_SESSION_KEY } from '@/app/lib/owner';
+import { isOwnerEmail, isPlatformSuperAdminProfile, markOwnerSessionFlag } from '@/app/lib/owner';
 import { supabase } from '@/app/lib/supabase';
 
 const PUBLIC_PREFIXES = [
@@ -43,9 +43,20 @@ export function EmailLifecycleBootstrap() {
       if (!token) return;
       try {
         const email = data.session?.user?.email ?? null;
-        if (typeof window !== 'undefined') {
-          sessionStorage.setItem(OWNER_SESSION_KEY, isOwnerEmail(email) ? '1' : '0');
+        const userId = data.session?.user?.id ?? null;
+        let isSuperAdmin = isOwnerEmail(email);
+        if (!isSuperAdmin && userId) {
+          const { data: prof } = await supabase
+            .from('profiles')
+            .select('role, email')
+            .eq('id', userId)
+            .maybeSingle();
+          isSuperAdmin = isPlatformSuperAdminProfile(
+            (prof as { role?: string | null } | null)?.role,
+            (prof as { role?: string; email?: string | null } | null)?.email ?? email,
+          );
         }
+        markOwnerSessionFlag(isSuperAdmin);
       } catch {
         // ignore
       }

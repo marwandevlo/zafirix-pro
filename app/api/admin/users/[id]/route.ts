@@ -141,19 +141,23 @@ export async function PATCH(request: NextRequest, ctx: { params: Promise<{ id: s
   const targetAuthEmail = String(targetAuth?.user?.email ?? '').trim().toLowerCase();
   const targetIsOwner = isOwnerEmail(targetEmail) || isOwnerEmail(targetAuthEmail);
   const prevStatus = String((targetProf as { status?: string | null } | null)?.status ?? '').trim().toLowerCase();
+  const actorIsOwner = isOwnerEmail(guard.adminEmail);
+  const isSelf = guard.adminUserId === userId;
 
-  if (targetIsOwner) {
-    // Owner is immutable from the admin panel.
+  // Non-owner admins cannot modify the platform owner account.
+  if (targetIsOwner && !actorIsOwner) {
     if (role && role !== 'owner') return NextResponse.json({ error: 'owner_immutable' }, { status: 403 });
     if (status && status !== 'active') return NextResponse.json({ error: 'owner_immutable' }, { status: 403 });
     if (plan && plan !== 'enterprise') return NextResponse.json({ error: 'owner_immutable' }, { status: 403 });
   }
 
-  if (guard.adminUserId === userId && status && status !== 'active') {
-    return NextResponse.json({ error: 'cannot_disable_self' }, { status: 400 });
-  }
-  if (guard.adminUserId === userId && role && !roleGrantsAdminAccess(role)) {
-    return NextResponse.json({ error: 'cannot_demote_self' }, { status: 400 });
+  if (!isSelf || !actorIsOwner) {
+    if (guard.adminUserId === userId && status && status !== 'active') {
+      return NextResponse.json({ error: 'cannot_disable_self' }, { status: 400 });
+    }
+    if (guard.adminUserId === userId && role && !roleGrantsAdminAccess(role)) {
+      return NextResponse.json({ error: 'cannot_demote_self' }, { status: 400 });
+    }
   }
 
   const updates: Record<string, unknown> = {};

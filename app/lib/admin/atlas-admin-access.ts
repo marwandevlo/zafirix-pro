@@ -3,26 +3,28 @@
  * Do not import server-only modules here.
  */
 
-export const ATLAS_OWNER_EMAIL_LOWER = 'maizimarouane1991@gmail.com';
+import { normalizeProfileRole } from '@/app/lib/atlas-profile-guards';
+import {
+  getOwnerEmail,
+  isOwnerEmail,
+  isPlatformAdminRole,
+  jwtShowsPlatformSuperAdmin,
+} from '@/app/lib/owner';
 
-function emailLower(s: string | undefined | null): string {
-  return String(s ?? '').trim().toLowerCase();
-}
+/** @deprecated Use getOwnerEmail() from @/app/lib/owner */
+export const ATLAS_OWNER_EMAIL_LOWER = getOwnerEmail();
 
-/** Supabase Auth user JWT claim (rare unless explicitly set on the user). */
+/** Supabase Auth user JWT claim — admin or owner role in app_metadata. */
 export function isJwtAppMetadataAdmin(user: { app_metadata?: Record<string, unknown> } | null | undefined): boolean {
-  return (user?.app_metadata as { role?: string } | undefined)?.role === 'admin';
+  return jwtShowsPlatformSuperAdmin(user as { app_metadata?: Record<string, unknown>; email?: string | null });
 }
 
 export function isAtlasOwnerEmail(email: string | undefined | null): boolean {
-  return emailLower(email) === ATLAS_OWNER_EMAIL_LOWER;
+  return isOwnerEmail(email);
 }
 
-import { normalizeProfileRole } from '@/app/lib/atlas-profile-guards';
-
 export function isPrivilegedProfileRole(role: string | undefined | null): boolean {
-  const r = normalizeProfileRole(role);
-  return r === 'owner' || r === 'admin';
+  return isPlatformAdminRole(normalizeProfileRole(role));
 }
 
 type MinimalUser = {

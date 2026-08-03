@@ -3,6 +3,7 @@ import { createServerClient } from '@supabase/ssr';
 import type { EmailOtpType } from '@supabase/supabase-js';
 import { createServiceRoleClient } from '@/app/lib/atlas-profile-status-server';
 import { ensureUserProfile } from '@/app/lib/ensure-user-profile';
+import { ensurePlatformSuperAdminSession } from '@/app/lib/admin/platform-super-admin';
 import { recordUserLogin } from '@/app/lib/atlas-user-activity';
 
 const DEFAULT_NEXT = '/dashboard';
@@ -101,6 +102,7 @@ export async function GET(request: NextRequest) {
       if (!ensured.ok) {
         console.warn('[auth/callback] ensureUserProfile failed', ensured.error);
       }
+      await ensurePlatformSuperAdminSession(admin, userData.user);
     } else {
       console.warn('[auth/callback] service_role missing — profile not ensured server-side');
     }

@@ -3,7 +3,7 @@
  */
 
 import type { SupabaseClient } from '@supabase/supabase-js';
-import { isAtlasOwnerEmail, isPrivilegedProfileRole } from '@/app/lib/admin/atlas-admin-access';
+import { isPlatformSuperAdminProfile } from '@/app/lib/owner';
 
 /** True when billing limits should not block uploads/OCR (development or explicit env flag). */
 export function isDevelopmentBillingBypass(): boolean {
@@ -25,8 +25,9 @@ export async function shouldBypassBillingEnforcement(
   const { data } = await db.from('profiles').select('role, email').eq('id', userId).maybeSingle();
   if (!data) return false;
 
-  if (isPrivilegedProfileRole(data.role as string | null | undefined)) return true;
-  if (isAtlasOwnerEmail(data.email as string | null | undefined)) return true;
+  if (isPlatformSuperAdminProfile(data.role as string | null | undefined, data.email as string | null | undefined)) {
+    return true;
+  }
 
   return false;
 }

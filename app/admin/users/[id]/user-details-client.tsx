@@ -5,7 +5,8 @@ import { useParams, useRouter } from 'next/navigation';
 import AdminShell from '@/app/admin/_components/AdminShell';
 import { isAtlasSupabaseDataEnabled } from '@/app/lib/atlas-data-source';
 import { adminAuthedFetch, fetchAdminBearerToken } from '@/app/lib/admin/admin-client-auth';
-import { isOwnerEmail, OWNER_EMAIL } from '@/app/lib/owner';
+import { isOwnerEmail, getOwnerEmail } from '@/app/lib/owner';
+import { supabase } from '@/app/lib/supabase';
 import { AdminAlert, AdminTableSkeleton } from '@/app/admin/_components/AdminUi';
 import { atlasPlanIdToProfilePlan } from '@/app/lib/atlas-subscription-sync';
 
@@ -106,6 +107,7 @@ export default function UserDetailsAdminClient() {
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [saveSuccess, setSaveSuccess] = useState(false);
+  const [actorEmail, setActorEmail] = useState('');
   const [error, setError] = useState('');
   const [user, setUser] = useState<UserDetail | null>(null);
   const [subs, setSubs] = useState<AtlasSubscriptionRow[]>([]);
@@ -204,11 +206,20 @@ export default function UserDetailsAdminClient() {
   }, [id, router]);
 
   useEffect(() => {
+    void supabase.auth.getUser().then(({ data }) => {
+      setActorEmail(String(data.user?.email ?? '').trim());
+    });
+  }, []);
+
+  useEffect(() => {
     void reload();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
 
-  const protectedOwner = useMemo(() => isOwnerEmail(user?.email ?? null), [user?.email]);
+  const protectedOwner = useMemo(() => {
+    if (!isOwnerEmail(user?.email ?? null)) return false;
+    return !isOwnerEmail(actorEmail);
+  }, [user?.email, actorEmail]);
 
   const save = useCallback(async () => {
     if (actionBusyRef.current || protectedOwner) return;
@@ -322,7 +333,11 @@ export default function UserDetailsAdminClient() {
                   <p className="text-xs text-gray-500 mt-1 font-mono">{user.id}</p>
                   {protectedOwner ? (
                     <p className="text-xs text-gray-500 mt-2">
-                      Owner protected: <span className="font-semibold">{OWNER_EMAIL}</span>
+                      Owner protected — only <span className="font-semibold">{getOwnerEmail()}</span> may edit this account.
+                    </p>
+                  ) : isOwnerEmail(user?.email) && isOwnerEmail(actorEmail) ? (
+                    <p className="text-xs text-emerald-700 mt-2">
+                      Platform owner session — full enterprise backend control enabled.
                     </p>
                   ) : null}
                 </div>

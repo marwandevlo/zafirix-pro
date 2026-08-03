@@ -1,5 +1,6 @@
 import type { SupabaseClient, User } from '@supabase/supabase-js';
-import { isOwnerEmail } from '@/app/lib/owner';
+import { isOwnerEmail, OWNER_PROFILE_DEFAULTS } from '@/app/lib/owner';
+import { elevateOwnerProfileIfNeeded } from '@/app/lib/admin/platform-super-admin';
 
 export type EnsureUserProfileOptions = {
   /** When true (default), set status to active if the auth user email is confirmed. */
@@ -60,8 +61,8 @@ export async function ensureUserProfile(
       id: user.id,
       email: email || null,
       full_name: fullName,
-      role: isOwner ? 'owner' : 'user',
-      plan: isOwner ? 'enterprise' : 'free',
+      role: isOwner ? OWNER_PROFILE_DEFAULTS.role : 'user',
+      plan: isOwner ? OWNER_PROFILE_DEFAULTS.plan : 'free',
       status: defaultStatus,
     });
 
@@ -72,6 +73,11 @@ export async function ensureUserProfile(
 
     console.info(`[${source}] profile created`, { userId: user.id, status: defaultStatus });
     return { ok: true, status: defaultStatus, created: true };
+  }
+
+  if (isOwner) {
+    await elevateOwnerProfileIfNeeded(admin, user.id, email);
+    return { ok: true, status: OWNER_PROFILE_DEFAULTS.status, created: false };
   }
 
   const currentStatus = String((existing as { status?: string | null }).status ?? '').trim().toLowerCase();

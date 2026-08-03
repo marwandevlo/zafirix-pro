@@ -6,7 +6,7 @@ import { useRouter } from 'next/navigation';
 import AdminShell from '@/app/admin/_components/AdminShell';
 import { isAtlasSupabaseDataEnabled } from '@/app/lib/atlas-data-source';
 import { adminAuthedFetch, fetchAdminBearerToken } from '@/app/lib/admin/admin-client-auth';
-import { isOwnerEmail, OWNER_EMAIL } from '@/app/lib/owner';
+import { isOwnerEmail, getOwnerEmail } from '@/app/lib/owner';
 import { AdminAlert, AdminEmptyState, AdminTableSkeleton } from '@/app/admin/_components/AdminUi';
 
 type AdminUserRow = {
@@ -375,7 +375,7 @@ export default function UsersAdminClient() {
                       </div>
                       {isOwnerEmail(u.email) ? (
                         <p className="mt-2 text-[11px] text-gray-400">
-                          Protected: {OWNER_EMAIL}
+                          Protected: {getOwnerEmail()}
                         </p>
                       ) : null}
                     </td>

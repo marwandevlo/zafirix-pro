@@ -106,7 +106,13 @@ function applyProfileGate(
   normalized: ProfileStatus,
   request: NextRequest,
   sessionResponse: NextResponse,
+  user?: User | null,
 ): NextResponse | null {
+  // Platform owner / admin never blocked by pending or suspended profile state.
+  if (user && jwtUserShowsAdmin(user)) {
+    return null;
+  }
+
   if (!isProfileGateExemptPath(pathname)) {
     if (isPendingStatus(normalized)) {
       const url = request.nextUrl.clone();
@@ -296,7 +302,7 @@ export async function middleware(request: NextRequest) {
   const normalizedStatus = await resolveProfileStatusForGate(user, supabaseUrl, supabase);
 
   if (normalizedStatus !== null) {
-    const gateRedirect = applyProfileGate(pathname, normalizedStatus, request, sessionResponse);
+    const gateRedirect = applyProfileGate(pathname, normalizedStatus, request, sessionResponse, user);
     if (gateRedirect) return gateRedirect;
   }
 

@@ -4,6 +4,7 @@
 
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { NextResponse } from 'next/server';
+import { isPlatformSuperAdminProfile } from '@/app/lib/owner';
 
 export type AtlasRoleSlug =
   | 'super_admin'
@@ -43,6 +44,15 @@ export function permissionDenied(status: 401 | 403, code: string, message?: stri
 
 export function permissionJsonResponse(deny: PermissionDeny): NextResponse {
   return NextResponse.json({ error: deny.code, code: deny.code, message: deny.message }, { status: deny.status });
+}
+
+async function isPlatformSuperAdminUser(db: SupabaseClient, userId: string): Promise<boolean> {
+  const { data } = await db.from('profiles').select('role, email').eq('id', userId).maybeSingle();
+  if (!data) return false;
+  return isPlatformSuperAdminProfile(
+    (data as { role?: string | null }).role,
+    (data as { email?: string | null }).email,
+  );
 }
 
 async function isWorkspaceOwner(
@@ -148,6 +158,15 @@ export async function requireRole(
   scope: { workspaceId?: string | null; companyId?: string | null },
 ): Promise<PermissionResult> {
   if (!userId) return permissionDenied(401, 'auth_required');
+
+  if (await isPlatformSuperAdminUser(db, userId)) {
+    return {
+      ok: true,
+      role: 'super_admin',
+      companyId: scope.companyId ?? undefined,
+      workspaceId: scope.workspaceId ?? undefined,
+    };
+  }
 
   if (scope.companyId) {
     const ctx = await resolveCompanyRole(db, userId, scope.companyId);

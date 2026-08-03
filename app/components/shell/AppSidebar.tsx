@@ -21,7 +21,7 @@ import {
 } from '@/app/lib/atlas-app-nav';
 import type { User } from '@supabase/supabase-js';
 import { supabase } from '@/app/lib/supabase';
-import { isOwnerEmail } from '@/app/lib/owner';
+import { isOwnerEmail, jwtShowsPlatformSuperAdmin } from '@/app/lib/owner';
 import { SoundEffectsSidebarControl } from '@/app/components/sound/SoundEffectsSidebarControl';
 
 export type AppSidebarProps = {
@@ -59,7 +59,10 @@ function computeCanSeeAdminNav(params: {
 
   const pr = String(params.profileRow?.role ?? '').trim().toLowerCase();
   if (pr === 'admin' || pr === 'owner') return true;
-  if (params.profileRow !== null && (pr === 'user' || pr === 'moderator')) return false;
+  if (params.profileRow !== null && (pr === 'user' || pr === 'moderator')) {
+    // Stale profile row — still trust JWT when it shows platform super-admin.
+    return jwtShowsPlatformSuperAdmin(params.user);
+  }
 
   const jr = params.jwtRole.trim().toLowerCase();
   return jr === 'admin' || jr === 'owner';
