@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import { todayYmd } from '@/app/lib/atlas-dates';
 import { ArrowLeft, BadgeCheck, Ban, Clock, Filter, ShieldCheck } from 'lucide-react';
 import { isAtlasSupabaseDataEnabled } from '@/app/lib/atlas-data-source';
+import { adminAuthedFetch } from '@/app/lib/admin/admin-client-auth';
 
 type SubStatus = 'pending_manual' | 'active' | 'canceled' | string;
 
@@ -41,6 +42,7 @@ export default function AdminSubscriptionsPage() {
   const [filter, setFilter] = useState<'pending' | 'active' | 'canceled' | 'all'>('pending');
   const [q, setQ] = useState('');
   const [loading, setLoading] = useState(false);
+  const [busyId, setBusyId] = useState<string | null>(null);
   const [error, setError] = useState('');
 
   useEffect(() => {
@@ -50,9 +52,7 @@ export default function AdminSubscriptionsPage() {
       setLoading(true);
       try {
         if (isAtlasSupabaseDataEnabled()) {
-          const res = await fetch('/api/admin/subscriptions', {
-            method: 'GET',
-          });
+          const res = await adminAuthedFetch('/api/admin/subscriptions', { method: 'GET' });
           const json = (await res.json().catch(() => ({}))) as {
             rows?: AdminSubRow[];
             error?: string;
@@ -110,15 +110,17 @@ export default function AdminSubscriptionsPage() {
     });
   }, [filter, q, rows]);
 
-  const setStatus = async (id: string, nextStatus: string) => {
-    if (!isAtlasSupabaseDataEnabled()) return;
+  const setStatus = async (rowId: string, nextStatus: string) => {
+    if (!isAtlasSupabaseDataEnabled()) {
+      setError('Mode Supabase requis.');
+      return;
+    }
     setError('');
-    setLoading(true);
+    setBusyId(rowId);
     try {
-      const res = await fetch('/api/admin/subscriptions', {
+      const res = await adminAuthedFetch('/api/admin/subscriptions', {
         method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ id, status: nextStatus }),
+        body: JSON.stringify({ id: rowId, status: nextStatus }),
       });
       const json = (await res.json().catch(() => ({}))) as {
         error?: string;
@@ -132,11 +134,11 @@ export default function AdminSubscriptionsPage() {
           .filter(Boolean);
         throw new Error(parts.join(' · '));
       }
-      setRows((prev) => prev.map((r) => (r.id === id ? { ...r, status: nextStatus } : r)));
+      setRows((prev) => prev.map((r) => (r.id === rowId ? { ...r, status: nextStatus } : r)));
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Erreur');
     } finally {
-      setLoading(false);
+      setBusyId(null);
     }
   };
 
@@ -145,6 +147,7 @@ export default function AdminSubscriptionsPage() {
       <header className="bg-white border-b border-gray-200 px-8 py-5 flex items-center justify-between">
         <div className="flex items-center gap-3">
           <button
+            type="button"
             onClick={() => router.push('/admin')}
             className="flex items-center gap-2 text-sm text-gray-500 hover:text-gray-700"
           >
@@ -274,23 +277,28 @@ export default function AdminSubscriptionsPage() {
                         <td className="px-6 py-4">
                           <div className="flex items-center justify-end gap-2">
                             <button
-                              onClick={() => setStatus(p.id, 'active')}
-                              className="px-3 py-2 rounded-xl border border-emerald-200 bg-emerald-50 text-emerald-800 text-xs font-semibold hover:bg-emerald-100 flex items-center gap-2"
+                              type="button"
+                              onClick={() => void setStatus(p.id, 'active')}
+                              disabled={busyId === p.id}
+                              className="px-3 py-2 rounded-xl border border-emerald-200 bg-emerald-50 text-emerald-800 text-xs font-semibold hover:bg-emerald-100 flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
                               title="Approve"
                             >
                               <BadgeCheck size={14} /> Approve
                             </button>
                             <button
-                              onClick={() => setStatus(p.id, 'canceled')}
-                              className="px-3 py-2 rounded-xl border border-red-200 bg-red-50 text-red-800 text-xs font-semibold hover:bg-red-100 flex items-center gap-2"
+                              type="button"
+                              onClick={() => void setStatus(p.id, 'canceled')}
+                              disabled={busyId === p.id}
+                              className="px-3 py-2 rounded-xl border border-red-200 bg-red-50 text-red-800 text-xs font-semibold hover:bg-red-100 flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
                               title="Reject"
                             >
                               <Ban size={14} /> Reject
                             </button>
                             <select
                               value={String(p.status ?? '')}
-                              onChange={(e) => setStatus(p.id, e.target.value)}
-                              className="px-2 py-2 rounded-xl border border-gray-200 bg-white text-xs font-semibold text-gray-700"
+                              onChange={(e) => void setStatus(p.id, e.target.value)}
+                              disabled={busyId === p.id}
+                              className="px-2 py-2 rounded-xl border border-gray-200 bg-white text-xs font-semibold text-gray-700 disabled:opacity-50"
                               title="Change status"
                             >
                               <option value="pending_manual">pending_manual</option>

@@ -4,8 +4,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import AdminShell from '@/app/admin/_components/AdminShell';
 import { isAtlasSupabaseDataEnabled } from '@/app/lib/atlas-data-source';
+import { adminAuthedFetch, fetchAdminBearerToken } from '@/app/lib/admin/admin-client-auth';
 import { isOwnerEmail, OWNER_EMAIL } from '@/app/lib/owner';
-import { supabase } from '@/app/lib/supabase';
 import { AdminAlert, AdminTableSkeleton } from '@/app/admin/_components/AdminUi';
 import { atlasPlanIdToProfilePlan } from '@/app/lib/atlas-subscription-sync';
 
@@ -102,7 +102,10 @@ export default function UserDetailsAdminClient() {
   const params = useParams<{ id: string }>();
   const id = String(params?.id ?? '');
 
-  const [loading, setLoading] = useState(false);
+  const [initialLoading, setInitialLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const [saveSuccess, setSaveSuccess] = useState(false);
   const [error, setError] = useState('');
   const [user, setUser] = useState<UserDetail | null>(null);
   const [subs, setSubs] = useState<AtlasSubscriptionRow[]>([]);
@@ -124,6 +127,8 @@ export default function UserDetailsAdminClient() {
   statusRef.current = status;
   fullNameRef.current = fullName;
 
+  const actionBusyRef = useRef(false);
+
   const syncFormFromUser = (u: UserDetail | null, subscriptions: AtlasSubscriptionRow[] = subs) => {
     setRole(String(u?.role ?? 'user').trim().toLowerCase());
     setPlan(resolveCanonicalPlan(u?.plan, subscriptions));
@@ -143,22 +148,17 @@ export default function UserDetailsAdminClient() {
     setFullName(saved.full_name);
   };
 
-  const reload = async (opts?: { syncForm?: boolean }) => {
+  const reload = useCallback(async (opts?: { syncForm?: boolean }) => {
     const syncForm = opts?.syncForm !== false;
-    if (!isAtlasSupabaseDataEnabled()) return null;
-    setLoading(true);
+    if (!isAtlasSupabaseDataEnabled()) {
+      setError('Mode Supabase requis pour charger cet utilisateur.');
+      return null;
+    }
+    setInitialLoading(true);
     setError('');
     try {
-      const { data } = await supabase.auth.getSession();
-      const token = data.session?.access_token ?? '';
-      if (!token) {
-        router.push(`/login?next=${encodeURIComponent(`/admin/users/${id}`)}`);
-        return null;
-      }
-      const res = await fetch(`/api/admin/users/${id}?t=${Date.now()}`, {
-        headers: { Authorization: `Bearer ${token}` },
-        cache: 'no-store',
-      });
+      await fetchAdminBearerToken();
+      const res = await adminAuthedFetch(`/api/admin/users/${id}?t=${Date.now()}`);
       const json: unknown = await res.json().catch(() => ({}));
       const msg =
         typeof json === 'object' && json && 'error' in json && typeof (json as { error?: unknown }).error === 'string'
@@ -192,27 +192,31 @@ export default function UserDetailsAdminClient() {
 
       return { user: u, subscriptions, adminLogs };
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Erreur');
+      const message = e instanceof Error ? e.message : 'Erreur';
+      if (message.includes('Session expirée')) {
+        router.push(`/login?next=${encodeURIComponent(`/admin/users/${id}`)}`);
+      }
+      setError(message);
       return null;
     } finally {
-      setLoading(false);
+      setInitialLoading(false);
     }
-  };
+  }, [id, router]);
 
   useEffect(() => {
     void reload();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
 
-  const save = async () => {
-    if (!isAtlasSupabaseDataEnabled()) return;
-    setLoading(true);
+  const protectedOwner = useMemo(() => isOwnerEmail(user?.email ?? null), [user?.email]);
+
+  const save = useCallback(async () => {
+    if (actionBusyRef.current || protectedOwner) return;
+    actionBusyRef.current = true;
+    setSaving(true);
+    setSaveSuccess(false);
     setError('');
     try {
-      const { data } = await supabase.auth.getSession();
-      const token = data.session?.access_token ?? '';
-      if (!token) return;
-
       const payload = {
         role: roleRef.current,
         plan: planRef.current,
@@ -220,11 +224,9 @@ export default function UserDetailsAdminClient() {
         full_name: fullNameRef.current,
       };
 
-      const res = await fetch(`/api/admin/users/${id}`, {
+      const res = await adminAuthedFetch(`/api/admin/users/${id}`, {
         method: 'PATCH',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
         body: JSON.stringify(payload),
-        cache: 'no-store',
       });
       const json: unknown = await res.json().catch(() => ({}));
       const body = (typeof json === 'object' && json ? json : {}) as {
@@ -255,25 +257,26 @@ export default function UserDetailsAdminClient() {
         applySavedSnapshot(payload, latestSubs);
       }
 
+      setSaveSuccess(true);
+      window.setTimeout(() => setSaveSuccess(false), 3000);
       router.refresh();
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Erreur');
     } finally {
-      setLoading(false);
+      actionBusyRef.current = false;
+      setSaving(false);
     }
-  };
+  }, [id, protectedOwner, reload, router, subs]);
 
-  const del = async () => {
-    if (!isAtlasSupabaseDataEnabled()) return;
+  const del = useCallback(async () => {
+    if (actionBusyRef.current || protectedOwner) return;
     const ok = window.confirm('Supprimer cet utilisateur ? Cette action est irréversible.');
     if (!ok) return;
-    setLoading(true);
+    actionBusyRef.current = true;
+    setDeleting(true);
     setError('');
     try {
-      const { data } = await supabase.auth.getSession();
-      const token = data.session?.access_token ?? '';
-      if (!token) return;
-      const res = await fetch(`/api/admin/users/${id}`, { method: 'DELETE', headers: { Authorization: `Bearer ${token}` } });
+      const res = await adminAuthedFetch(`/api/admin/users/${id}`, { method: 'DELETE' });
       const json: unknown = await res.json().catch(() => ({}));
       const msg =
         typeof json === 'object' && json && 'error' in json && typeof (json as { error?: unknown }).error === 'string'
@@ -284,11 +287,13 @@ export default function UserDetailsAdminClient() {
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Erreur');
     } finally {
-      setLoading(false);
+      actionBusyRef.current = false;
+      setDeleting(false);
     }
-  };
+  }, [id, protectedOwner, router]);
 
   const displayPlan = useMemo(() => normalizePlanToken(plan), [plan]);
+  const actionBusy = saving || deleting;
 
   const createdLabel = useMemo(() => {
     if (!user?.created_at) return '—';
@@ -296,11 +301,10 @@ export default function UserDetailsAdminClient() {
     return Number.isNaN(d.getTime()) ? user.created_at : d.toLocaleString();
   }, [user?.created_at]);
 
-  const protectedOwner = isOwnerEmail(user?.email ?? null);
-
   return (
     <AdminShell title="Admin · User details">
-      {loading ? <AdminAlert variant="info">Chargement…</AdminAlert> : null}
+      {initialLoading ? <AdminAlert variant="info">Chargement…</AdminAlert> : null}
+      {saveSuccess ? <AdminAlert variant="info">Modifications enregistrées.</AdminAlert> : null}
       {error ? <AdminAlert variant="error">{error}</AdminAlert> : null}
 
       {!user ? (
@@ -324,22 +328,31 @@ export default function UserDetailsAdminClient() {
                 </div>
                 <div className="flex items-center gap-2">
                   <button
+                    type="button"
                     onClick={() => router.push('/admin/users')}
-                    className="px-3 py-2 rounded-xl border border-gray-200 bg-white text-gray-700 text-xs font-semibold hover:bg-gray-50"
+                    disabled={actionBusy}
+                    className="px-3 py-2 rounded-xl border border-gray-200 bg-white text-gray-700 text-xs font-semibold hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
                   >
                     Back
                   </button>
                   <button
-                    onClick={del}
-                    disabled={protectedOwner}
-                    className="px-3 py-2 rounded-xl border border-red-200 bg-red-50 text-red-900 text-xs font-semibold hover:bg-red-100"
+                    type="button"
+                    onClick={() => void del()}
+                    disabled={protectedOwner || actionBusy}
+                    className="px-3 py-2 rounded-xl border border-red-200 bg-red-50 text-red-900 text-xs font-semibold hover:bg-red-100 disabled:opacity-50 disabled:cursor-not-allowed"
                   >
-                    Delete
+                    {deleting ? 'Deleting…' : 'Delete'}
                   </button>
                 </div>
               </div>
 
-              <div className="mt-5 grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
+              <form
+                className="mt-5 grid grid-cols-1 md:grid-cols-2 gap-4 text-sm"
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  void save();
+                }}
+              >
                 <div>
                   <p className="text-xs text-gray-500">Full name</p>
                   <input
@@ -402,14 +415,14 @@ export default function UserDetailsAdminClient() {
                 </div>
                 <div className="flex items-end">
                   <button
-                    onClick={save}
-                    disabled={protectedOwner}
-                    className="w-full px-4 py-2.5 rounded-xl border border-blue-200 bg-blue-50 text-blue-900 text-xs font-semibold hover:bg-blue-100"
+                    type="submit"
+                    disabled={protectedOwner || actionBusy}
+                    className="w-full px-4 py-2.5 rounded-xl border border-blue-200 bg-blue-50 text-blue-900 text-xs font-semibold hover:bg-blue-100 disabled:opacity-50 disabled:cursor-not-allowed"
                   >
-                    Save changes
+                    {saving ? 'Saving…' : saveSuccess ? 'Saved' : 'Save changes'}
                   </button>
                 </div>
-              </div>
+              </form>
             </div>
 
             <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">

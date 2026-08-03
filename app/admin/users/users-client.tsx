@@ -5,8 +5,8 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import AdminShell from '@/app/admin/_components/AdminShell';
 import { isAtlasSupabaseDataEnabled } from '@/app/lib/atlas-data-source';
+import { adminAuthedFetch, fetchAdminBearerToken } from '@/app/lib/admin/admin-client-auth';
 import { isOwnerEmail, OWNER_EMAIL } from '@/app/lib/owner';
-import { supabase } from '@/app/lib/supabase';
 import { AdminAlert, AdminEmptyState, AdminTableSkeleton } from '@/app/admin/_components/AdminUi';
 
 type AdminUserRow = {
@@ -25,6 +25,7 @@ type AdminUserRow = {
 export default function UsersAdminClient() {
   const router = useRouter();
   const [loading, setLoading] = useState(false);
+  const [busyUserId, setBusyUserId] = useState<string | null>(null);
   const [error, setError] = useState('');
   const [rows, setRows] = useState<AdminUserRow[]>([]);
   const [warning, setWarning] = useState<string>('');
@@ -33,8 +34,9 @@ export default function UsersAdminClient() {
   const [planFilter, setPlanFilter] = useState<string>('all');
   const [statusFilter, setStatusFilter] = useState<string>('all');
 
-  const loadUsers = useCallback(async (cancelledRef?: { current: boolean }) => {
-    setLoading(true);
+  const loadUsers = useCallback(async (cancelledRef?: { current: boolean }, opts?: { silent?: boolean }) => {
+    const silent = opts?.silent === true;
+    if (!silent) setLoading(true);
     setError('');
     setWarning('');
     try {
@@ -46,9 +48,7 @@ export default function UsersAdminClient() {
         return;
       }
 
-      const { data } = await supabase.auth.getSession();
-      const token = data.session?.access_token ?? '';
-      if (!token) return;
+      await fetchAdminBearerToken();
 
       const sp = new URLSearchParams();
       if (q.trim()) sp.set('q', q.trim());
@@ -57,10 +57,7 @@ export default function UsersAdminClient() {
       if (statusFilter !== 'all') sp.set('status', statusFilter);
       const url = `/api/admin/users${sp.toString() ? `?${sp.toString()}` : ''}`;
 
-      const res = await fetch(url, {
-        headers: { Authorization: `Bearer ${token}` },
-        cache: 'no-store',
-      });
+      const res = await adminAuthedFetch(url);
       const json: unknown = await res.json().catch(() => ({}));
       if (!res.ok) {
         const msg =
@@ -86,7 +83,7 @@ export default function UsersAdminClient() {
     } catch (e) {
       if (!cancelledRef?.current) setError(e instanceof Error ? e.message : 'Erreur');
     } finally {
-      if (!cancelledRef?.current) setLoading(false);
+      if (!cancelledRef?.current && !silent) setLoading(false);
     }
   }, [planFilter, q, roleFilter, statusFilter]);
 
@@ -100,23 +97,21 @@ export default function UsersAdminClient() {
 
   const visible = useMemo(() => rows, [rows]);
 
-  const mutateUser = async (id: string, patch: Record<string, unknown>, confirmText?: string) => {
-    if (!isAtlasSupabaseDataEnabled()) return;
+  const mutateUser = async (userId: string, patch: Record<string, unknown>, confirmText?: string) => {
+    if (!isAtlasSupabaseDataEnabled()) {
+      setError('Mode Supabase requis pour modérer les utilisateurs.');
+      return;
+    }
     if (confirmText) {
       const ok = window.confirm(confirmText);
       if (!ok) return;
     }
-    setLoading(true);
+    setBusyUserId(userId);
     setError('');
     try {
-      const { data } = await supabase.auth.getSession();
-      const token = data.session?.access_token ?? '';
-      if (!token) return;
-      const res = await fetch(`/api/admin/users/${id}`, {
+      const res = await adminAuthedFetch(`/api/admin/users/${userId}`, {
         method: 'PATCH',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
         body: JSON.stringify(patch),
-        cache: 'no-store',
       });
       const json = (await res.json().catch(() => ({}))) as {
         error?: string;
@@ -129,7 +124,7 @@ export default function UsersAdminClient() {
       if (json.user) {
         setRows((prev) =>
           prev.map((r) =>
-            r.id === id
+            r.id === userId
               ? {
                   ...r,
                   role: json.user?.role ?? r.role,
@@ -141,44 +136,41 @@ export default function UsersAdminClient() {
           ),
         );
       } else {
-        setRows((prev) => prev.map((r) => (r.id === id ? { ...r, ...patch } : r)));
+        setRows((prev) => prev.map((r) => (r.id === userId ? { ...r, ...patch } : r)));
       }
 
       router.refresh();
-      await loadUsers();
+      await loadUsers(undefined, { silent: true });
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Erreur');
     } finally {
-      setLoading(false);
+      setBusyUserId(null);
     }
   };
 
-  const deleteUser = async (id: string) => {
-    if (!isAtlasSupabaseDataEnabled()) return;
+  const deleteUser = async (userId: string) => {
+    if (!isAtlasSupabaseDataEnabled()) {
+      setError('Mode Supabase requis pour supprimer un utilisateur.');
+      return;
+    }
     const ok = window.confirm('Supprimer cet utilisateur ? Cette action est irréversible.');
     if (!ok) return;
-    setLoading(true);
+    setBusyUserId(userId);
     setError('');
     try {
-      const { data } = await supabase.auth.getSession();
-      const token = data.session?.access_token ?? '';
-      if (!token) return;
-      const res = await fetch(`/api/admin/users/${id}`, {
-        method: 'DELETE',
-        headers: { Authorization: `Bearer ${token}` },
-      });
+      const res = await adminAuthedFetch(`/api/admin/users/${userId}`, { method: 'DELETE' });
       const json: unknown = await res.json().catch(() => ({}));
       const msg =
         typeof json === 'object' && json && 'error' in json && typeof (json as { error?: unknown }).error === 'string'
           ? String((json as { error?: unknown }).error)
           : 'error';
       if (!res.ok) throw new Error(msg);
-      setRows((prev) => prev.filter((r) => r.id !== id));
+      setRows((prev) => prev.filter((r) => r.id !== userId));
       router.refresh();
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Erreur');
     } finally {
-      setLoading(false);
+      setBusyUserId(null);
     }
   };
 
@@ -340,38 +332,43 @@ export default function UsersAdminClient() {
                         ) : null}
                         {String(u.status ?? '').toLowerCase() === 'pending' ? (
                           <button
-                            onClick={() => mutateUser(u.id, { status: 'active' }, 'Approuver cet utilisateur ?')}
-                            disabled={isOwnerEmail(u.email)}
-                            className="px-3 py-2 rounded-xl border border-emerald-200 bg-emerald-50 text-emerald-900 text-xs font-semibold hover:bg-emerald-100"
+                            type="button"
+                            onClick={() => void mutateUser(u.id, { status: 'active' }, 'Approuver cet utilisateur ?')}
+                            disabled={isOwnerEmail(u.email) || busyUserId === u.id}
+                            className="px-3 py-2 rounded-xl border border-emerald-200 bg-emerald-50 text-emerald-900 text-xs font-semibold hover:bg-emerald-100 disabled:opacity-50 disabled:cursor-not-allowed"
                           >
-                            Approve
+                            {busyUserId === u.id ? '…' : 'Approve'}
                           </button>
                         ) : null}
                         <button
-                          onClick={() => mutateUser(u.id, { status: 'suspended' }, 'Suspendre cet utilisateur ?')}
-                          disabled={isOwnerEmail(u.email)}
-                          className="px-3 py-2 rounded-xl border border-amber-200 bg-amber-50 text-amber-900 text-xs font-semibold hover:bg-amber-100"
+                          type="button"
+                          onClick={() => void mutateUser(u.id, { status: 'suspended' }, 'Suspendre cet utilisateur ?')}
+                          disabled={isOwnerEmail(u.email) || busyUserId === u.id}
+                          className="px-3 py-2 rounded-xl border border-amber-200 bg-amber-50 text-amber-900 text-xs font-semibold hover:bg-amber-100 disabled:opacity-50 disabled:cursor-not-allowed"
                         >
                           Suspend
                         </button>
                         <button
-                          onClick={() => mutateUser(u.id, { status: 'active' })}
-                          disabled={isOwnerEmail(u.email)}
-                          className="px-3 py-2 rounded-xl border border-emerald-200 bg-emerald-50 text-emerald-900 text-xs font-semibold hover:bg-emerald-100"
+                          type="button"
+                          onClick={() => void mutateUser(u.id, { status: 'active' })}
+                          disabled={isOwnerEmail(u.email) || busyUserId === u.id}
+                          className="px-3 py-2 rounded-xl border border-emerald-200 bg-emerald-50 text-emerald-900 text-xs font-semibold hover:bg-emerald-100 disabled:opacity-50 disabled:cursor-not-allowed"
                         >
                           Activate
                         </button>
                         <button
-                          onClick={() => mutateUser(u.id, { status: 'banned' }, 'Bannir cet utilisateur ?')}
-                          disabled={isOwnerEmail(u.email)}
-                          className="px-3 py-2 rounded-xl border border-red-200 bg-red-50 text-red-900 text-xs font-semibold hover:bg-red-100"
+                          type="button"
+                          onClick={() => void mutateUser(u.id, { status: 'banned' }, 'Bannir cet utilisateur ?')}
+                          disabled={isOwnerEmail(u.email) || busyUserId === u.id}
+                          className="px-3 py-2 rounded-xl border border-red-200 bg-red-50 text-red-900 text-xs font-semibold hover:bg-red-100 disabled:opacity-50 disabled:cursor-not-allowed"
                         >
                           {String(u.status ?? '').toLowerCase() === 'pending' ? 'Reject' : 'Ban'}
                         </button>
                         <button
-                          onClick={() => deleteUser(u.id)}
-                          disabled={isOwnerEmail(u.email)}
-                          className="px-3 py-2 rounded-xl border border-gray-200 bg-white text-gray-700 text-xs font-semibold hover:bg-gray-50"
+                          type="button"
+                          onClick={() => void deleteUser(u.id)}
+                          disabled={isOwnerEmail(u.email) || busyUserId === u.id}
+                          className="px-3 py-2 rounded-xl border border-gray-200 bg-white text-gray-700 text-xs font-semibold hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
                         >
                           Delete
                         </button>
