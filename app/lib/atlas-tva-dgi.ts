@@ -250,6 +250,31 @@ export function roundDgiAmount(value: number): number {
   return Math.round(amount * 100) / 100;
 }
 
+const DGI_RELEVE_AMOUNT_TOLERANCE = 0.01;
+
+/** Enforce SIMPL-TVA row math: TTC must equal MHT + TVA (cent-level tolerance). */
+export function normalizeDgiReleveAmounts(
+  mhtRaw: number,
+  tvaRaw: number,
+  ttcRaw?: number | null,
+): { mht: number; tva: number; ttc: number } {
+  const mht = roundDgiAmount(mhtRaw);
+  const tva = roundDgiAmount(tvaRaw);
+  const expectedTtc = roundDgiAmount(mht + tva);
+  const ttcProvided =
+    ttcRaw != null && Number.isFinite(Number(ttcRaw)) ? roundDgiAmount(Number(ttcRaw)) : null;
+
+  if (ttcProvided == null || Math.abs(ttcProvided - expectedTtc) > DGI_RELEVE_AMOUNT_TOLERANCE) {
+    return { mht, tva, ttc: expectedTtc };
+  }
+
+  return { mht, tva, ttc: ttcProvided };
+}
+
+export function isDgiReleveAmountConsistent(mht: number, tva: number, ttc: number): boolean {
+  return Math.abs(roundDgiAmount(mht + tva) - roundDgiAmount(ttc)) <= DGI_RELEVE_AMOUNT_TOLERANCE;
+}
+
 export function formatDgiDateYmd(value: string | null | undefined, fallback?: string): string {
   const raw = String(value ?? '').trim();
   const isoMatch = raw.match(/^(\d{4})-(\d{2})-(\d{2})/);
@@ -595,7 +620,9 @@ export function resolveDgiSupplierRef(
       ifSources.push(linked.ifFiscal);
       rawNom = rawNom || linked.nom || null;
     }
-  } else if (index) {
+  }
+
+  if (index) {
     const byName = lookupSupplierIdentityByName(index, rawNom);
     if (byName) {
       rawNom = rawNom || byName.nom || null;
@@ -623,13 +650,15 @@ export function buildDgiReleveRows(
     const issueDate = formatDgiDateYmd(line.issueDate);
     const paymentDate = formatDgiDateYmd(line.paymentDate || line.issueDate, issueDate);
 
+    const amounts = normalizeDgiReleveAmounts(line.amountHT, line.vatAmount, line.totalTTC);
+
     return {
       ord: rowIndex + 1,
       num: sanitizeDgiNumFacture(line.reference || String(rowIndex + 1)),
       des: sanitizeDgiDesignation(line.designation),
-      mht: roundDgiAmount(line.amountHT),
-      tva: roundDgiAmount(line.vatAmount),
-      ttc: roundDgiAmount(line.totalTTC),
+      mht: amounts.mht,
+      tva: amounts.tva,
+      ttc: amounts.ttc,
       refF: resolveDgiSupplierRef(
         {
           counterparty: line.counterparty,

@@ -14,6 +14,7 @@ import {
   formatDgiIce,
   formatDgiIdentifiantFiscal,
   lookupSupplierIdentityByName,
+  normalizeDgiReleveAmounts,
   resolveDgiIce,
   resolveDgiIdentifiantFiscal,
   sanitizeDgiNomFournisseur,
@@ -243,6 +244,9 @@ type SupplierRow = {
   vat_rate: number | string | null;
   payment_method?: string | null;
   category?: string | null;
+  metadata?: unknown;
+  document_id?: string | null;
+  source_document_id?: string | null;
   created_at?: string | null;
   updated_at?: string | null;
 };
@@ -293,11 +297,73 @@ function extractDocumentField(extraction: unknown, key: string): string {
   const field = rec[key];
   if (field == null) return '';
   if (typeof field === 'object') {
-    const obj = field as { value?: unknown; user_corrected_value?: unknown };
-    const val = obj.user_corrected_value ?? obj.value;
+    const obj = field as { value?: unknown; user_corrected_value?: unknown; normalized_value?: unknown };
+    const val = obj.user_corrected_value ?? obj.normalized_value ?? obj.value;
     return val != null ? String(val).trim() : '';
   }
   return String(field).trim();
+}
+
+function resolveDocumentExtraction(metadata: unknown): unknown {
+  const meta = asRecord(metadata);
+  if (!meta) return null;
+  return meta.extraction ?? null;
+}
+
+function extractMoroccoSupplierIdsFromRecord(record: unknown): { ice?: string; ifFiscal?: string } {
+  const rec = asRecord(record);
+  if (!rec) return {};
+
+  const morocco = asRecord(rec.morocco_supplier_ids);
+  const ice = morocco?.ice != null ? String(morocco.ice).trim() : '';
+  const ifFiscal = morocco?.if != null ? String(morocco.if).trim() : '';
+
+  return {
+    ice: ice || undefined,
+    ifFiscal: ifFiscal || undefined,
+  };
+}
+
+function extractDocumentSupplierIdentity(metadata: unknown): {
+  ice?: string;
+  ifFiscal?: string;
+  name?: string;
+} {
+  const extraction = resolveDocumentExtraction(metadata);
+  const morocco = extractMoroccoSupplierIdsFromRecord(extraction);
+
+  const ice =
+    morocco.ice ||
+    extractDocumentField(extraction, 'supplier_ice') ||
+    extractDocumentField(extraction, 'ice') ||
+    undefined;
+  const ifFiscal =
+    morocco.ifFiscal ||
+    extractDocumentField(extraction, 'supplier_if') ||
+    extractDocumentField(extraction, 'if_fiscal') ||
+    undefined;
+  const name =
+    extractDocumentField(extraction, 'supplier_name') ||
+    extractDocumentField(extraction, 'customer_name') ||
+    extractDocumentField(extraction, 'fournisseur') ||
+    undefined;
+
+  return { ice, ifFiscal, name };
+}
+
+function extractInvoiceMetadataSupplierIdentity(metadata: unknown): { ice?: string; ifFiscal?: string } {
+  return extractMoroccoSupplierIdsFromRecord(metadata);
+}
+
+function mergeSupplierRowIdentity(row: SupplierRow): {
+  supplier_ice?: string | null;
+  supplier_if?: string | null;
+} {
+  const fromMetadata = extractInvoiceMetadataSupplierIdentity(row.metadata);
+  return {
+    supplier_ice: row.supplier_ice || fromMetadata.ice || null,
+    supplier_if: row.supplier_if || fromMetadata.ifFiscal || null,
+  };
 }
 
 async function loadDocumentSupplierHints(
@@ -310,7 +376,7 @@ async function loadDocumentSupplierHints(
 
   const { data, error } = await db
     .from('atlas_documents')
-    .select('id, extraction_json')
+    .select('id, metadata')
     .eq('company_id', companyId)
     .in('id', unique);
 
@@ -321,15 +387,9 @@ async function loadDocumentSupplierHints(
 
   const map = new Map<string, { ice?: string; ifFiscal?: string; name?: string }>();
   for (const row of data ?? []) {
-    const ext = (row as { extraction_json?: unknown }).extraction_json;
-    map.set(String((row as { id: string }).id), {
-      ice: extractDocumentField(ext, 'supplier_ice') || undefined,
-      ifFiscal: extractDocumentField(ext, 'supplier_if') || undefined,
-      name:
-        extractDocumentField(ext, 'supplier_name') ||
-        extractDocumentField(ext, 'customer_name') ||
-        undefined,
-    });
+    const identity = extractDocumentSupplierIdentity((row as { metadata?: unknown }).metadata);
+    if (!identity.ice && !identity.ifFiscal && !identity.name) continue;
+    map.set(String((row as { id: string }).id), identity);
   }
   return map;
 }
@@ -342,7 +402,7 @@ async function enrichSupplierIdentityIndexFromDocuments(
 ): Promise<SupplierIdentityIndex> {
   const { data, error } = await db
     .from('atlas_documents')
-    .select('extraction_json')
+    .select('metadata')
     .eq('company_id', companyId)
     .order('created_at', { ascending: false })
     .limit(500);
@@ -355,13 +415,8 @@ async function enrichSupplierIdentityIndexFromDocuments(
   const byInvoiceId = new Map(index.byInvoiceId);
 
   for (const row of data ?? []) {
-    const ext = (row as { extraction_json?: unknown }).extraction_json;
-    const name =
-      extractDocumentField(ext, 'supplier_name') ||
-      extractDocumentField(ext, 'customer_name') ||
-      extractDocumentField(ext, 'fournisseur');
-    const ice = extractDocumentField(ext, 'supplier_ice') || extractDocumentField(ext, 'ice');
-    const ifFiscal = extractDocumentField(ext, 'supplier_if') || extractDocumentField(ext, 'if_fiscal');
+    const identity = extractDocumentSupplierIdentity((row as { metadata?: unknown }).metadata);
+    const { ice, ifFiscal, name } = identity;
     if (!name && !ice && !ifFiscal) continue;
 
     const record = {
@@ -392,18 +447,21 @@ export async function loadCompanySupplierIdentityIndex(
   const rows = await fetchCompanyScopedRows<SupplierRow>(
     db,
     'atlas_supplier_invoices',
-    'id, supplier_name, supplier_ice, supplier_if',
+    'id, supplier_name, supplier_ice, supplier_if, metadata',
     companyId,
     userId,
   );
 
   let index = buildSupplierIdentityIndex(
-    rows.map((row) => ({
-      id: String(row.id),
-      supplier_name: row.supplier_name,
-      supplier_ice: row.supplier_ice,
-      supplier_if: row.supplier_if,
-    })),
+    rows.map((row) => {
+      const merged = mergeSupplierRowIdentity(row);
+      return {
+        id: String(row.id),
+        supplier_name: row.supplier_name,
+        supplier_ice: merged.supplier_ice,
+        supplier_if: merged.supplier_if,
+      };
+    }),
   );
 
   index = await enrichSupplierIdentityIndexFromDocuments(db, companyId, userId, index);
@@ -423,12 +481,11 @@ function resolveSupplierIdentityFromSources(
 ): { supplierIce?: string; supplierIf?: string; counterparty?: string } {
   let name = sources.counterparty ? String(sources.counterparty).trim() : undefined;
   const inv = sources.sourceInvoiceId ? supplierById.get(String(sources.sourceInvoiceId)) : undefined;
+  const invMetadataIds = inv ? extractInvoiceMetadataSupplierIdentity(inv.metadata) : {};
   const indexed = sources.sourceInvoiceId
     ? supplierIndex.byInvoiceId.get(String(sources.sourceInvoiceId))
     : undefined;
-  const byName = sources.sourceInvoiceId
-    ? undefined
-    : lookupSupplierIdentityByName(supplierIndex, name);
+  const byName = lookupSupplierIdentityByName(supplierIndex, name);
 
   if (inv) {
     name = name || (inv.supplier_name ? String(inv.supplier_name).trim() : undefined);
@@ -437,22 +494,23 @@ function resolveSupplierIdentityFromSources(
   if (docHint?.name) name = name || docHint.name;
   if (byName?.nom) name = name || byName.nom;
 
+  const mergedInv = inv ? mergeSupplierRowIdentity(inv) : undefined;
   const iceSources: Array<string | null | undefined> = [
     sources.supplierIce,
-    inv?.supplier_ice,
+    mergedInv?.supplier_ice,
+    invMetadataIds.ice,
     indexed?.ice,
     docHint?.ice,
+    byName?.ice,
   ];
   const ifSources: Array<string | null | undefined> = [
     sources.supplierIf,
-    inv?.supplier_if,
+    mergedInv?.supplier_if,
+    invMetadataIds.ifFiscal,
     indexed?.ifFiscal,
     docHint?.ifFiscal,
+    byName?.ifFiscal,
   ];
-  if (!sources.sourceInvoiceId) {
-    iceSources.push(byName?.ice);
-    ifSources.push(byName?.ifFiscal);
-  }
 
   const supplierIce = resolveDgiIce(...iceSources);
   const supplierIf = resolveDgiIdentifiantFiscal(...ifSources);
@@ -484,7 +542,7 @@ export async function computeTvaPeriod(
     fetchCompanyScopedRows<SupplierRow>(
       db,
       'atlas_supplier_invoices',
-      'id, supplier_name, supplier_ice, supplier_if, invoice_number, invoice_date, status, validation_status, amount_ht, vat_amount, amount_ttc, vat_rate, payment_method, category, created_at, updated_at',
+      'id, supplier_name, supplier_ice, supplier_if, invoice_number, invoice_date, status, validation_status, amount_ht, vat_amount, amount_ttc, vat_rate, payment_method, category, metadata, document_id, source_document_id, created_at, updated_at',
       companyId,
       userId,
     ),
@@ -505,20 +563,25 @@ export async function computeTvaPeriod(
   ]);
 
   let supplierIndex = buildSupplierIdentityIndex(
-    supplierInvoices.map((row) => ({
-      id: String(row.id),
-      supplier_name: row.supplier_name,
-      supplier_ice: row.supplier_ice,
-      supplier_if: row.supplier_if,
-    })),
+    supplierInvoices.map((row) => {
+      const merged = mergeSupplierRowIdentity(row);
+      return {
+        id: String(row.id),
+        supplier_name: row.supplier_name,
+        supplier_ice: merged.supplier_ice,
+        supplier_if: merged.supplier_if,
+      };
+    }),
   );
   supplierIndex = await enrichSupplierIdentityIndexFromDocuments(db, companyId, userId, supplierIndex);
   const supplierById = new Map(supplierInvoices.map((row) => [String(row.id), row]));
-  const docHints = await loadDocumentSupplierHints(
-    db,
-    companyId,
-    suggestions.map((row) => row.source_document_id),
-  );
+  const linkedDocumentIds = [
+    ...suggestions.map((row) => row.source_document_id),
+    ...supplierInvoices.flatMap((row) =>
+      [row.document_id, row.source_document_id].filter((id): id is string => Boolean(id)),
+    ),
+  ];
+  const docHints = await loadDocumentSupplierHints(db, companyId, linkedDocumentIds);
 
   const lines: AtlasTvaLineItem[] = [];
   let tvaCollectee = 0;
@@ -568,14 +631,19 @@ export async function computeTvaPeriod(
 
     const amountHT = Number(row.amount_ht ?? 0);
     const vatAmount = supplierVatAmount(row);
-    const totalTTC = Number(row.amount_ttc ?? amountHT + vatAmount);
-    if (vatAmount <= 0 && amountHT <= 0) continue;
+    const purchaseAmounts = normalizeDgiReleveAmounts(
+      amountHT,
+      vatAmount,
+      row.amount_ttc != null ? Number(row.amount_ttc) : null,
+    );
+    if (purchaseAmounts.tva <= 0 && purchaseAmounts.mht <= 0) continue;
 
-    supplierTvaSum += vatAmount;
-    achatsHT += amountHT;
+    supplierTvaSum += purchaseAmounts.tva;
+    achatsHT += purchaseAmounts.mht;
     purchasesCount += 1;
     countedInvoiceIds.add(String(row.id));
 
+    const linkedDocId = row.document_id ?? row.source_document_id ?? null;
     const identity = resolveSupplierIdentityFromSources(
       {
         supplierIce: row.supplier_ice,
@@ -585,6 +653,7 @@ export async function computeTvaPeriod(
       },
       supplierIndex,
       supplierById,
+      linkedDocId ? docHints.get(String(linkedDocId)) : undefined,
     );
 
     lines.push({
@@ -593,9 +662,9 @@ export async function computeTvaPeriod(
       reference: String(row.invoice_number ?? row.id.slice(0, 8)),
       counterparty: identity.counterparty ?? String(row.supplier_name ?? ''),
       issueDate,
-      amountHT,
-      vatAmount,
-      totalTTC,
+      amountHT: purchaseAmounts.mht,
+      vatAmount: purchaseAmounts.tva,
+      totalTTC: purchaseAmounts.ttc,
       vatRate: row.vat_rate != null ? Number(row.vat_rate) : undefined,
       source: 'supplier_invoice',
       sourceInvoiceId: String(row.id),
@@ -619,16 +688,17 @@ export async function computeTvaPeriod(
 
     const vatAmount = Number(row.amount ?? 0);
     const amountHT = Number(row.base_ht ?? 0);
-    if (vatAmount <= 0) continue;
+    const suggestionAmounts = normalizeDgiReleveAmounts(amountHT, vatAmount, amountHT + vatAmount);
+    if (suggestionAmounts.tva <= 0) continue;
 
     const isDeductible = String(row.tva_type).toLowerCase() === 'deductible';
     if (isDeductible) {
-      suggestionDeductible += vatAmount;
-      achatsHT += amountHT;
+      suggestionDeductible += suggestionAmounts.tva;
+      achatsHT += suggestionAmounts.mht;
       purchasesCount += 1;
     } else {
-      tvaCollectee += vatAmount;
-      caHT += amountHT;
+      tvaCollectee += suggestionAmounts.tva;
+      caHT += suggestionAmounts.mht;
       salesCount += 1;
     }
 
@@ -650,9 +720,9 @@ export async function computeTvaPeriod(
       reference: String(row.invoice_number ?? row.source_document_id.slice(0, 8)),
       counterparty: suggestionIdentity.counterparty ?? String(row.supplier_name ?? 'Suggestion TVA'),
       issueDate,
-      amountHT,
-      vatAmount,
-      totalTTC: amountHT + vatAmount,
+      amountHT: suggestionAmounts.mht,
+      vatAmount: suggestionAmounts.tva,
+      totalTTC: suggestionAmounts.ttc,
       vatRate: row.rate != null ? Number(row.rate) : undefined,
       source: 'tva_suggestion',
       sourceInvoiceId: row.source_invoice_id ?? undefined,

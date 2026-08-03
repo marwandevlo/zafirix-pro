@@ -8,6 +8,7 @@ import {
   formatDgiIdentifiantFiscal,
   isDeductiblePurchaseLine,
   isDgiRegimePeriodConsistent,
+  isDgiReleveAmountConsistent,
   isValidDgiDateYmd,
   isValidDgiRegimeCode,
   resolveDgiPeriodMetadata,
@@ -43,6 +44,7 @@ export {
   isValidDgiRegimeCode,
   lookupSupplierIdentityByName,
   normalizeDgiRegimeCode,
+  normalizeDgiReleveAmounts,
   parseDgiPeriodFromKey,
   resolveDgiCompanyIdentifiers,
   resolveDgiIce,
@@ -104,6 +106,9 @@ function validateDgiReleveRowFields(row: DgiReleveDeductionRow): string | null {
   if (row.mp < 1 || row.mp > 6) return `Mode paiement invalide (facture ${row.num})`;
   if (!Number.isFinite(row.mht) || !Number.isFinite(row.tva) || !Number.isFinite(row.ttc)) {
     return `Montants invalides (facture ${row.num})`;
+  }
+  if (!isDgiReleveAmountConsistent(row.mht, row.tva, row.ttc)) {
+    return `Incohérence TTC/MHT/TVA (facture ${row.num}) — TTC doit être égal à MHT + TVA`;
   }
   return null;
 }
