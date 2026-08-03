@@ -87,7 +87,26 @@ export async function prepareStorageUploadSlot(
 
   const documentId = crypto.randomUUID();
   const safeName = sanitizeDocumentFilename(filename);
-  const storagePath = buildAtlasDocumentStoragePath(userId, companyId, documentId, safeName);
+  let storagePath: string;
+  try {
+    storagePath = buildAtlasDocumentStoragePath(userId, companyId, documentId, safeName);
+  } catch {
+    return {
+      ok: false,
+      code: 'storage_path_invalid',
+      message: 'Invalid storage path segments',
+      httpStatus: 400,
+    };
+  }
+
+  if (!parseAtlasDocumentStoragePath(storagePath)) {
+    return {
+      ok: false,
+      code: 'storage_path_invalid',
+      message: 'Generated storage path failed validation',
+      httpStatus: 500,
+    };
+  }
 
   try {
     const admin = supabase;

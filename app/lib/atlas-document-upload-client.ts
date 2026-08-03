@@ -7,6 +7,8 @@ import {
   ATLAS_DOCUMENTS_BUCKET,
   inferDocumentMimeType,
   isAllowedDocumentMime,
+  normalizeAtlasDocumentStoragePath,
+  parseAtlasDocumentStoragePath,
 } from '@/app/lib/atlas-document-storage';
 import { logUploadDiagnostic } from '@/app/lib/atlas-document-upload-diagnostics';
 import { formatStorageErrorForUi, parseSupabaseStorageError } from '@/app/lib/atlas-storage-error';
@@ -60,6 +62,58 @@ type PrepareResponse = {
   storagePath: string;
   bucket: string;
 };
+
+function idsEqualPath(a: string | null | undefined, b: string | null | undefined): boolean {
+  if (!a || !b) return false;
+  return a.trim().toLowerCase() === b.trim().toLowerCase();
+}
+
+/** Normalize prepare response path and ensure it matches register expectations. */
+function resolveRegisterStoragePath(
+  rawPath: string,
+  documentId: string,
+): { ok: true; storagePath: string } | { ok: false; body: DocumentUploadErrorBody } {
+  const storagePath = normalizeAtlasDocumentStoragePath(rawPath);
+  const parsed = parseAtlasDocumentStoragePath(storagePath);
+  if (!parsed) {
+    return {
+      ok: false,
+      body: {
+        error: 'storage_path_forbidden',
+        code: 'storage_path_forbidden',
+        step: 'prepare_response',
+        message: 'Chemin de stockage invalide renvoyé par le serveur.',
+      },
+    };
+  }
+  if (!idsEqualPath(parsed.documentId, documentId)) {
+    return {
+      ok: false,
+      body: {
+        error: 'storage_path_forbidden',
+        code: 'storage_path_forbidden',
+        step: 'prepare_response',
+        message: 'Identifiant document incohérent dans le chemin de stockage.',
+      },
+    };
+  }
+  if (segmentsCount(storagePath) < 4) {
+    return {
+      ok: false,
+      body: {
+        error: 'storage_path_forbidden',
+        code: 'storage_path_forbidden',
+        step: 'prepare_response',
+        message: 'Format de chemin attendu : utilisateur/société/document/fichier.',
+      },
+    };
+  }
+  return { ok: true, storagePath };
+}
+
+function segmentsCount(normalizedPath: string): number {
+  return normalizedPath.split('/').filter(Boolean).length;
+}
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => window.setTimeout(resolve, ms));
@@ -423,6 +477,12 @@ export async function uploadDocumentForOcr(
     };
   }
 
+  const resolvedPath = resolveRegisterStoragePath(prepareBody.storagePath, prepareBody.documentId);
+  if (!resolvedPath.ok) {
+    return { ok: false, status: 403, body: resolvedPath.body };
+  }
+  const storagePath = resolvedPath.storagePath;
+
   const bucket = prepareBody.bucket || ATLAS_DOCUMENTS_BUCKET;
 
   logUploadDiagnostic({
@@ -430,7 +490,7 @@ export async function uploadDocumentForOcr(
     step: 'client_storage_upload',
     companyId,
     documentId: prepareBody.documentId,
-    storagePath: prepareBody.storagePath,
+    storagePath,
     bucket,
     fileSize: uploadFile.size,
     mimeType: uploadMime,
@@ -439,7 +499,7 @@ export async function uploadDocumentForOcr(
   const storageResult = await uploadViaAuthenticatedClientWithRetry(
     uploadFile,
     uploadMime,
-    prepareBody.storagePath,
+    storagePath,
     bucket,
     companyId,
     prepareBody.documentId,
@@ -447,7 +507,7 @@ export async function uploadDocumentForOcr(
   );
 
   if (!storageResult.ok) {
-    await removeFailedStorageObject(prepareBody.storagePath);
+    await removeFailedStorageObject(storagePath);
     const status =
       storageResult.body.code === 'file_too_large'
         ? 413
@@ -476,7 +536,7 @@ export async function uploadDocumentForOcr(
         filename: uploadFile.name,
         mimeType: uploadMime,
         sizeBytes: uploadFile.size,
-        storagePath: prepareBody.storagePath,
+        storagePath,
         sha256Hash,
       }),
     },
@@ -485,7 +545,7 @@ export async function uploadDocumentForOcr(
   );
 
   if (!registerResult.ok) {
-    await removeFailedStorageObject(prepareBody.storagePath);
+    await removeFailedStorageObject(storagePath);
     const rawBody = registerResult.body as EnrichedDocumentUploadErrorBody;
     const regBody: DocumentUploadErrorBody = {
       ...rawBody,
@@ -506,7 +566,7 @@ export async function uploadDocumentForOcr(
         clientSessionUserId: clientAuth.data.user?.id,
         requestCompanyId: companyId,
         requestDocumentId: prepareBody.documentId,
-        requestStoragePath: prepareBody.storagePath,
+        requestStoragePath: storagePath,
       });
       regBody.message = presentation.message;
       regBody.userHint = presentation.hint;
@@ -515,7 +575,7 @@ export async function uploadDocumentForOcr(
       console.error('[atlas-documents/client] storage_path_forbidden', {
         companyId,
         documentId: prepareBody.documentId,
-        storagePath: prepareBody.storagePath,
+        storagePath,
         clientSessionUserId: clientAuth.data.user?.id,
         failureReason: presentation.failureReason,
         serverResponse: rawBody,
@@ -529,7 +589,7 @@ export async function uploadDocumentForOcr(
       step: 'register',
       companyId,
       documentId: prepareBody.documentId,
-      storagePath: prepareBody.storagePath,
+      storagePath,
       bucket,
       httpStatus: registerResult.status,
       errorCode: regBody.code,
@@ -542,7 +602,7 @@ export async function uploadDocumentForOcr(
 
   const registerBody = registerResult.data;
   if (!registerBody.document?.id) {
-    await removeFailedStorageObject(prepareBody.storagePath);
+    await removeFailedStorageObject(storagePath);
     return {
       ok: false,
       status: 500,
@@ -555,7 +615,7 @@ export async function uploadDocumentForOcr(
     step: 'register',
     companyId,
     documentId: registerBody.document.id,
-    storagePath: prepareBody.storagePath,
+    storagePath,
     bucket,
     fileSize: uploadFile.size,
     mimeType: uploadMime,

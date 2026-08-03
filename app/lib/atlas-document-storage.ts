@@ -56,7 +56,11 @@ export function documentUploadLimitExceededMessage(mime: string): string {
 
 export function sanitizeDocumentFilename(name: string): string {
   const base = name.split(/[/\\]/).pop() ?? 'document';
-  const cleaned = base.replace(/[^\w.\-() ]+/g, '_').trim();
+  const cleaned = base
+    .replace(/[^\w.\-() ]+/g, '_')
+    .replace(/\.{2,}/g, '.')
+    .replace(/^\.+/, '')
+    .trim();
   return cleaned.slice(0, 180) || 'document';
 }
 
@@ -125,10 +129,11 @@ export function normalizeAtlasDocumentStoragePath(storagePath: string): string {
  */
 export function parseAtlasDocumentStoragePath(storagePath: string): ParsedAtlasDocumentStoragePath | null {
   const normalized = normalizeAtlasDocumentStoragePath(storagePath);
-  if (!normalized || normalized.includes('..')) return null;
+  if (!normalized) return null;
 
   const segments = normalized.split('/').filter(Boolean);
-  if (segments.length < 3 || segments.some((segment) => !segment.trim())) return null;
+  if (segments.length < 3) return null;
+  if (segments.some((segment) => segment === '..' || segment === '.')) return null;
 
   if (segments.length >= 4) {
     const [userId, companyId, documentId, ...rest] = segments;
@@ -247,7 +252,14 @@ export function buildAtlasDocumentStoragePath(
   documentId: string,
   filename: string,
 ): string {
-  return `${normalizeIdSegment(userId)}/${normalizeIdSegment(companyId)}/${normalizeIdSegment(documentId)}/${sanitizeDocumentFilename(filename)}`;
+  const safeUserId = normalizeIdSegment(userId);
+  const safeCompanyId = normalizeIdSegment(companyId);
+  const safeDocumentId = normalizeIdSegment(documentId);
+  const safeName = sanitizeDocumentFilename(filename);
+  if (!safeUserId || !safeCompanyId || !safeDocumentId || !safeName) {
+    throw new Error('invalid_storage_path_segments');
+  }
+  return `${safeUserId}/${safeCompanyId}/${safeDocumentId}/${safeName}`;
 }
 
 export function buildAtlasDocumentWorkingStoragePath(

@@ -13,6 +13,7 @@ import {
   buildRegisterPathForbiddenLogPayload,
   logRegisterStoragePathForbidden,
 } from '@/app/lib/atlas-document-storage-path-debug';
+import { normalizeAtlasDocumentStoragePath } from '@/app/lib/atlas-document-storage';
 import { checkWorkspaceRateLimit, rateLimitResponse } from '@/app/lib/atlas-rate-limit';
 import { meterFeatureUsage } from '@/app/lib/atlas-usage-meter';
 import { ensureWorkspaceSubscription } from '@/app/lib/atlas-billing-server';
@@ -65,7 +66,7 @@ export async function POST(request: NextRequest) {
   const filename = String(body.filename ?? 'document').trim();
   const mimeType = String(body.mimeType ?? '').trim().toLowerCase();
   const sizeBytes = Number(body.sizeBytes ?? 0);
-  const storagePath = String(body.storagePath ?? '').trim();
+  const storagePath = normalizeAtlasDocumentStoragePath(String(body.storagePath ?? '').trim());
   const sha256Hash = body.sha256Hash ? String(body.sha256Hash).trim().toLowerCase() : undefined;
 
   if (!documentId || !isUuid(documentId)) {
