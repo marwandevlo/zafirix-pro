@@ -90,7 +90,7 @@ export async function runMoroccoComplianceAudit(
   const [companyRes, invRes, supRes, accRes, aeProfileRes, aeTurnoverRes] = await Promise.all([
     db
       .from('atlas_companies')
-      .select('id, ice, if_fiscal, rc, cnss, cnss_number, company_json, raison_sociale, name')
+      .select('id, ice, if_fiscal, rc, cnss_number, company_json, name, legal_name')
       .eq('id', companyId)
       .eq('user_id', userId)
       .maybeSingle(),
@@ -135,9 +135,9 @@ export async function runMoroccoComplianceAudit(
     (typeof companyJson.ice === 'string' && companyJson.ice) ||
     '';
   const cnss =
-    (typeof company?.cnss === 'string' && company.cnss) ||
     (typeof company?.cnss_number === 'string' && company.cnss_number) ||
     (typeof companyJson.cnss === 'string' && companyJson.cnss) ||
+    (typeof companyJson.cnss_number === 'string' && companyJson.cnss_number) ||
     '';
 
   if (!String(companyIce).trim()) {

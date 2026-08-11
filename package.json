@@ -11,6 +11,7 @@
     "apply:routing-migration": "node scripts/apply-routing-migration.mjs",
     "apply:production-migrations": "node scripts/apply-production-migrations.mjs",
     "verify:production": "node scripts/verify-production-readiness.mjs",
+    "simulate:journey": "node scripts/simulate-user-journey.mjs",
     "test:e2e": "playwright test",
     "test:e2e:ui": "playwright test --ui"
   },
