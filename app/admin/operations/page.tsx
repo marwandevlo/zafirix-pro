@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react';
 import AdminShell from '@/app/admin/_components/AdminShell';
 import {
-  Activity, AlertCircle, BarChart3, Database, Gauge, HeartPulse, Shield, Users,
+  Activity, AlertCircle, BarChart3, Database, Gauge, HeartPulse, Route, Shield, Users,
 } from 'lucide-react';
 
 type DepCheck = { name: string; status: string; latencyMs?: number; detail?: string };
@@ -24,22 +24,27 @@ type DashboardStats = {
   paymentRequests?: { pending?: number; paid?: number };
 };
 
+type JourneySummary = { pass: number; warn: number; fail: number };
+type JourneyCheck = { id: string; area: string; severity: string; title: string; detail?: string };
+
 export default function AdminOperationsPage() {
   const [deps, setDeps] = useState<DepCheck[]>([]);
   const [healthStatus, setHealthStatus] = useState('unknown');
   const [metrics, setMetrics] = useState<Metrics | null>(null);
   const [stats, setStats] = useState<DashboardStats | null>(null);
   const [auditCount, setAuditCount] = useState<number | null>(null);
+  const [journey, setJourney] = useState<{ ok: boolean; summary: JourneySummary; fails: JourneyCheck[] } | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     void (async () => {
       try {
-        const [depRes, metRes, statsRes, auditRes] = await Promise.all([
+        const [depRes, metRes, statsRes, auditRes, diagRes] = await Promise.all([
           fetch('/api/health/dependencies'),
           fetch('/api/health/metrics'),
           fetch('/api/admin/dashboard-stats'),
           fetch('/api/audit/stats'),
+          fetch('/api/admin/diagnose'),
         ]);
         const depJson = await depRes.json();
         setHealthStatus(String(depJson.status ?? 'unknown'));
@@ -54,6 +59,21 @@ export default function AdminOperationsPage() {
         if (auditRes.ok) {
           const auditJson = await auditRes.json();
           setAuditCount(typeof auditJson.total === 'number' ? auditJson.total : null);
+        }
+        if (diagRes.ok) {
+          const diagJson = await diagRes.json();
+          const report = diagJson.report as {
+            ok: boolean;
+            summary: JourneySummary;
+            checks: JourneyCheck[];
+          } | undefined;
+          if (report?.summary) {
+            setJourney({
+              ok: !!report.ok,
+              summary: report.summary,
+              fails: (report.checks ?? []).filter((c) => c.severity === 'fail').slice(0, 8),
+            });
+          }
         }
       } catch (e) {
         setError(e instanceof Error ? e.message : 'load_failed');
@@ -111,6 +131,41 @@ export default function AdminOperationsPage() {
             </div>
             <p className="text-3xl font-bold">{auditCount ?? '—'}</p>
           </div>
+        </div>
+
+        <div className="rounded-2xl border border-gray-200 bg-white p-5">
+          <div className="flex items-center justify-between gap-3 mb-3">
+            <div className="flex items-center gap-2 text-sm font-semibold text-gray-800">
+              <Route className="w-4 h-4 text-cyan-700" /> Journey diagnose (client + admin)
+            </div>
+            {journey ? (
+              <span
+                className={`text-xs font-bold px-2.5 py-1 rounded-full ${
+                  journey.ok ? 'bg-emerald-50 text-emerald-700' : 'bg-rose-50 text-rose-700'
+                }`}
+              >
+                {journey.summary.pass} pass · {journey.summary.warn} warn · {journey.summary.fail} fail
+              </span>
+            ) : (
+              <span className="text-xs text-gray-400">Chargement…</span>
+            )}
+          </div>
+          <p className="text-xs text-gray-500 mb-3">
+            Routes, tables usage/logistique, règles ICE/TVA, RPC quotas — via{' '}
+            <code className="text-[11px] bg-gray-50 px-1 rounded">/api/admin/diagnose</code>
+          </p>
+          {journey?.fails?.length ? (
+            <ul className="space-y-1.5 text-xs text-rose-700">
+              {journey.fails.map((f) => (
+                <li key={f.id}>
+                  ✗ [{f.area}] {f.title}
+                  {f.detail ? ` — ${f.detail}` : ''}
+                </li>
+              ))}
+            </ul>
+          ) : journey ? (
+            <p className="text-sm text-emerald-700 font-medium">Aucun échec dur détecté sur le parcours critique.</p>
+          ) : null}
         </div>
 
         <div className="grid lg:grid-cols-2 gap-6">
@@ -180,7 +235,9 @@ export default function AdminOperationsPage() {
 
         <p className="text-xs text-gray-400">
           Accès restreint administrateurs. Voir aussi{' '}
-          <a href="/admin/security" className="text-indigo-600 hover:underline">/admin/security</a>.
+          <a href="/admin/security" className="text-indigo-600 hover:underline">/admin/security</a>
+          {' · '}
+          CLI <code className="text-[11px]">npm run simulate:journey -- --db</code>.
         </p>
       </div>
     </AdminShell>
