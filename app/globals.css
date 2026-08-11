@@ -66,6 +66,15 @@ a,
   }
 }
 
+/* SaaS dashboard glass cards */
+.dash-glass {
+  background: rgba(255, 255, 255, 0.82);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid rgba(15, 31, 61, 0.08);
+  box-shadow: 0 1px 2px rgba(15, 31, 61, 0.04);
+}
+
 /* Prevent accidental horizontal scroll on module tables */
 .mobile-scroll-x {
   overflow-x: auto;

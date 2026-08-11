@@ -14,8 +14,7 @@ import { BrandWordmark } from '@/app/components/branding/BrandWordmark';
 import { ZafirixLogo } from '@/app/components/branding/ZafirixLogo';
 import {
   filterAtlasNavItemsForPath,
-  getCoreAtlasNavItems,
-  getZafirixEnterpriseNavItems,
+  getGroupedAtlasNavItems,
   resolveActiveAtlasNavId,
   type AtlasAppNavItem,
 } from '@/app/lib/atlas-app-nav';
@@ -147,8 +146,7 @@ export function AppSidebar({
     return showAdminNav ? base : base.filter((item) => item.id !== 'admin');
   }, [pathname, showAdminNav]);
 
-  const coreNavItems = useMemo(() => getCoreAtlasNavItems(visibleItems), [visibleItems]);
-  const enterpriseNavItems = useMemo(() => getZafirixEnterpriseNavItems(visibleItems), [visibleItems]);
+  const navGroups = useMemo(() => getGroupedAtlasNavItems(visibleItems), [visibleItems]);
 
   const activeId = useMemo(() => resolveActiveAtlasNavId(pathname, visibleItems), [pathname, visibleItems]);
 
@@ -244,17 +242,15 @@ export function AppSidebar({
         )}
       </div>
 
-      <nav className={`flex-1 px-3 py-4 overflow-y-auto ${isHome ? 'space-y-0.5' : 'space-y-1'}`}>
-        {coreNavItems.map(renderNavItem)}
-
-        {enterpriseNavItems.length > 0 && (
-          <div className={isHome ? 'mt-3 pt-3 border-t border-white/10 space-y-0.5' : 'mt-3 pt-3 border-t border-white/10 space-y-1'}>
-            <p className="px-3 pb-1.5 text-[10px] font-semibold uppercase tracking-wider text-white/35 select-none">
-              {t ? t('Modules Zafirix', 'وحدات زفيريكس') : 'Modules Zafirix'}
+      <nav className="flex-1 px-3 py-4 overflow-y-auto space-y-4">
+        {navGroups.map(({ group, items }) => (
+          <div key={group.id} className="space-y-0.5">
+            <p className="px-3 pb-1 text-[10px] font-semibold uppercase tracking-wider text-cyan-300/50 select-none">
+              {t ? t(group.labelFr, group.labelAr) : group.labelFr}
             </p>
-            {enterpriseNavItems.map(renderNavItem)}
+            {items.map(renderNavItem)}
           </div>
-        )}
+        ))}
 
         {children}
       </nav>

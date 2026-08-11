@@ -1,13 +1,34 @@
 'use client';
+
 import dynamic from 'next/dynamic';
 import { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import {
-  LayoutDashboard, FileText, Receipt, Calculator,
-  TrendingUp, Upload, Bell, ChevronRight,
-  AlertCircle, Brain,
-  ArrowUpRight, ArrowDownRight, Calendar, Globe,
-  Users, Zap, Shield, Menu, Package, Truck, Wallet, Gavel, Briefcase, UserRound,
+  LayoutDashboard,
+  FileText,
+  Receipt,
+  Calculator,
+  TrendingUp,
+  Upload,
+  Bell,
+  ChevronRight,
+  ChevronDown,
+  Brain,
+  ArrowUpRight,
+  ArrowDownRight,
+  Calendar,
+  Users,
+  Zap,
+  Shield,
+  Menu,
+  Package,
+  Truck,
+  Wallet,
+  Gavel,
+  Briefcase,
+  UserRound,
+  Plus,
+  Sparkles,
 } from 'lucide-react';
 import { listAtlasInvoices } from '@/app/lib/atlas-invoices-repository';
 import type { AtlasInvoice } from '@/app/types/atlas-invoice';
@@ -15,7 +36,6 @@ import { isOverdue, todayYmd } from '@/app/lib/atlas-dates';
 import { refreshAtlasUsageState } from '@/app/lib/atlas-usage-limits';
 import { isAtlasSupabaseDataEnabled } from '@/app/lib/atlas-data-source';
 import { GlobalSearchButton } from '@/app/components/search/GlobalSearchButton';
-import { UsageWidget } from '@/app/components/usage/UsageWidget';
 import { TrialUpgradeBanner } from '@/app/components/trial/TrialUpgradeBanner';
 import { TrialOnboardingChecklist } from '@/app/components/trial/TrialOnboardingChecklist';
 import { GettingStartedWidget } from '@/app/components/onboarding/GettingStartedWidget';
@@ -42,7 +62,6 @@ import { ExecutiveSummaryWidget } from '@/app/components/assistant/ExecutiveSumm
 import { CompanySwitcher } from '@/app/components/shell/CompanySwitcher';
 import { CompanyMasterExportMenu } from '@/app/components/company/CompanyMasterExportMenu';
 import { ConsolidatedDashboardWidget } from '@/app/components/cabinet/ConsolidatedDashboardWidget';
-import { SubscriptionWidget } from '@/app/components/billing/SubscriptionWidget';
 import { UsagePlanWidget } from '@/app/components/billing/UsagePlanWidget';
 import { DeadlineRadarWidget } from '@/app/components/dashboard/DeadlineRadarWidget';
 import { LegalCalendarWidget } from '@/app/components/dashboard/LegalCalendarWidget';
@@ -65,35 +84,77 @@ const DashboardIaSection = dynamic(
     })),
   {
     ssr: false,
-    loading: () => (
-      <div className="rounded-xl border border-gray-100 bg-white p-6 animate-pulse">
-        <div className="h-4 w-48 bg-gray-200 rounded" />
-        <div className="mt-4 grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-3">
-          {Array.from({ length: 6 }).map((_, i) => (
-            <div key={i} className="h-20 bg-gray-100 rounded-xl" />
-          ))}
-        </div>
-      </div>
-    ),
+    loading: () => <div className="dash-glass h-36 animate-pulse rounded-2xl" />,
   },
 );
 
-const modules = [
-  { id: 'tva', label: 'TVA', labelAr: 'الضريبة على القيمة المضافة', icon: Receipt, color: 'bg-blue-500', href: '/tva', deadline: '20 Mai', urgent: true },
-  { id: 'is', label: 'IS Fiscal', labelAr: 'الضريبة على الشركات', icon: Calculator, color: 'bg-purple-500', href: '/is', deadline: '31 Mars', urgent: false },
-  { id: 'ir', label: 'IR / Salaires', labelAr: 'الضريبة على الدخل', icon: TrendingUp, color: 'bg-green-500', href: '/ir', deadline: '30 Avril', urgent: false },
-  { id: 'factures', label: 'Factures', labelAr: 'الفواتير', icon: FileText, color: 'bg-amber-500', href: '/factures', deadline: null, urgent: false },
-  { id: 'inventaire', label: 'Inventaire', labelAr: 'المخزون', icon: Package, color: 'bg-teal-500', href: '/inventaire', deadline: null, urgent: false },
-  { id: 'logistique', label: 'Logistique', labelAr: 'اللوجستيك', icon: Truck, color: 'bg-slate-600', href: '/logistique', deadline: null, urgent: false },
-  { id: 'recouvrement', label: 'Recouvrement', labelAr: 'التحصيل', icon: Gavel, color: 'bg-red-600', href: '/recouvrement', deadline: null, urgent: false },
-  { id: 'caisse', label: 'Caisse', labelAr: 'الصندوق', icon: Wallet, color: 'bg-yellow-600', href: '/caisse', deadline: null, urgent: false },
-  { id: 'auto-entrepreneur', label: 'Auto-entrepreneur', labelAr: 'المقاول الذاتي', icon: Briefcase, color: 'bg-sky-600', href: '/auto-entrepreneur', deadline: null, urgent: false },
-  { id: 'personne-physique', label: 'Personne physique', labelAr: 'شخص ذاتي', icon: UserRound, color: 'bg-indigo-600', href: '/personne-physique', deadline: null, urgent: false },
-  { id: 'clients', label: 'Clients', labelAr: 'العملاء', icon: Users, color: 'bg-emerald-500', href: '/clients', deadline: null, urgent: false },
-  { id: 'comptabilite', label: 'Comptabilité', labelAr: 'المحاسبة', icon: LayoutDashboard, color: 'bg-cyan-500', href: '/comptabilite', deadline: null, urgent: false },
-  { id: 'documents', label: 'Documents IA', labelAr: 'وثائق الذكاء الاصطناعي', icon: Upload, color: 'bg-rose-500', href: '/documents', deadline: null, urgent: false },
-  { id: 'consultant', label: 'Consultant IA', labelAr: 'المستشار الذكي', icon: Brain, color: 'bg-indigo-500', href: '/consultant', deadline: null, urgent: false },
+type ModuleItem = {
+  id: string;
+  label: string;
+  labelAr: string;
+  icon: typeof FileText;
+  href: string;
+  urgent?: boolean;
+};
+
+type ModuleGroup = {
+  id: string;
+  titleFr: string;
+  titleAr: string;
+  items: ModuleItem[];
+};
+
+const MODULE_GROUPS: ModuleGroup[] = [
+  {
+    id: 'invoicing',
+    titleFr: 'Facturation & Comptabilité',
+    titleAr: 'الفوترة والمحاسبة',
+    items: [
+      { id: 'factures', label: 'Factures', labelAr: 'الفواتير', icon: FileText, href: '/factures' },
+      { id: 'comptabilite', label: 'Comptabilité', labelAr: 'المحاسبة', icon: LayoutDashboard, href: '/comptabilite' },
+      { id: 'clients', label: 'Clients', labelAr: 'العملاء', icon: Users, href: '/clients' },
+      { id: 'caisse', label: 'Caisse', labelAr: 'الصندوق', icon: Wallet, href: '/caisse' },
+      { id: 'documents', label: 'Documents IA', labelAr: 'وثائق ذكية', icon: Upload, href: '/documents' },
+      { id: 'recouvrement', label: 'Recouvrement', labelAr: 'التحصيل', icon: Gavel, href: '/recouvrement' },
+    ],
+  },
+  {
+    id: 'logistics',
+    titleFr: 'Logistique & COD',
+    titleAr: 'اللوجستيك والتحصيل',
+    items: [
+      { id: 'logistique', label: 'Logistique', labelAr: 'اللوجستيك', icon: Truck, href: '/logistique' },
+      { id: 'inventaire', label: 'Inventaire', labelAr: 'المخزون', icon: Package, href: '/inventaire' },
+    ],
+  },
+  {
+    id: 'business',
+    titleFr: 'Gestion métier',
+    titleAr: 'إدارة الأعمال',
+    items: [
+      { id: 'auto-entrepreneur', label: 'Auto-entrepreneur', labelAr: 'المقاول الذاتي', icon: Briefcase, href: '/auto-entrepreneur' },
+      { id: 'personne-physique', label: 'Personne physique', labelAr: 'شخص ذاتي', icon: UserRound, href: '/personne-physique' },
+      { id: 'tva', label: 'TVA', labelAr: 'TVA', icon: Receipt, href: '/tva', urgent: true },
+      { id: 'is', label: 'IS Fiscal', labelAr: 'IS', icon: Calculator, href: '/is' },
+      { id: 'ir', label: 'IR / Salaires', labelAr: 'IR', icon: TrendingUp, href: '/ir' },
+      { id: 'consultant', label: 'Consultant IA', labelAr: 'المستشار', icon: Brain, href: '/consultant' },
+    ],
+  },
 ];
+
+const QUICK_ACTIONS = [
+  { id: 'invoice', labelFr: 'Nouvelle facture', labelAr: 'فاتورة جديدة', href: '/factures', icon: FileText },
+  { id: 'shipment', labelFr: 'Nouvelle expédition', labelAr: 'شحنة جديدة', href: '/logistique', icon: Truck },
+  { id: 'expense', labelFr: 'Ajouter une dépense', labelAr: 'إضافة مصروف', href: '/comptabilite', icon: Wallet },
+  { id: 'audit', labelFr: 'Audit IA', labelAr: 'تدقيق ذكي', href: '/audit', icon: Sparkles },
+] as const;
+
+function statusLabel(status: AtlasInvoice['status'], t: (fr: string, ar: string) => string): string {
+  if (status === 'paid') return t('Payée', 'مدفوعة');
+  if (status === 'sent') return t('Envoyée', 'مرسلة');
+  if (status === 'draft') return t('Brouillon', 'مسودة');
+  return String(status);
+}
 
 export default function Home() {
   const router = useRouter();
@@ -104,8 +165,8 @@ export default function Home() {
   const [fiscalUrgentCount, setFiscalUrgentCount] = useState(0);
   const [deadlinesError, setDeadlinesError] = useState(false);
   const [notificationUnread, setNotificationUnread] = useState(0);
-  const [showNotifications, setShowNotifications] = useState(false);
-  const t = (fr: string, ar: string) => lang === 'fr' ? fr : ar;
+  const [moreOpen, setMoreOpen] = useState(false);
+  const t = (fr: string, ar: string) => (lang === 'fr' ? fr : ar);
 
   useEffect(() => {
     let cancelled = false;
@@ -123,7 +184,9 @@ export default function Home() {
         if (!cancelled) setDeadlinesError(true);
       }
     })();
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   useEffect(() => {
@@ -151,39 +214,78 @@ export default function Home() {
     const totalFacture = invoices.reduce((sum, inv) => sum + (inv.totalTTC || 0), 0);
     const unpaid = invoices.filter((inv) => inv.status !== 'paid');
     const overdue = unpaid.filter((inv) => isOverdue(inv.dueDate, false, now));
+    const paid = invoices.filter((inv) => inv.status === 'paid');
+    const paidAmount = paid.reduce((sum, inv) => sum + (inv.totalTTC || 0), 0);
     return {
       totalFacture,
       unpaidCount: unpaid.length,
       overdueCount: overdue.length,
       overdueAmount: overdue.reduce((sum, inv) => sum + (inv.totalTTC || 0), 0),
+      paidAmount,
+      pendingAmount: unpaid.reduce((sum, inv) => sum + (inv.totalTTC || 0), 0),
     };
   }, [invoices]);
 
-  const kpis = useMemo(() => ([
-    { label: "Chiffre d'affaires", labelAr: 'رقم الأعمال', value: formatMadAmountLabel(invoiceSummary.totalFacture), change: t('Factures enregistrées', 'فواتير مسجلة'), up: true, icon: TrendingUp, color: 'text-blue-600' },
-    { label: 'TVA', labelAr: 'TVA', value: '—', change: t('En cours de stabilisation', 'قيد الاستقرار'), up: true, icon: Receipt, color: 'text-slate-500' },
-    { label: 'Factures en attente', labelAr: 'فواتير معلقة', value: String(invoiceSummary.unpaidCount), change: `${invoiceSummary.overdueCount} ${t('en retard', 'متأخرة')}`, up: invoiceSummary.overdueCount === 0, icon: FileText, color: 'text-amber-600' },
-    {
-      label: 'Rappels fiscaux',
-      labelAr: 'تذكير ضريبي',
-      value: deadlinesError ? '!' : String(pendingFiscalCount),
-      change: deadlinesError
-        ? t('Échéances indisponibles', 'المواعيد غير متاحة')
-        : t('Radar échéances', 'رادار المواعيد'),
-      up: !deadlinesError && pendingFiscalCount === 0,
-      icon: Calendar,
-      color: deadlinesError ? 'text-red-600' : 'text-purple-600',
-    },
-  ]), [invoiceSummary, pendingFiscalCount, deadlinesError, lang]);
+  const recentInvoices = useMemo(() => {
+    return [...invoices]
+      .sort((a, b) => String(b.issueDate ?? '').localeCompare(String(a.issueDate ?? '')))
+      .slice(0, 8);
+  }, [invoices]);
+
+  const kpis = useMemo(
+    () => [
+      {
+        label: "Chiffre d'affaires",
+        labelAr: 'رقم الأعمال',
+        value: formatMadAmountLabel(invoiceSummary.totalFacture),
+        change: t('Factures enregistrées', 'فواتير مسجلة'),
+        up: true,
+        icon: TrendingUp,
+      },
+      {
+        label: 'Encaissé',
+        labelAr: 'المحصّل',
+        value: formatMadAmountLabel(invoiceSummary.paidAmount),
+        change: t('Factures payées', 'فواتير مدفوعة'),
+        up: true,
+        icon: Wallet,
+      },
+      {
+        label: 'À encaisser',
+        labelAr: 'المستحقات',
+        value: formatMadAmountLabel(invoiceSummary.pendingAmount),
+        change: `${invoiceSummary.overdueCount} ${t('en retard', 'متأخرة')}`,
+        up: invoiceSummary.overdueCount === 0,
+        icon: FileText,
+      },
+      {
+        label: 'Rappels fiscaux',
+        labelAr: 'تذكير ضريبي',
+        value: deadlinesError ? '!' : String(pendingFiscalCount),
+        change: deadlinesError
+          ? t('Échéances indisponibles', 'المواعيد غير متاحة')
+          : t('Radar échéances', 'رادار المواعيد'),
+        up: !deadlinesError && pendingFiscalCount === 0,
+        icon: Calendar,
+      },
+    ],
+    [invoiceSummary, pendingFiscalCount, deadlinesError, lang],
+  );
 
   const navigate = (href: string) => {
     setMenuOpen(false);
     router.push(href);
   };
 
-  return (
-    <div className="flex h-dvh bg-gray-50 overflow-hidden" dir={lang === 'ar' ? 'rtl' : 'ltr'}>
+  const dateLabel = new Date().toLocaleDateString(lang === 'fr' ? 'fr-MA' : 'ar-MA', {
+    weekday: 'long',
+    year: 'numeric',
+    month: 'long',
+    day: 'numeric',
+  });
 
+  return (
+    <div className="flex h-dvh bg-[#f4f6fa] overflow-hidden" dir={lang === 'ar' ? 'rtl' : 'ltr'}>
       <AppSidebarMobileOverlay open={menuOpen} onClose={() => setMenuOpen(false)} />
       <AppSidebar
         variant="home"
@@ -198,207 +300,434 @@ export default function Home() {
 
       <main className="flex-1 flex flex-col overflow-hidden min-w-0">
         <header
-          className="bg-white border-b border-gray-200 px-3 sm:px-4 lg:px-8 py-3 lg:py-4 flex items-center justify-between shrink-0"
+          className="bg-white/80 backdrop-blur-xl border-b border-[#0F1F3D]/10 px-3 sm:px-4 lg:px-8 py-3 lg:py-3.5 flex items-center justify-between shrink-0 z-20"
           style={{ paddingTop: 'max(0.75rem, env(safe-area-inset-top))' }}
         >
           <div className="flex items-center gap-2 sm:gap-3 min-w-0">
             <button
               type="button"
               onClick={() => setMenuOpen(true)}
-              className="lg:hidden min-h-11 min-w-11 inline-flex items-center justify-center rounded-xl hover:bg-gray-100"
+              className="lg:hidden min-h-11 min-w-11 inline-flex items-center justify-center rounded-xl hover:bg-slate-100"
               aria-label={t('Menu', 'القائمة')}
             >
-              <Menu size={22} className="text-gray-600" />
+              <Menu size={22} className="text-[#0F1F3D]" />
             </button>
             <div className="min-w-0">
-              <h1 className="text-base sm:text-lg lg:text-xl font-bold text-gray-800 truncate">{t('Tableau de bord', 'لوحة التحكم')}</h1>
-              <p className="text-xs text-gray-400 hidden sm:block">{new Date().toLocaleDateString(lang === 'fr' ? 'fr-MA' : 'ar-MA', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}</p>
+              <h1 className="text-base sm:text-lg font-bold text-[#0F1F3D] truncate">
+                {t('Tableau de bord', 'لوحة التحكم')}
+              </h1>
+              <p className="text-[11px] text-slate-400 hidden sm:block capitalize">{dateLabel}</p>
             </div>
           </div>
           <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
-            <CompanySwitcher className="hidden sm:block" />
+            <CompanySwitcher className="hidden md:block" />
             <CompanyMasterExportMenu />
-            <button
-              type="button"
-              onClick={() => navigate('/consultant')}
-              className="hidden sm:flex items-center gap-2 min-h-11 px-3 py-2 bg-indigo-50 text-indigo-600 rounded-xl text-sm font-medium hover:bg-indigo-100 transition-colors"
-            >
-              <Brain size={16} />
-              <span className="hidden md:inline">{t('Consultant IA', 'المستشار')}</span>
-            </button>
             <GlobalSearchButton />
             <button
               type="button"
-              onClick={() => setShowNotifications((v) => !v)}
-              className="relative min-h-11 min-w-11 inline-flex items-center justify-center rounded-xl hover:bg-gray-100"
+              onClick={() => setMoreOpen(true)}
+              className="relative min-h-11 min-w-11 inline-flex items-center justify-center rounded-xl hover:bg-slate-100"
               aria-label={t('Notifications', 'الإشعارات')}
             >
-              <Bell size={18} className="text-gray-500" />
+              <Bell size={18} className="text-slate-500" />
               {notificationUnread > 0 && (
-                <span className="absolute top-1 right-1 min-w-[0.5rem] h-2 px-0.5 bg-red-500 rounded-full text-[8px] text-white font-bold flex items-center justify-center">
-                  {notificationUnread > 9 ? '9+' : notificationUnread}
-                </span>
+                <span className="absolute top-1.5 right-1.5 min-w-[0.5rem] h-2 bg-rose-500 rounded-full" />
               )}
             </button>
-            <div className="flex items-center gap-2">
-              <div className={`w-2 h-2 rounded-full ${connected ? 'bg-green-500' : 'bg-red-500'}`}></div>
-              <div className="w-9 h-9 rounded-full bg-[#0F1F3D] flex items-center justify-center text-white text-sm font-bold">M</div>
+            <div className="flex items-center gap-2 pl-1">
+              <div className={`w-2 h-2 rounded-full ${connected ? 'bg-emerald-500' : 'bg-rose-500'}`} />
+              <div className="w-9 h-9 rounded-full bg-[#0F1F3D] flex items-center justify-center text-cyan-300 text-sm font-bold">
+                Z
+              </div>
             </div>
           </div>
         </header>
 
-        <div className="flex-1 overflow-y-auto overscroll-contain px-3 sm:px-4 lg:px-8 py-4 lg:py-6 space-y-4 lg:space-y-6 pb-mobile-nav" data-tour="dashboard">
-          <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-xs sm:text-sm text-amber-950 flex gap-2 items-start">
-            <Shield size={16} className="shrink-0 mt-0.5 text-amber-700" aria-hidden />
-            <p>
-              {t(
-                'Les échéances fiscales affichées ici sont indicatives. Les modules TVA, IS et déclarations sont en cours de stabilisation — validez toute obligation avec votre expert-comptable.',
-                'المواعيد الضريبية المعروضة هنا إشارية. وحدات TVA وIS والتصاريح قيد الاستقرار — يُرجى التحقق مع خبيركم المحاسبي.',
-              )}
-            </p>
-          </div>
+        <div
+          className="flex-1 overflow-y-auto overscroll-contain px-3 sm:px-4 lg:px-8 py-4 lg:py-6 space-y-5 lg:space-y-6 pb-mobile-nav"
+          data-tour="dashboard"
+        >
+          {/* ── 1. Welcome / status ─────────────────────────────────────── */}
+          <section
+            className="relative overflow-hidden rounded-2xl border border-white/10 text-white shadow-lg"
+            style={{
+              background: 'linear-gradient(135deg, #0F1F3D 0%, #163057 55%, #0e7490 130%)',
+            }}
+          >
+            <div
+              className="pointer-events-none absolute inset-0 opacity-50"
+              style={{
+                backgroundImage:
+                  'radial-gradient(circle at 12% 20%, rgba(34,211,238,0.28), transparent 40%), radial-gradient(circle at 90% 80%, rgba(14,116,144,0.35), transparent 45%)',
+              }}
+            />
+            <div className="relative p-4 sm:p-6 flex flex-col lg:flex-row lg:items-center gap-4 lg:gap-6">
+              <div className="min-w-0 flex-1">
+                <p className="text-[11px] font-semibold uppercase tracking-widest text-cyan-300/90">
+                  Zafirixpro
+                </p>
+                <h2 className="mt-1 text-xl sm:text-2xl font-bold tracking-tight">
+                  {t('Bienvenue sur votre cockpit', 'مرحباً بك في لوحة القيادة')}
+                </h2>
+                <p className="mt-1.5 text-sm text-white/65 max-w-xl">
+                  {t(
+                    'Suivez quotas, trésorerie et actions prioritaires — conçus pour mobile et desktop.',
+                    'تابع الحصص والخزينة والإجراءات ذات الأولوية — للجوال وسطح المكتب.',
+                  )}
+                </p>
+              </div>
+              <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 sm:gap-3 w-full lg:w-auto">
+                <div className="sm:min-w-[200px] rounded-xl bg-white/10 backdrop-blur border border-white/15 p-2">
+                  <CompanySwitcher className="w-full" />
+                </div>
+                <div className="flex gap-2">
+                  <div className="flex-1 sm:flex-none rounded-xl bg-white/10 backdrop-blur border border-white/15 px-3 py-2.5 min-h-11">
+                    <p className="text-[10px] text-white/50 uppercase tracking-wide">
+                      {t('Statut', 'الحالة')}
+                    </p>
+                    <p className="text-sm font-semibold text-cyan-200">
+                      {connected ? t('Connecté', 'متصل') : t('Hors ligne', 'غير متصل')}
+                    </p>
+                  </div>
+                  <div className="flex-1 sm:flex-none rounded-xl bg-white/10 backdrop-blur border border-white/15 px-3 py-2.5 min-h-11">
+                    <p className="text-[10px] text-white/50 uppercase tracking-wide">
+                      {t('Alertes', 'تنبيهات')}
+                    </p>
+                    <p className="text-sm font-semibold">
+                      {invoiceSummary.overdueCount + pendingFiscalCount}
+                    </p>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </section>
+
           <ReferralPostOnboardingModal lang={lang} />
           <TrialUpgradeBanner />
           <DemoModeBanner lang={lang} />
-          <GettingStartedWidget lang={lang} />
-          <OnboardingChecklistWidget lang={lang} />
-          <SmartRecommendationsWidget lang={lang} />
-          <ReferralDashboardCard lang={lang} />
-          <TrialOnboardingChecklist lang={lang} />
-          <DashboardFunnelInsights lang={lang} pendingDeclarationsCount={pendingFiscalCount} />
+
           {invoiceSummary.overdueCount > 0 && (
-            <div className="bg-red-50 border border-red-200 rounded-xl p-4 text-sm text-red-800">
-              <span className="font-semibold">Alertes paiements :</span> {invoiceSummary.overdueCount} facture(s) en retard — {formatMadAmountLabel(invoiceSummary.overdueAmount)}.
+            <div className="dash-glass rounded-2xl border-rose-200/80 bg-rose-50/90 px-4 py-3 text-sm text-rose-900">
+              <span className="font-semibold">{t('Paiements en retard', 'مدفوعات متأخرة')} — </span>
+              {invoiceSummary.overdueCount} {t('facture(s)', 'فاتورة')} ·{' '}
+              {formatMadAmountLabel(invoiceSummary.overdueAmount)}
             </div>
           )}
-          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 lg:gap-4">
-            {kpis.map((kpi, i) => (
-              <div key={i} className="bg-white rounded-xl p-4 lg:p-5 shadow-sm border border-gray-100">
-                <div className="flex items-start justify-between mb-2">
-                  <p className="text-xs text-gray-400 font-medium leading-tight">{t(kpi.label, kpi.labelAr)}</p>
-                  <div className={`w-7 h-7 rounded-lg bg-gray-50 flex items-center justify-center ${kpi.color} shrink-0`}>
-                    <kpi.icon size={14} />
+
+          {/* ── 2. Usage & KPIs ─────────────────────────────────────────── */}
+          <section className="grid grid-cols-1 xl:grid-cols-5 gap-4 lg:gap-5">
+            <div className="xl:col-span-2">
+              <UsagePlanWidget />
+            </div>
+            <div className="xl:col-span-3 grid grid-cols-2 gap-3 sm:gap-4">
+              {kpis.map((kpi) => (
+                <div
+                  key={kpi.label}
+                  className="dash-glass rounded-2xl p-4 sm:p-5 flex flex-col justify-between min-h-[7.5rem]"
+                >
+                  <div className="flex items-start justify-between gap-2">
+                    <p className="text-[11px] sm:text-xs text-slate-500 font-medium leading-tight">
+                      {t(kpi.label, kpi.labelAr)}
+                    </p>
+                    <div className="w-8 h-8 rounded-lg bg-[#0F1F3D]/5 text-[#0F1F3D] flex items-center justify-center shrink-0">
+                      <kpi.icon size={15} />
+                    </div>
+                  </div>
+                  <p className="text-lg sm:text-2xl font-bold text-[#0F1F3D] mt-2 tabular-nums truncate">
+                    {kpi.value}
+                  </p>
+                  <div className="flex items-center gap-1 mt-1">
+                    {kpi.up ? (
+                      <ArrowUpRight size={12} className="text-emerald-500" />
+                    ) : (
+                      <ArrowDownRight size={12} className="text-rose-500" />
+                    )}
+                    <span className={`text-[11px] ${kpi.up ? 'text-emerald-600' : 'text-rose-600'}`}>
+                      {kpi.change}
+                    </span>
                   </div>
                 </div>
-                <p className="text-xl lg:text-2xl font-bold text-gray-800">{kpi.value}</p>
-                <div className="flex items-center gap-1 mt-1">
-                  {kpi.up ? <ArrowUpRight size={11} className="text-green-500" /> : <ArrowDownRight size={11} className="text-red-500" />}
-                  <span className={`text-xs ${kpi.up ? 'text-green-500' : 'text-red-500'}`}>{kpi.change}</span>
+              ))}
+            </div>
+          </section>
+
+          {/* ── 3. Quick actions ────────────────────────────────────────── */}
+          <section>
+            <div className="flex items-center justify-between mb-3">
+              <h2 className="text-sm font-semibold text-[#0F1F3D]">
+                {t('Actions rapides', 'إجراءات سريعة')}
+              </h2>
+            </div>
+            <div className="grid grid-cols-2 lg:grid-cols-4 gap-2.5 sm:gap-3">
+              {QUICK_ACTIONS.map((action) => (
+                <button
+                  key={action.id}
+                  type="button"
+                  onClick={() => navigate(action.href)}
+                  className="dash-glass group rounded-2xl p-3.5 sm:p-4 min-h-[4.75rem] text-left hover:border-cyan-300/60 hover:shadow-md active:scale-[0.99] transition-all"
+                >
+                  <div className="flex items-center gap-3">
+                    <div className="w-10 h-10 rounded-xl bg-[#0F1F3D] text-cyan-300 flex items-center justify-center shrink-0 group-hover:bg-[#163057]">
+                      <action.icon size={18} />
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <p className="text-sm font-semibold text-[#0F1F3D] leading-snug">
+                        {t(action.labelFr, action.labelAr)}
+                      </p>
+                      <p className="text-[11px] text-slate-400 mt-0.5 flex items-center gap-1">
+                        <Plus size={10} /> {t('Ouvrir', 'فتح')}
+                      </p>
+                    </div>
+                  </div>
+                </button>
+              ))}
+            </div>
+          </section>
+
+          {/* ── 4. Recent activity ──────────────────────────────────────── */}
+          <section className="dash-glass rounded-2xl overflow-hidden">
+            <div className="px-4 sm:px-5 py-3.5 border-b border-slate-100/80 flex items-center justify-between gap-2">
+              <div>
+                <h2 className="text-sm font-semibold text-[#0F1F3D]">
+                  {t('Activité récente', 'النشاط الأخير')}
+                </h2>
+                <p className="text-[11px] text-slate-400">
+                  {t('Dernières factures', 'آخر الفواتير')}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => navigate('/factures')}
+                className="text-xs font-semibold text-cyan-700 hover:underline min-h-10 px-2"
+              >
+                {t('Tout voir', 'عرض الكل')} →
+              </button>
+            </div>
+
+            {/* Mobile cards */}
+            <div className="lg:hidden divide-y divide-slate-100">
+              {recentInvoices.length === 0 ? (
+                <p className="p-5 text-sm text-slate-400">{t('Aucune facture pour le moment.', 'لا توجد فواتير بعد.')}</p>
+              ) : (
+                recentInvoices.map((inv) => (
+                  <button
+                    key={String(inv.id)}
+                    type="button"
+                    onClick={() => navigate('/factures')}
+                    className="w-full text-left p-4 hover:bg-slate-50/80 active:bg-slate-50 min-h-16"
+                  >
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <p className="text-sm font-semibold text-[#0F1F3D] truncate">
+                          {inv.clientName || t('Client', 'عميل')}
+                        </p>
+                        <p className="text-[11px] text-slate-400 mt-0.5">
+                          {inv.number} · {inv.issueDate}
+                        </p>
+                      </div>
+                      <div className="text-right shrink-0">
+                        <p className="text-sm font-bold text-[#0F1F3D] tabular-nums">
+                          {formatMadAmountLabel(inv.totalTTC || 0)}
+                        </p>
+                        <p className="text-[10px] text-slate-500 mt-0.5">{statusLabel(inv.status, t)}</p>
+                      </div>
+                    </div>
+                  </button>
+                ))
+              )}
+            </div>
+
+            {/* Desktop table */}
+            <div className="hidden lg:block overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead className="bg-slate-50/80 text-slate-500 text-left text-xs">
+                  <tr>
+                    <th className="px-5 py-3 font-semibold">{t('N°', 'الرقم')}</th>
+                    <th className="px-5 py-3 font-semibold">{t('Client', 'العميل')}</th>
+                    <th className="px-5 py-3 font-semibold">{t('Date', 'التاريخ')}</th>
+                    <th className="px-5 py-3 font-semibold">{t('Statut', 'الحالة')}</th>
+                    <th className="px-5 py-3 font-semibold text-right">{t('Montant', 'المبلغ')}</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {recentInvoices.length === 0 ? (
+                    <tr>
+                      <td colSpan={5} className="px-5 py-8 text-slate-400 text-center">
+                        {t('Aucune facture pour le moment.', 'لا توجد فواتير بعد.')}
+                      </td>
+                    </tr>
+                  ) : (
+                    recentInvoices.map((inv) => (
+                      <tr
+                        key={String(inv.id)}
+                        className="border-t border-slate-100 hover:bg-slate-50/70 cursor-pointer"
+                        onClick={() => navigate('/factures')}
+                      >
+                        <td className="px-5 py-3 font-medium text-[#0F1F3D]">{inv.number}</td>
+                        <td className="px-5 py-3 text-slate-700">{inv.clientName}</td>
+                        <td className="px-5 py-3 text-slate-500">{inv.issueDate}</td>
+                        <td className="px-5 py-3">
+                          <span className="inline-flex rounded-lg bg-slate-100 px-2 py-0.5 text-[11px] font-semibold text-slate-600">
+                            {statusLabel(inv.status, t)}
+                          </span>
+                        </td>
+                        <td className="px-5 py-3 text-right font-semibold tabular-nums text-[#0F1F3D]">
+                          {formatMadAmountLabel(inv.totalTTC || 0)}
+                        </td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </section>
+
+          {/* ── Module groups ───────────────────────────────────────────── */}
+          <section className="space-y-4">
+            <div className="flex items-center justify-between">
+              <h2 className="text-sm font-semibold text-[#0F1F3D]">
+                {t('Modules', 'الوحدات')}
+              </h2>
+              <span className="text-[11px] text-slate-400">
+                {MODULE_GROUPS.reduce((n, g) => n + g.items.length, 0)} {t('raccourcis', 'اختصارات')}
+              </span>
+            </div>
+            {MODULE_GROUPS.map((group) => (
+              <div key={group.id} className="dash-glass rounded-2xl p-4 sm:p-5">
+                <h3 className="text-xs font-bold uppercase tracking-wider text-cyan-800/70 mb-3">
+                  {t(group.titleFr, group.titleAr)}
+                </h3>
+                <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2 sm:gap-2.5">
+                  {group.items.map((m) => (
+                    <button
+                      key={m.id}
+                      type="button"
+                      onClick={() => navigate(m.href)}
+                      className="relative rounded-xl border border-slate-100 bg-white/70 p-3 min-h-[4.25rem] text-left hover:border-cyan-200 hover:shadow-sm active:scale-[0.99] transition-all"
+                    >
+                      {m.urgent ? (
+                        <span className="absolute top-2 right-2 w-1.5 h-1.5 bg-rose-400 rounded-full animate-pulse" />
+                      ) : null}
+                      <div className="w-8 h-8 rounded-lg bg-[#0F1F3D] text-cyan-300 flex items-center justify-center mb-2">
+                        <m.icon size={15} />
+                      </div>
+                      <p className="text-xs font-semibold text-[#0F1F3D] leading-snug line-clamp-2">
+                        {t(m.label, m.labelAr)}
+                      </p>
+                    </button>
+                  ))}
                 </div>
               </div>
             ))}
-          </div>
+          </section>
 
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 lg:gap-6">
+          {/* Deadlines strip */}
+          <section className="grid grid-cols-1 lg:grid-cols-2 gap-4 lg:gap-5">
             <DeadlineRadarWidget lang={lang} />
             <LegalCalendarWidget lang={lang} />
+          </section>
 
-            <div className="lg:col-span-1">
-              <div className="flex items-center justify-between mb-3">
-                <h2 className="font-semibold text-gray-700 text-sm">{t('Modules', 'الوحدات')}</h2>
-                <span className="text-xs text-gray-400">{modules.length} {t('modules', 'وحدات')}</span>
+          {/* Onboarding / growth (secondary) */}
+          <div className="space-y-4">
+            <GettingStartedWidget lang={lang} />
+            <OnboardingChecklistWidget lang={lang} />
+            <SmartRecommendationsWidget lang={lang} />
+            <ReferralDashboardCard lang={lang} />
+            <TrialOnboardingChecklist lang={lang} />
+            <DashboardFunnelInsights lang={lang} pendingDeclarationsCount={pendingFiscalCount} />
+          </div>
+
+          {/* Collapsible deeper insights */}
+          <section className="dash-glass rounded-2xl overflow-hidden">
+            <button
+              type="button"
+              onClick={() => setMoreOpen((v) => !v)}
+              className="w-full flex items-center justify-between gap-3 px-4 sm:px-5 py-4 min-h-14 text-left hover:bg-slate-50/50"
+            >
+              <div>
+                <p className="text-sm font-semibold text-[#0F1F3D]">
+                  {t('Insights & outils avancés', 'رؤى وأدوات متقدمة')}
+                </p>
+                <p className="text-[11px] text-slate-400">
+                  {t('Notifications, banque, IA, audit…', 'إشعارات، بنك، ذكاء، تدقيق…')}
+                </p>
               </div>
-              <div className="grid grid-cols-2 gap-2 lg:gap-3">
-                {modules.map(m => (
-                  <button key={m.id} onClick={() => navigate(m.href)}
-                    className="bg-white rounded-xl p-3 lg:p-4 shadow-sm border border-gray-100 hover:border-blue-200 hover:shadow-md transition-all text-left group relative overflow-hidden min-h-[4.5rem] active:scale-[0.99]">
-                    {m.urgent && <span className="absolute top-2 right-2 w-2 h-2 bg-red-400 rounded-full animate-pulse"></span>}
-                    <div className="flex items-center gap-2 lg:gap-3">
-                      <div className={`w-9 h-9 lg:w-9 lg:h-9 ${m.color} rounded-lg flex items-center justify-center shrink-0`}>
-                        <m.icon size={16} className="text-white" />
-                      </div>
-                      <div className="flex-1 min-w-0">
-                        <p className="font-semibold text-gray-800 text-xs lg:text-sm truncate">{t(m.label, m.labelAr)}</p>
-                        {m.deadline && <p className="text-xs text-red-500 mt-0.5 hidden lg:block">⏰ {m.deadline}</p>}
-                      </div>
-                      <ChevronRight size={12} className="text-gray-300 group-hover:text-blue-400 shrink-0 hidden lg:block" />
+              <ChevronDown
+                size={18}
+                className={`text-slate-400 shrink-0 transition-transform ${moreOpen ? 'rotate-180' : ''}`}
+              />
+            </button>
+            {moreOpen ? (
+              <div className="border-t border-slate-100 p-4 sm:p-5 space-y-4 lg:space-y-5">
+                <div className="rounded-xl border border-amber-200/80 bg-amber-50/90 px-4 py-3 text-xs text-amber-950 flex gap-2 items-start">
+                  <Shield size={14} className="shrink-0 mt-0.5 text-amber-700" aria-hidden />
+                  <p>
+                    {t(
+                      'Les échéances fiscales sont indicatives — validez avec votre expert-comptable.',
+                      'المواعيد الضريبية إشارية — يُرجى التحقق مع خبيركم المحاسبي.',
+                    )}
+                  </p>
+                </div>
+
+                <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+                    <div className="lg:col-span-2">
+                      <NotificationCenterWidget onUnreadChange={setNotificationUnread} />
                     </div>
-                  </button>
-                ))}
+                    <AuditorPassWidget />
+                  </div>
+
+                <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+                  <div className="lg:col-span-2">
+                    <AlertCenterWidget />
+                  </div>
+                  <LegalContractsWidget />
+                </div>
+
+                <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+                  <LiasseReadinessWidget />
+                  <ReconciliationWidget />
+                  <BankAlertCenter compact />
+                </div>
+                <PayrollDashboardSection />
+                <ConsolidatedDashboardWidget />
+                <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+                  <AIInsightsWidget />
+                  <FiscalClosingAssistantWidget />
+                  <ExecutiveSummaryWidget />
+                </div>
+                <DashboardIaSection />
+                <AuditStatsWidget />
               </div>
+            ) : null}
+          </section>
 
-              <div className="mt-3 grid grid-cols-3 gap-2 lg:gap-3">
-                <button onClick={() => window.open('https://www.tax.gov.ma', '_blank')} className="flex items-center gap-2 p-2.5 bg-blue-50 rounded-xl border border-blue-100 hover:bg-blue-100 transition-colors">
-                  <Shield size={14} className="text-blue-500 shrink-0" />
-                  <div className="min-w-0">
-                    <p className="text-xs font-semibold text-blue-700 truncate">DGI · SIMPL</p>
-                    <p className="text-xs text-blue-400 hidden lg:block">{t('Portail fiscal', 'الضرائب')}</p>
-                  </div>
-                </button>
-                <button onClick={() => window.open('https://www.cnss.ma', '_blank')} className="flex items-center gap-2 p-2.5 bg-green-50 rounded-xl border border-green-100 hover:bg-green-100 transition-colors">
-                  <Users size={14} className="text-green-500 shrink-0" />
-                  <div className="min-w-0">
-                    <p className="text-xs font-semibold text-green-700">CNSS</p>
-                    <p className="text-xs text-green-400 hidden lg:block">{t('Sécurité sociale', 'الضمان')}</p>
-                  </div>
-                </button>
-                <button onClick={() => navigate('/consultant')} className="flex items-center gap-2 p-2.5 bg-indigo-50 rounded-xl border border-indigo-100 hover:bg-indigo-100 transition-colors">
-                  <Zap size={14} className="text-indigo-500 shrink-0" />
-                  <div className="min-w-0">
-                    <p className="text-xs font-semibold text-indigo-700 truncate">{t('Conseil IA', 'مستشار')}</p>
-                    <p className="text-xs text-indigo-400 hidden lg:block">{t('Question', 'سؤال')}</p>
-                  </div>
-                </button>
-              </div>
-            </div>
-          </div>
-
-          {/* ── Notifications + Auditor pass ─────────────────────────────── */}
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 lg:gap-6">
-            <div className={showNotifications ? 'lg:col-span-2' : 'lg:col-span-2'}>
-              <NotificationCenterWidget onUnreadChange={setNotificationUnread} />
-            </div>
-            <AuditorPassWidget />
-          </div>
-
-          {/* ── Alert Center + Legal + Audit ────────────────────────────── */}
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 lg:gap-6">
-            <div className="lg:col-span-2">
-              <AlertCenterWidget />
-            </div>
-            <div className="lg:col-span-1">
-              <LegalContractsWidget />
-            </div>
-          </div>
-
-          {/* ── Banking & Payroll ─────────────────────────────────────────── */}
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 lg:gap-6">
-            <LiasseReadinessWidget />
-            <ReconciliationWidget />
-            <BankAlertCenter compact />
-          </div>
-          <PayrollDashboardSection />
-
-          {/* ── Subscription + Utilisation & Forfait ─────────────────────── */}
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 lg:gap-6">
-            <SubscriptionWidget />
-            <UsagePlanWidget />
-          </div>
-
-          {/* ── Cabinet consolidated (Phase 14) ─────────────────────────── */}
-          <ConsolidatedDashboardWidget />
-
-          {/* ── AI Insights + Closing + Executive (Phase 13) ──────────────── */}
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 lg:gap-6">
-            <AIInsightsWidget />
-            <FiscalClosingAssistantWidget />
-            <ExecutiveSummaryWidget />
-          </div>
-
-          {/* ── Documents IA — Validation KPIs + Queue ───────────────────── */}
-          <DashboardIaSection />
-
-          {/* ── Audit Activity + Usage ─────────────────────────────────── */}
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 lg:gap-6">
-            <div className="lg:col-span-1">
-              <UsageWidget />
-            </div>
-            <div className="lg:col-span-2">
-              <AuditStatsWidget />
-            </div>
+          <div className="flex flex-wrap gap-2 pb-2">
+            <button
+              type="button"
+              onClick={() => window.open('https://www.tax.gov.ma', '_blank')}
+              className="inline-flex items-center gap-2 min-h-11 px-3 rounded-xl border border-slate-200 bg-white text-xs font-semibold text-slate-600 hover:bg-slate-50"
+            >
+              <Shield size={14} className="text-cyan-600" /> DGI · SIMPL
+            </button>
+            <button
+              type="button"
+              onClick={() => window.open('https://www.cnss.ma', '_blank')}
+              className="inline-flex items-center gap-2 min-h-11 px-3 rounded-xl border border-slate-200 bg-white text-xs font-semibold text-slate-600 hover:bg-slate-50"
+            >
+              <Users size={14} className="text-emerald-600" /> CNSS
+            </button>
+            <button
+              type="button"
+              onClick={() => navigate('/consultant')}
+              className="inline-flex items-center gap-2 min-h-11 px-3 rounded-xl border border-slate-200 bg-white text-xs font-semibold text-slate-600 hover:bg-slate-50"
+            >
+              <Zap size={14} className="text-indigo-500" /> {t('Conseil IA', 'مستشار')}
+              <ChevronRight size={12} />
+            </button>
           </div>
         </div>
       </main>
+
       <MobileBottomNav onOpenMenu={() => setMenuOpen(true)} />
       <GuidedTourEngine lang={lang} autoStart />
       <FeedbackWidget lang={lang} />

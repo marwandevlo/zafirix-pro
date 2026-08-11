@@ -180,6 +180,124 @@ export function getCoreAtlasNavItems(items: AtlasAppNavItem[]): AtlasAppNavItem[
   return items.filter((item) => !ZAFIRIX_ENTERPRISE_NAV_ID_SET.has(item.id));
 }
 
+/** Sidebar / dashboard module groups for enterprise IA. */
+export type AtlasNavGroupId =
+  | 'overview'
+  | 'invoicing_accounting'
+  | 'logistics_cod'
+  | 'business'
+  | 'fiscal_ai'
+  | 'platform';
+
+export type AtlasNavGroup = {
+  id: AtlasNavGroupId;
+  labelFr: string;
+  labelAr: string;
+  itemIds: AtlasNavItemId[];
+};
+
+export const ATLAS_NAV_GROUPS: AtlasNavGroup[] = [
+  {
+    id: 'overview',
+    labelFr: 'Vue d’ensemble',
+    labelAr: 'نظرة عامة',
+    itemIds: ['dashboard', 'companies', 'cabinet', 'setup', 'help'],
+  },
+  {
+    id: 'invoicing_accounting',
+    labelFr: 'Facturation & Comptabilité',
+    labelAr: 'الفوترة والمحاسبة',
+    itemIds: [
+      'factures',
+      'clients',
+      'comptabilite',
+      'banque',
+      'caisse',
+      'immobilisations',
+      'recouvrement',
+      'documents',
+      'validation',
+    ],
+  },
+  {
+    id: 'logistics_cod',
+    labelFr: 'Logistique & COD',
+    labelAr: 'اللوجستيك والتحصيل',
+    itemIds: ['logistique', 'inventaire', 'commissions', 'courrier'],
+  },
+  {
+    id: 'business',
+    labelFr: 'Gestion métier',
+    labelAr: 'إدارة الأعمال',
+    itemIds: [
+      'auto-entrepreneur',
+      'personne-physique',
+      'rh',
+      'juridique',
+      'contrats',
+      'gouvernance',
+      'satisfaction-client',
+      'etude',
+      'rapports',
+    ],
+  },
+  {
+    id: 'fiscal_ai',
+    labelFr: 'Fiscalité & IA',
+    labelAr: 'الضرائب والذكاء',
+    itemIds: [
+      'tva',
+      'is',
+      'ir',
+      'liasse',
+      'calendrier-fiscal',
+      'simulateur-fiscal',
+      'consultant',
+      'assistant',
+      'audit',
+      'agents',
+      'smart-generator',
+      'briefing-ceo',
+      'auditor-pass',
+    ],
+  },
+  {
+    id: 'platform',
+    labelFr: 'Compte & plateforme',
+    labelAr: 'الحساب والمنصة',
+    itemIds: ['billing', 'subscription', 'pricing', 'settings', 'admin'],
+  },
+];
+
+export function getGroupedAtlasNavItems(items: AtlasAppNavItem[]): {
+  group: AtlasNavGroup;
+  items: AtlasAppNavItem[];
+}[] {
+  const byId = new Map(items.map((item) => [item.id, item]));
+  const used = new Set<AtlasNavItemId>();
+  const grouped = ATLAS_NAV_GROUPS.map((group) => {
+    const groupItems = group.itemIds
+      .map((id) => byId.get(id))
+      .filter((item): item is AtlasAppNavItem => !!item);
+    groupItems.forEach((item) => used.add(item.id));
+    return { group, items: groupItems };
+  }).filter((g) => g.items.length > 0);
+
+  const leftovers = items.filter((item) => !used.has(item.id));
+  if (leftovers.length > 0) {
+    grouped.push({
+      group: {
+        id: 'platform',
+        labelFr: 'Autres',
+        labelAr: 'أخرى',
+        itemIds: leftovers.map((i) => i.id),
+      },
+      items: leftovers,
+    });
+  }
+  return grouped;
+}
+
 /** Full module list for the sidebar on every app route (single source of truth: `ATLAS_APP_NAV_ITEMS` order). */
 const ALL_ATLAS_NAV_IDS: AtlasNavItemId[] = ATLAS_APP_NAV_ITEMS.map((item) => item.id);
 
