@@ -67,6 +67,7 @@ import { DeadlineRadarWidget } from '@/app/components/dashboard/DeadlineRadarWid
 import { LegalCalendarWidget } from '@/app/components/dashboard/LegalCalendarWidget';
 import { NotificationCenterWidget } from '@/app/components/dashboard/NotificationCenterWidget';
 import { AuditorPassWidget } from '@/app/components/dashboard/AuditorPassWidget';
+import { MoroccoComplianceAuditWidget } from '@/app/components/dashboard/MoroccoComplianceAuditWidget';
 import { fetchDashboardDeadlinesShared } from '@/app/lib/dashboard-deadlines-client';
 
 const ReferralPostOnboardingModal = dynamic(
@@ -146,7 +147,7 @@ const QUICK_ACTIONS = [
   { id: 'invoice', labelFr: 'Nouvelle facture', labelAr: 'فاتورة جديدة', href: '/factures', icon: FileText },
   { id: 'shipment', labelFr: 'Nouvelle expédition', labelAr: 'شحنة جديدة', href: '/logistique', icon: Truck },
   { id: 'expense', labelFr: 'Ajouter une dépense', labelAr: 'إضافة مصروف', href: '/comptabilite', icon: Wallet },
-  { id: 'audit', labelFr: 'Audit IA', labelAr: 'تدقيق ذكي', href: '/audit', icon: Sparkles },
+  { id: 'audit', labelFr: 'Audit fiscal Maroc', labelAr: 'تدقيق ضريبي', href: '#morocco-audit', icon: Sparkles },
 ] as const;
 
 function statusLabel(status: AtlasInvoice['status'], t: (fr: string, ar: string) => string): string {
@@ -274,6 +275,10 @@ export default function Home() {
 
   const navigate = (href: string) => {
     setMenuOpen(false);
+    if (href.startsWith('#')) {
+      document.getElementById(href.slice(1))?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      return;
+    }
     router.push(href);
   };
 
@@ -483,6 +488,11 @@ export default function Home() {
               ))}
             </div>
           </section>
+
+          {/* ── Audit & Conformité Maroc ──────────────────────────────── */}
+          <div id="morocco-audit">
+            <MoroccoComplianceAuditWidget lang={lang} />
+          </div>
 
           {/* ── 4. Recent activity ──────────────────────────────────────── */}
           <section className="dash-glass rounded-2xl overflow-hidden">

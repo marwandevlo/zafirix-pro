@@ -8,6 +8,7 @@ import { ExportMenu } from '@/app/components/ExportMenu';
 import type { ExportColumn } from '@/app/components/ExportMenu';
 import { FiscalCompliancePanel } from '@/app/components/compliance/FiscalCompliancePanel';
 import { AuditorPassWidget } from '@/app/components/dashboard/AuditorPassWidget';
+import { MoroccoComplianceAuditWidget } from '@/app/components/dashboard/MoroccoComplianceAuditWidget';
 import { getActiveCompanyDbRowId } from '@/app/lib/atlas-active-company';
 import { isAtlasSupabaseDataEnabled } from '@/app/lib/atlas-data-source';
 
@@ -134,6 +135,7 @@ export default function AuditPage() {
         </header>
 
         <div className="p-6 space-y-4 max-w-5xl">
+          <MoroccoComplianceAuditWidget />
           <FiscalCompliancePanel fiscalYear={fiscalYear} />
           {loading ? (
             <Loader2 className="animate-spin text-violet-500 mx-auto" size={28} />
