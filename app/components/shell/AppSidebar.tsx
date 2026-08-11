@@ -4,7 +4,6 @@ import { useEffect, useMemo, useState } from 'react';
 import { usePathname, useRouter } from 'next/navigation';
 import {
   ArrowLeft,
-  Building2,
   Globe,
   LogIn,
   LogOut,
@@ -217,13 +216,8 @@ export function AppSidebar({
       <div className="px-6 py-5 border-b border-white/10 flex items-center justify-between gap-2">
         {isHome ? (
           <>
-            <div className="flex items-center gap-3 min-w-0">
-              <div className="w-9 h-9 bg-amber-400 rounded-xl flex items-center justify-center shrink-0">
-                <Building2 size={20} className="text-[#0F1F3D]" />
-              </div>
-              <div className="min-w-0">
-                <ZafirixLogo size="sm" subtitle subtitleText="ZAFIRIX GROUP · المغرب" subtitleClassName="text-white/40" />
-              </div>
+            <div className="min-w-0 flex-1">
+              <ZafirixLogo size="sm" subtitle subtitleText="ZAFIRIX GROUP · المغرب" subtitleClassName="text-white/40" />
             </div>
             <button type="button" onClick={() => setMenuOpen?.(false)} className="lg:hidden min-h-11 min-w-11 inline-flex items-center justify-center text-white/50 hover:text-white" aria-label="Fermer le menu">
               <X size={20} />
