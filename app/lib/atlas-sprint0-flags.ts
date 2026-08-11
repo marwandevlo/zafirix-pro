@@ -25,9 +25,16 @@ export function isClientPortalBridgeEnabled(): boolean {
   return true;
 }
 
-/** Server-side demo portal code (default 1234). */
+/**
+ * Server-side demo portal code.
+ * Default `1234` only in development / when demo mode is explicitly enabled.
+ * Production never falls back to a hardcoded PIN.
+ */
 export function clientPortalDemoCode(): string {
-  return process.env.CLIENT_PORTAL_DEMO_CODE?.trim() || '1234';
+  const configured = process.env.CLIENT_PORTAL_DEMO_CODE?.trim();
+  if (configured) return configured;
+  if (isClientPortalDemoEnabled()) return '1234';
+  return '';
 }
 
 /** localStorage-based admin role — development only; never trusted in production builds. */

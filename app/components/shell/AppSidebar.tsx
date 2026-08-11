@@ -164,9 +164,9 @@ export function AppSidebar({
 
   const navButtonClass = (item: AtlasAppNavItem, isActive: boolean) => {
     const base = isHome
-      ? 'w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm transition-all group'
-      : 'w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-all';
-    if (!isActive) return `${base} text-white/50 hover:bg-white/10 hover:text-white`;
+      ? 'w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm transition-all group min-h-11'
+      : 'w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm transition-all min-h-11';
+    if (!isActive) return `${base} text-white/50 hover:bg-white/10 hover:text-white active:bg-white/15`;
     if (consultantModuleAccent && item.id === 'consultant') {
       return `${base} bg-indigo-500/25 text-indigo-100 border border-indigo-400/30`;
     }
@@ -210,29 +210,36 @@ export function AppSidebar({
     ? `fixed lg:relative inset-y-0 left-0 z-50 w-64 bg-[#0F1F3D] flex flex-col shrink-0 shadow-xl transform transition-transform duration-300 ${
         menuOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'
       }`
-    : 'w-60 bg-[#1B2A4A] flex flex-col shrink-0';
+    : `fixed lg:relative inset-y-0 left-0 z-50 w-60 bg-[#1B2A4A] flex flex-col shrink-0 shadow-xl transform transition-transform duration-300 ${
+        menuOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'
+      }`;
 
   return (
     <aside className={asideClass}>
-      <div className={`px-6 py-5 border-b border-white/10 ${isHome ? 'flex items-center justify-between' : ''}`}>
+      <div className="px-6 py-5 border-b border-white/10 flex items-center justify-between gap-2">
         {isHome ? (
           <>
-            <div className="flex items-center gap-3">
-              <div className="w-9 h-9 bg-amber-400 rounded-xl flex items-center justify-center">
+            <div className="flex items-center gap-3 min-w-0">
+              <div className="w-9 h-9 bg-amber-400 rounded-xl flex items-center justify-center shrink-0">
                 <Building2 size={20} className="text-[#0F1F3D]" />
               </div>
-              <div>
+              <div className="min-w-0">
                 <ZafirixLogo size="sm" subtitle subtitleText="ZAFIRIX GROUP · المغرب" subtitleClassName="text-white/40" />
               </div>
             </div>
-            <button type="button" onClick={() => setMenuOpen?.(false)} className="lg:hidden text-white/50 hover:text-white">
+            <button type="button" onClick={() => setMenuOpen?.(false)} className="lg:hidden min-h-11 min-w-11 inline-flex items-center justify-center text-white/50 hover:text-white" aria-label="Fermer le menu">
               <X size={20} />
             </button>
           </>
         ) : (
           <>
-            <BrandWordmark size="md" />
-            <p className="text-white/40 text-xs">ZAFIRIX GROUP</p>
+            <div className="min-w-0">
+              <BrandWordmark size="md" />
+              <p className="text-white/40 text-xs">ZAFIRIX GROUP</p>
+            </div>
+            <button type="button" onClick={() => setMenuOpen?.(false)} className="lg:hidden min-h-11 min-w-11 inline-flex items-center justify-center text-white/50 hover:text-white" aria-label="Fermer le menu">
+              <X size={20} />
+            </button>
           </>
         )}
       </div>

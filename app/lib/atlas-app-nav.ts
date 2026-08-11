@@ -34,6 +34,8 @@ import {
   GitCompare,
   KeyRound,
   ScrollText,
+  UserRound,
+  Briefcase,
 } from 'lucide-react';
 
 export type AtlasNavItemId =
@@ -70,6 +72,8 @@ export type AtlasNavItemId =
   | 'contrats'
   | 'briefing-ceo'
   | 'auditor-pass'
+  | 'auto-entrepreneur'
+  | 'personne-physique'
   | 'is'
   | 'liasse'
   | 'ir'
@@ -118,6 +122,8 @@ export const ATLAS_APP_NAV_ITEMS: AtlasAppNavItem[] = [
   { id: 'courrier', label: 'Courrier', labelAr: 'البريد', icon: Mail, href: '/courrier' },
   { id: 'satisfaction-client', label: 'Satisfaction client', labelAr: 'رضا العملاء', icon: MessageSquareHeart, href: '/satisfaction-client' },
   { id: 'caisse', label: 'Caisse', labelAr: 'الصندوق', icon: Wallet, href: '/caisse' },
+  { id: 'auto-entrepreneur', label: 'Auto-entrepreneur', labelAr: 'المقاول الذاتي', icon: Briefcase, href: '/auto-entrepreneur' },
+  { id: 'personne-physique', label: 'Personne physique', labelAr: 'شخص ذاتي', icon: UserRound, href: '/personne-physique' },
   { id: 'juridique', label: 'Juridique', labelAr: 'القانونية', icon: Scale, href: '/juridique' },
   { id: 'gouvernance', label: 'Gouvernance & CA', labelAr: 'الحوكمة', icon: ScrollText, href: '/gouvernance' },
   { id: 'auditor-pass', label: 'Pass auditeur', labelAr: 'تصريح المدقق', icon: KeyRound, href: '/auditor' },
@@ -148,6 +154,8 @@ export const ZAFIRIX_ENTERPRISE_NAV_IDS: AtlasNavItemId[] = [
   'caisse',
   'logistique',
   'recouvrement',
+  'auto-entrepreneur',
+  'personne-physique',
   'contrats',
   'calendrier-fiscal',
   'simulateur-fiscal',

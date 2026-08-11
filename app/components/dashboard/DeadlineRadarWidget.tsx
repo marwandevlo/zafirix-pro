@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import { AlertCircle, CheckCircle, Clock, Globe, Loader2, Radar } from 'lucide-react';
 import { getActiveCompanyDbRowId } from '@/app/lib/atlas-active-company';
 import { onCompanySwitched } from '@/app/lib/atlas-company-switch-event';
+import { fetchDashboardDeadlinesShared } from '@/app/lib/dashboard-deadlines-client';
 import type { FiscalDeadline, FiscalDeadlineSeverity } from '@/app/types/atlas-fiscal-calendar';
 
 type Props = {
@@ -23,6 +24,7 @@ export function DeadlineRadarWidget({ lang = 'fr', compact = false, maxItems = 6
   const router = useRouter();
   const t = (fr: string, ar: string) => (lang === 'fr' ? fr : ar);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [deadlines, setDeadlines] = useState<FiscalDeadline[]>([]);
   const [counts, setCounts] = useState({ red: 0, orange: 0, green: 0, total: 0 });
 
@@ -30,17 +32,21 @@ export function DeadlineRadarWidget({ lang = 'fr', compact = false, maxItems = 6
     let cancelled = false;
     const load = async (companyId?: string | null) => {
       setLoading(true);
+      setError(null);
       try {
-        const qs = companyId ? `?companyId=${encodeURIComponent(companyId)}` : '';
-        const res = await fetch(`/api/dashboard/deadlines${qs}`, { credentials: 'include' });
-        if (!res.ok || cancelled) return;
-        const data = (await res.json()) as {
-          deadlines?: FiscalDeadline[];
-          counts?: typeof counts;
-        };
+        const data = await fetchDashboardDeadlinesShared(companyId);
+        if (cancelled) return;
+        if (!data) {
+          setError(t('Impossible de charger les échéances', 'تعذر تحميل المواعيد'));
+          setDeadlines([]);
+          setCounts({ red: 0, orange: 0, green: 0, total: 0 });
+          return;
+        }
+        setDeadlines((data.deadlines as FiscalDeadline[] | undefined) ?? []);
+        setCounts(data.counts ?? { red: 0, orange: 0, green: 0, total: 0 });
+      } catch {
         if (!cancelled) {
-          setDeadlines(data.deadlines ?? []);
-          setCounts(data.counts ?? { red: 0, orange: 0, green: 0, total: 0 });
+          setError(t('Impossible de charger les échéances', 'تعذر تحميل المواعيد'));
         }
       } finally {
         if (!cancelled) setLoading(false);
@@ -52,7 +58,7 @@ export function DeadlineRadarWidget({ lang = 'fr', compact = false, maxItems = 6
     })();
     const off = onCompanySwitched((cid) => { void load(cid); });
     return () => { cancelled = true; off(); };
-  }, []);
+  }, [lang]);
 
   const visible = deadlines.slice(0, maxItems);
 
@@ -79,6 +85,8 @@ export function DeadlineRadarWidget({ lang = 'fr', compact = false, maxItems = 6
         <div className="flex justify-center py-8 text-gray-400">
           <Loader2 size={18} className="animate-spin" />
         </div>
+      ) : error ? (
+        <p className="text-xs text-red-500 p-4">{error}</p>
       ) : (
         <div className={`p-3 space-y-2 ${compact ? 'max-h-64 overflow-y-auto' : ''}`}>
           {visible.map((d) => {

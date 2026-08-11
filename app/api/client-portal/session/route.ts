@@ -3,7 +3,7 @@ import { atlasDataBackend } from '@/app/lib/atlas-data-source';
 import { getPortalBaseUrl, getPublicAppUrl } from '@/app/lib/atlas-app-url';
 import { resolveClientPortalSession } from '@/app/lib/atlas-client-portal';
 import { buildClientPortalPath } from '@/app/lib/atlas-client-portal-links';
-import { isClientPortalBridgeEnabled, clientPortalDemoCode } from '@/app/lib/atlas-sprint0-flags';
+import { isClientPortalBridgeEnabled, clientPortalDemoCode, isClientPortalDemoEnabled } from '@/app/lib/atlas-sprint0-flags';
 import { getSupabaseServiceRoleClient } from '@/app/lib/supabase-admin';
 
 export const runtime = 'nodejs';
@@ -46,15 +46,16 @@ export async function POST(request: NextRequest) {
 
 /** GET — portal activation status (health check). */
 export async function GET() {
-  const demoCode = clientPortalDemoCode();
-  const portalPath = buildClientPortalPath(demoCode);
+  const demoEnabled = isClientPortalDemoEnabled();
+  const demoCode = demoEnabled ? clientPortalDemoCode() : '';
+  const portalPath = demoCode ? buildClientPortalPath(demoCode) : undefined;
   return NextResponse.json({
     enabled: isClientPortalBridgeEnabled(),
     backend: atlasDataBackend(),
     appOrigin: getPublicAppUrl(),
     portalOrigin: getPortalBaseUrl(),
     portalEntryPath: '/portal',
-    demoPortalPath: process.env.NODE_ENV === 'development' ? portalPath : undefined,
-    demoCode: process.env.NODE_ENV === 'development' ? demoCode : undefined,
+    demoPortalPath: process.env.NODE_ENV === 'development' && demoEnabled ? portalPath : undefined,
+    demoCode: process.env.NODE_ENV === 'development' && demoEnabled ? demoCode : undefined,
   });
 }

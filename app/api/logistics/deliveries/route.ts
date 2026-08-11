@@ -1,6 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { requireAtlasSupabaseSession } from '@/app/lib/atlas-api-session';
-import { requireApiCompanyAccess } from '@/app/lib/atlas-api-company-guard';
+import {
+  isMissingRelationshipError,
+  isMissingTableError,
+  requireApiCompanyAccess,
+} from '@/app/lib/atlas-api-company-guard';
 import {
   apiBadRequest,
   apiErrorMessageFr,
@@ -47,6 +51,121 @@ function mapDeliveryRow(row: DeliveryRow, extras?: {
   });
 }
 
+type AdminClient = ReturnType<typeof getSupabaseServiceRoleClient>;
+
+/** Prefer nested embeds; fall back to plain rows when FK/schema cache is incomplete. */
+async function queryDeliveries(
+  admin: AdminClient,
+  opts: { companyId: string; userId: string; invoiceId: string | null },
+): Promise<{ rows: DeliveryRow[]; warning?: string; error?: { message: string } }> {
+  let embedded = admin
+    .from('zafirix_deliveries')
+    .select(`
+      *,
+      zafirix_delivery_partners ( name, tracking_url_template ),
+      atlas_invoices ( invoice_json )
+    `)
+    .eq('company_id', opts.companyId)
+    .eq('user_id', opts.userId)
+    .order('created_at', { ascending: false })
+    .limit(100);
+
+  if (opts.invoiceId) embedded = embedded.eq('invoice_id', opts.invoiceId);
+
+  const embeddedResult = await embedded;
+  if (!embeddedResult.error) {
+    return { rows: (embeddedResult.data ?? []) as DeliveryRow[] };
+  }
+
+  const msg = embeddedResult.error.message;
+  console.warn('[logistics/deliveries] embed query failed, trying plain select:', msg);
+
+  // Relationship / missing partner table → still serve BL list without joins.
+  if (isMissingRelationshipError(msg) || isMissingTableError(msg)) {
+    let plain = admin
+      .from('zafirix_deliveries')
+      .select('*')
+      .eq('company_id', opts.companyId)
+      .eq('user_id', opts.userId)
+      .order('created_at', { ascending: false })
+      .limit(100);
+    if (opts.invoiceId) plain = plain.eq('invoice_id', opts.invoiceId);
+
+    const plainResult = await plain;
+    if (plainResult.error) {
+      return { rows: [], error: plainResult.error };
+    }
+
+    return {
+      rows: (plainResult.data ?? []) as DeliveryRow[],
+    };
+  }
+
+  return { rows: [], error: embeddedResult.error };
+}
+
+async function loadDeliveryExtras(
+  admin: AdminClient,
+  deliveryIds: string[],
+): Promise<{
+  eventsByDelivery: Map<string, ReturnType<typeof rowToTrackingEvent>[]>;
+  reconsByDelivery: Map<string, ReturnType<typeof rowToCodReconciliation>[]>;
+}> {
+  const eventsByDelivery = new Map<string, ReturnType<typeof rowToTrackingEvent>[]>();
+  const reconsByDelivery = new Map<string, ReturnType<typeof rowToCodReconciliation>[]>();
+
+  if (deliveryIds.length === 0) {
+    return { eventsByDelivery, reconsByDelivery };
+  }
+
+  const [eventsRes, reconsRes] = await Promise.all([
+    admin
+      .from('zafirix_shipment_tracking_events')
+      .select('*')
+      .in('delivery_id', deliveryIds)
+      .order('recorded_at', { ascending: false }),
+    admin
+      .from('zafirix_cod_reconciliations')
+      .select('*')
+      .in('delivery_id', deliveryIds)
+      .order('reconciled_at', { ascending: false }),
+  ]);
+
+  if (eventsRes.error) {
+    if (!isMissingTableError(eventsRes.error.message)) {
+      console.warn('[logistics/deliveries] tracking events:', eventsRes.error.message);
+    }
+  } else {
+    for (const event of eventsRes.data ?? []) {
+      const deliveryId = String((event as Record<string, unknown>).delivery_id ?? '');
+      if (!deliveryId) continue;
+      const list = eventsByDelivery.get(deliveryId) ?? [];
+      if (list.length < 20) {
+        list.push(rowToTrackingEvent(event as Record<string, unknown>));
+        eventsByDelivery.set(deliveryId, list);
+      }
+    }
+  }
+
+  if (reconsRes.error) {
+    if (!isMissingTableError(reconsRes.error.message)) {
+      console.warn('[logistics/deliveries] COD reconciliations:', reconsRes.error.message);
+    }
+  } else {
+    for (const recon of reconsRes.data ?? []) {
+      const deliveryId = String((recon as Record<string, unknown>).delivery_id ?? '');
+      if (!deliveryId) continue;
+      const list = reconsByDelivery.get(deliveryId) ?? [];
+      if (list.length < 5) {
+        list.push(rowToCodReconciliation(recon as Record<string, unknown>));
+        reconsByDelivery.set(deliveryId, list);
+      }
+    }
+  }
+
+  return { eventsByDelivery, reconsByDelivery };
+}
+
 export async function GET(request: NextRequest) {
   const session = await requireAtlasSupabaseSession(request);
   if (!session.ok) return apiUnauthorized();
@@ -59,48 +178,29 @@ export async function GET(request: NextRequest) {
   const access = await requireApiCompanyAccess(admin, session.userId, companyId);
   if (!access.ok) return apiForbidden(apiErrorMessageFr(access.error));
 
-  let q = admin
-    .from('zafirix_deliveries')
-    .select(`
-      *,
-      zafirix_delivery_partners ( name, tracking_url_template ),
-      atlas_invoices ( invoice_json )
-    `)
-    .eq('company_id', access.companyId)
-    .eq('user_id', session.userId)
-    .order('created_at', { ascending: false })
-    .limit(100);
+  const { rows, error } = await queryDeliveries(admin, {
+    companyId: access.companyId,
+    userId: session.userId,
+    invoiceId: params.get('invoiceId'),
+  });
 
-  const invoiceId = params.get('invoiceId');
-  if (invoiceId) q = q.eq('invoice_id', invoiceId);
-
-  const { data, error } = await q;
   if (error) return mapDbError(error, { deliveries: [] });
 
   const includeEvents = params.get('includeEvents') === '1';
-  const deliveries = await Promise.all(
-    (data ?? []).map(async (raw) => {
-      const row = raw as DeliveryRow;
-      if (!includeEvents) return mapDeliveryRow(row);
+  if (!includeEvents || rows.length === 0) {
+    return NextResponse.json({
+      ok: true,
+      deliveries: rows.map((row) => mapDeliveryRow(row)),
+    });
+  }
 
-      const { data: events } = await admin
-        .from('zafirix_shipment_tracking_events')
-        .select('*')
-        .eq('delivery_id', row.id)
-        .order('recorded_at', { ascending: false })
-        .limit(20);
+  const deliveryIds = rows.map((row) => String(row.id));
+  const { eventsByDelivery, reconsByDelivery } = await loadDeliveryExtras(admin, deliveryIds);
 
-      const { data: recons } = await admin
-        .from('zafirix_cod_reconciliations')
-        .select('*')
-        .eq('delivery_id', row.id)
-        .order('reconciled_at', { ascending: false })
-        .limit(5);
-
-      return mapDeliveryRow(row, {
-        trackingEvents: (events ?? []).map((e) => rowToTrackingEvent(e as Record<string, unknown>)),
-        codReconciliations: (recons ?? []).map((r) => rowToCodReconciliation(r as Record<string, unknown>)),
-      });
+  const deliveries = rows.map((row) =>
+    mapDeliveryRow(row, {
+      trackingEvents: eventsByDelivery.get(String(row.id)) ?? [],
+      codReconciliations: reconsByDelivery.get(String(row.id)) ?? [],
     }),
   );
 
@@ -133,15 +233,38 @@ export async function POST(request: NextRequest) {
   const access = await requireApiCompanyAccess(admin, session.userId, body.companyId);
   if (!access.ok) return apiForbidden(apiErrorMessageFr(access.error));
 
+  const {
+    checkZafirixUsage,
+    isZafirixQuotaError,
+    quotaErrorMessageFr,
+  } = await import('@/app/lib/zafirix-usage-server');
+  const shipmentQuota = await checkZafirixUsage(admin, session.userId, access.companyId, 'shipments', 1);
+  if (!shipmentQuota.allowed) {
+    return NextResponse.json(
+      {
+        ok: false,
+        error: 'quota_exceeded',
+        message: shipmentQuota.messageFr ?? 'Quota d’expéditions atteint.',
+        meter: 'shipments',
+        suggestedAddons: shipmentQuota.suggestedAddons ?? [],
+        upgradeTo: shipmentQuota.upgradeTo ?? null,
+      },
+      { status: 429 },
+    );
+  }
+
   let partnerName: string | null = body.carrier?.trim() ?? null;
   let partnerTemplate: string | null = null;
   if (body.partnerId) {
-    const { data: partner } = await admin
+    const { data: partner, error: partnerErr } = await admin
       .from('zafirix_delivery_partners')
       .select('name, tracking_url_template')
       .eq('id', body.partnerId)
       .eq('user_id', session.userId)
       .maybeSingle();
+    if (partnerErr && !isMissingTableError(partnerErr.message)) {
+      console.warn('[logistics/deliveries] partner lookup:', partnerErr.message);
+    }
     if (partner) {
       partnerName = String(partner.name);
       partnerTemplate = (partner.tracking_url_template as string | null) ?? null;
@@ -175,27 +298,68 @@ export async function POST(request: NextRequest) {
     if (json?.totalTTC) codAmount = Number(json.totalTTC);
   }
 
-  const { data, error } = await admin
-    .from('zafirix_deliveries')
-    .insert({
-      user_id: session.userId,
-      company_id: access.companyId,
-      invoice_id: body.invoiceId ?? null,
-      partner_id: body.partnerId ?? null,
-      waybill_number: body.waybillNumber.trim(),
-      tracking_id: trackingId,
-      carrier: partnerName,
-      cod_amount: codAmount,
-      recipient_name: body.recipientName?.trim() ?? null,
-      recipient_phone: body.recipientPhone?.trim() ?? null,
-      tracking_url: trackingUrl,
-      notes: body.notes?.trim() ?? null,
-      status: 'pending',
-    })
-    .select('*')
-    .single();
+  const basePayload: Record<string, unknown> = {
+    user_id: session.userId,
+    company_id: access.companyId,
+    invoice_id: body.invoiceId ?? null,
+    waybill_number: body.waybillNumber.trim(),
+    carrier: partnerName,
+    cod_amount: codAmount,
+    recipient_name: body.recipientName?.trim() ?? null,
+    recipient_phone: body.recipientPhone?.trim() ?? null,
+    tracking_url: trackingUrl,
+    status: 'pending',
+  };
 
-  if (error) return mapDbError(error);
+  const extendedPayload = {
+    ...basePayload,
+    partner_id: body.partnerId ?? null,
+    tracking_id: trackingId,
+    notes: body.notes?.trim() ?? null,
+  };
+
+  let data: Record<string, unknown> | null = null;
+  let error: { message: string } | null = null;
+
+  {
+    const result = await admin
+      .from('zafirix_deliveries')
+      .insert(extendedPayload)
+      .select('*')
+      .single();
+    data = (result.data as Record<string, unknown> | null) ?? null;
+    error = result.error;
+  }
+
+  // Columns from COD migration missing → retry without partner_id / tracking_id / notes.
+  if (error && (error.message.includes('partner_id') || error.message.includes('tracking_id') || error.message.includes('notes'))) {
+    console.warn('[logistics/deliveries] retry insert without COD columns:', error.message);
+    const result = await admin
+      .from('zafirix_deliveries')
+      .insert(basePayload)
+      .select('*')
+      .single();
+    data = (result.data as Record<string, unknown> | null) ?? null;
+    error = result.error;
+  }
+
+  if (error) {
+    if (isZafirixQuotaError(error.message)) {
+      return NextResponse.json(
+        {
+          ok: false,
+          error: 'quota_exceeded',
+          message: quotaErrorMessageFr(error.message, 'Quota d’expéditions atteint.'),
+          meter: 'shipments',
+          suggestedAddons: shipmentQuota.suggestedAddons ?? [],
+          upgradeTo: shipmentQuota.upgradeTo ?? null,
+        },
+        { status: 429 },
+      );
+    }
+    return mapDbError(error);
+  }
+  if (!data) return mapDbError({ message: 'insert_failed' });
 
   const deliveryId = String(data.id);
   await insertTrackingEvent(admin, {
@@ -208,7 +372,7 @@ export async function POST(request: NextRequest) {
 
   return NextResponse.json({
     ok: true,
-    delivery: rowToDelivery(data as Record<string, unknown>, {
+    delivery: rowToDelivery(data, {
       partner: partnerName ? { name: partnerName, tracking_url_template: partnerTemplate } : null,
     }),
   });

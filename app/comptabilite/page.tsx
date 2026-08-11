@@ -129,16 +129,19 @@ export default function ComptabilitePage() {
     if (!isCurrentCompanyWorkspaceGeneration(scope)) return;
 
     setActiveCompanyId(companyId);
-    setInvoices(companyId ? await listAtlasInvoices({ companyId }) : []);
-    setPayments(await listAtlasPayments(companyId ? { companyId } : undefined));
-    setEcritures(await listAtlasAccountingEntries(companyId ? { companyId } : undefined));
+    const companyFilter = companyId ? { companyId } : undefined;
+    const [invoicesResult, paymentsResult, entriesResult, suppliersResult] = await Promise.all([
+      companyId ? listAtlasInvoices({ companyId }) : Promise.resolve([]),
+      listAtlasPayments(companyFilter),
+      listAtlasAccountingEntries(companyFilter),
+      companyId ? listSupplierInvoices(companyId) : Promise.resolve([]),
+    ]);
     if (!isCurrentCompanyWorkspaceGeneration(scope)) return;
 
-    if (companyId) {
-      setSupplierInvoices(await listSupplierInvoices(companyId));
-    } else {
-      setSupplierInvoices([]);
-    }
+    setInvoices(invoicesResult);
+    setPayments(paymentsResult);
+    setEcritures(entriesResult);
+    setSupplierInvoices(suppliersResult);
   }, []);
 
   useCompanyWorkspaceReset(wipeAccountingState, () => {

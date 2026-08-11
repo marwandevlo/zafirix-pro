@@ -327,10 +327,32 @@ export async function createStockTransfer(
   if (input.fromStoreId === input.toStoreId) return { ok: false, error: 'same_store' };
   if (!input.lines.length) return { ok: false, error: 'empty_lines' };
 
+  const itemIds = [...new Set(input.lines.map((line) => line.itemId))];
+
+  const [{ data: stockRows }, { data: itemCostRows }] = await Promise.all([
+    admin
+      .from('zafirix_inventory_stock')
+      .select('item_id, quantity')
+      .eq('user_id', input.userId)
+      .eq('store_id', input.fromStoreId)
+      .in('item_id', itemIds),
+    admin
+      .from('zafirix_inventory_items')
+      .select('id, sku, name, unit_cost')
+      .eq('user_id', input.userId)
+      .in('id', itemIds),
+  ]);
+
+  const stockMap = new Map(
+    (stockRows ?? []).map((row) => [String(row.item_id), Number(row.quantity ?? 0)]),
+  );
   for (const line of input.lines) {
-    const qty = await getStockQuantity(admin, input.userId, input.fromStoreId, line.itemId);
-    if (qty < line.quantity) return { ok: false, error: 'insufficient_stock' };
+    if ((stockMap.get(line.itemId) ?? 0) < line.quantity) {
+      return { ok: false, error: 'insufficient_stock' };
+    }
   }
+
+  const itemMap = new Map((itemCostRows ?? []).map((i) => [String(i.id), i]));
 
   const { data: transfer, error: trErr } = await admin
     .from('zafirix_stock_transfers')
@@ -347,20 +369,18 @@ export async function createStockTransfer(
 
   if (trErr) return { ok: false, error: trErr.message };
 
-  const lineRows = await Promise.all(
-    input.lines.map(async (line) => {
-      const unitCost = await resolveItemUnitCost(admin, input.userId, line.itemId);
-      return {
-        transfer_id: transfer.id,
-        item_id: line.itemId,
-        quantity: line.quantity,
-        unit_cost: unitCost,
-        unitCost,
-        itemId: line.itemId,
-        quantityOut: line.quantity,
-      };
-    }),
-  );
+  const lineRows = input.lines.map((line) => {
+    const unitCost = Number(itemMap.get(line.itemId)?.unit_cost ?? 0);
+    return {
+      transfer_id: transfer.id,
+      item_id: line.itemId,
+      quantity: line.quantity,
+      unit_cost: unitCost,
+      unitCost,
+      itemId: line.itemId,
+      quantityOut: line.quantity,
+    };
+  });
 
   const { error: linesErr } = await admin.from('zafirix_stock_transfer_lines').insert(
     lineRows.map(({ transfer_id, item_id, quantity, unit_cost }) => ({
@@ -371,13 +391,6 @@ export async function createStockTransfer(
     })),
   );
   if (linesErr) return { ok: false, error: linesErr.message };
-
-  const { data: items } = await admin
-    .from('zafirix_inventory_items')
-    .select('id, sku, name')
-    .in('id', input.lines.map((l) => l.itemId));
-
-  const itemMap = new Map((items ?? []).map((i) => [String(i.id), i]));
 
   return {
     ok: true,

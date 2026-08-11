@@ -4,7 +4,7 @@
 
 import type { SupabaseClient } from '@supabase/supabase-js';
 import type { AiSourceRef } from '@/app/types/atlas-ai-copilot';
-import { refreshAtlasAiContext, contextToPromptBlock, buildAtlasAiContext } from '@/app/lib/atlas-ai-context';
+import { refreshAtlasAiContext, contextToPromptBlock } from '@/app/lib/atlas-ai-context';
 import { detectAtlasAiAnomalies } from '@/app/lib/atlas-ai-anomalies';
 import { explainReadiness } from '@/app/lib/atlas-ai-audit';
 import {
@@ -62,8 +62,9 @@ export async function runAtlasAiExplain(
   const companyId = req.companyId?.trim() || null;
   const question = req.question?.trim() || defaultQuestion(explainType);
 
-  const { snapshot } = await refreshAtlasAiContext(db, { userId, companyId });
-  const { sources: baseSources } = await buildAtlasAiContext(db, { userId, companyId });
+  // refreshAtlasAiContext already builds context — do not call buildAtlasAiContext again
+  // (that duplicated 9+ heavy queries and caused multi-second AI explain lag).
+  const { snapshot, sources: baseSources } = await refreshAtlasAiContext(db, { userId, companyId });
   const sources: AiSourceRef[] = [...baseSources];
   let system = COPILOT_SYSTEM;
   let subjectBlock = '';
@@ -125,13 +126,14 @@ export async function runAtlasAiExplain(
   } else if (explainType === 'account_code') {
     system = EXPLAINER_ACCOUNTING;
     const code = (req.accountCode ?? req.entityId ?? '').trim();
-    const { data: entries } = await db
+    let entriesQuery = db
       .from('atlas_accounting_entries')
       .select('id, entry_json, validation_status, company_id')
       .eq('user_id', userId)
-      .limit(500);
-    const filtered = filterCo(entries, companyId);
-    const matching = filtered.filter((e) => {
+      .limit(200);
+    if (companyId) entriesQuery = entriesQuery.eq('company_id', companyId);
+    const { data: entries } = await entriesQuery;
+    const matching = (entries ?? []).filter((e) => {
       const j = e.entry_json as { account?: string; compte?: string; lines?: Array<{ account?: string }> } | null;
       const acc = String(j?.account ?? j?.compte ?? '');
       if (acc.startsWith(code)) return true;
@@ -147,20 +149,31 @@ export async function runAtlasAiExplain(
     sources.push({ type: 'accounting_entry', id: code, label: `Compte ${code}` });
   } else if (explainType === 'document' && req.entityId) {
     system = EXPLAINER_DOCUMENT;
-    const { data: doc } = await db.from('atlas_documents').select('*').eq('id', req.entityId).eq('user_id', userId).maybeSingle();
-    const { data: route } = await db.from('zafirix_routing_records').select('*').eq('source_document_id', req.entityId).limit(5);
-    const { data: tvaRowsRaw } = await db.from('zafirix_tva_suggestions').select('id, validation_status, vat_amount, metadata').eq('user_id', userId).limit(50);
-    const tvaRows = (tvaRowsRaw ?? []).filter((r) => {
-      const meta = (r.metadata && typeof r.metadata === 'object') ? r.metadata as Record<string, unknown> : {};
-      return String(meta.source_document_id ?? '') === req.entityId;
-    });
+    const [docRes, routeRes, tvaRes] = await Promise.all([
+      db
+        .from('atlas_documents')
+        .select('id, title, document_type, type, content, ocr_result, validation_status')
+        .eq('id', req.entityId)
+        .eq('user_id', userId)
+        .maybeSingle(),
+      db.from('zafirix_routing_records').select('id, validation_status, route_type, created_at').eq('source_document_id', req.entityId).limit(5),
+      db
+        .from('zafirix_tva_suggestions')
+        .select('id, validation_status, vat_amount, metadata')
+        .eq('user_id', userId)
+        .filter('metadata->>source_document_id', 'eq', req.entityId)
+        .limit(50),
+    ]);
+    const doc = docRes.data;
+    const route = routeRes.data;
+    const tvaRows = tvaRes.data ?? [];
     subjectLoaded = !!doc;
     structured = {
       document_type: doc?.document_type ?? doc?.type ?? null,
       extracted_data: doc?.content ?? doc?.ocr_result ?? null,
       routing_path: route ?? [],
       validation_status: doc?.validation_status ?? route?.[0]?.validation_status ?? null,
-      tva_impact: tvaRows ?? [],
+      tva_impact: tvaRows,
     };
     subjectBlock = `[DOCUMENT]\n${JSON.stringify({ doc, routing: route, tva: tvaRows }, null, 2)}`;
     sources.push({ type: 'document', id: req.entityId, label: doc?.title ? String(doc.title) : 'Document' });

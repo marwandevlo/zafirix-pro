@@ -58,8 +58,9 @@ export async function GET(request: NextRequest) {
       .limit(10),
     supabase
       .from('atlas_companies')
-      .select('id, company_json')
-      .limit(50),
+      .select('id, name, legal_name, trade_name, company_json')
+      .or(`name.ilike.${like},legal_name.ilike.${like},trade_name.ilike.${like}`)
+      .limit(20),
   ]);
 
   if (invRes.error || docRes.error || empRes.error || compRes.error) {
@@ -104,14 +105,13 @@ export async function GET(request: NextRequest) {
     });
   }
 
-  const qLower = q.toLowerCase();
   for (const r of compRes.data ?? []) {
-    const j = r.company_json as Record<string, unknown> | null;
-    const name = typeof j?.raisonSociale === 'string' ? j.raisonSociale : '';
-    const ifFiscal = typeof j?.if_fiscal === 'string' ? j.if_fiscal : '';
-    const city = typeof j?.ville === 'string' ? j.ville : '';
-    const hay = `${name} ${ifFiscal} ${city}`.toLowerCase();
-    if (!hay.includes(qLower)) continue;
+    const j = (r.company_json as Record<string, unknown> | null) ?? {};
+    const name = String(
+      r.trade_name ?? r.legal_name ?? r.name ?? (typeof j.raisonSociale === 'string' ? j.raisonSociale : '') ?? '',
+    );
+    const ifFiscal = typeof j.if_fiscal === 'string' ? j.if_fiscal : '';
+    const city = typeof j.ville === 'string' ? j.ville : '';
     hits.push({
       type: 'company',
       id: String(r.id),

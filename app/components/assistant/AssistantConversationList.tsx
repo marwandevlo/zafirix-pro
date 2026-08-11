@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Loader2, MessageSquare, Plus, Search } from 'lucide-react';
 import type { AtlasAiConversation } from '@/app/types/atlas-ai-copilot';
+import { useDebouncedValue } from '@/app/lib/use-debounced-value';
 
 type Props = {
   companyId: string | null;
@@ -15,26 +16,48 @@ type Props = {
 export function AssistantConversationList({ companyId, activeId, onSelect, onNew, refreshKey }: Props) {
   const [conversations, setConversations] = useState<AtlasAiConversation[]>([]);
   const [search, setSearch] = useState('');
+  const debouncedSearch = useDebouncedValue(search, 350);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (signal?: AbortSignal) => {
     setLoading(true);
+    setError(null);
     try {
       const params = new URLSearchParams();
       if (companyId) params.set('companyId', companyId);
-      if (search.trim()) params.set('search', search.trim());
+      if (debouncedSearch.trim()) params.set('search', debouncedSearch.trim());
       const qs = params.toString() ? `?${params}` : '';
-      const res = await fetch(`/api/assistant/conversations${qs}`, { credentials: 'include' });
-      if (!res.ok) return;
-      const data = await res.json() as { conversations?: AtlasAiConversation[] };
-      setConversations(data.conversations ?? []);
+      const res = await fetch(`/api/assistant/conversations${qs}`, {
+        credentials: 'include',
+        signal,
+      });
+      if (!res.ok) {
+        if (!signal?.aborted) {
+          setError('Impossible de charger les conversations.');
+          setConversations([]);
+        }
+        return;
+      }
+      const data = (await res.json()) as { conversations?: AtlasAiConversation[] };
+      if (!signal?.aborted) {
+        setConversations(data.conversations ?? []);
+      }
+    } catch (err) {
+      if (err instanceof DOMException && err.name === 'AbortError') return;
+      if (!signal?.aborted) {
+        setError(err instanceof Error ? err.message : 'Erreur de chargement');
+        setConversations([]);
+      }
     } finally {
-      setLoading(false);
+      if (!signal?.aborted) setLoading(false);
     }
-  }, [companyId, search]);
+  }, [companyId, debouncedSearch]);
 
   useEffect(() => {
-    void load();
+    const controller = new AbortController();
+    void load(controller.signal);
+    return () => controller.abort();
   }, [load, refreshKey]);
 
   return (
@@ -59,6 +82,8 @@ export function AssistantConversationList({ companyId, activeId, onSelect, onNew
       <div className="flex-1 overflow-y-auto p-2 space-y-1">
         {loading ? (
           <Loader2 className="animate-spin text-gray-400 mx-auto mt-4" size={18} />
+        ) : error ? (
+          <p className="text-xs text-red-500 p-2">{error}</p>
         ) : conversations.length === 0 ? (
           <p className="text-xs text-gray-400 p-2">Aucune conversation</p>
         ) : (

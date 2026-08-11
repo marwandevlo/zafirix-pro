@@ -229,7 +229,16 @@ export async function upsertAtlasInvoice(
   }
 
   const { data: inserted, error } = await supabase.from('atlas_invoices').insert(row).select('id').single();
-  if (error) return { ok: false, error: error.message };
+  if (error) {
+    if (/zafirix_quota_exceeded/i.test(error.message)) {
+      return {
+        ok: false,
+        error: error.message.replace(/^.*zafirix_quota_exceeded:\s*/i, '').trim()
+          || 'Quota factures atteint. Achetez un pack ou passez à un forfait supérieur.',
+      };
+    }
+    return { ok: false, error: error.message };
+  }
   const invMeta = (invoice.metadata ?? {}) as InvoiceInventoryMetadata;
   if (invMeta.inventoryLines?.length && inserted?.id) {
     void syncInvoiceInventoryCogs(companyId, String(inserted.id), invMeta.inventoryLines);

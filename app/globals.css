@@ -3,6 +3,11 @@
 :root {
   --background: #ffffff;
   --foreground: #171717;
+  --zafirix-navy: #0F1F3D;
+  --zafirix-navy-soft: #1B2A4A;
+  --zafirix-cyan: #22d3ee;
+  --safe-bottom: env(safe-area-inset-bottom, 0px);
+  --safe-top: env(safe-area-inset-top, 0px);
 }
 
 @theme inline {
@@ -19,8 +24,51 @@
   }
 }
 
+html {
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+}
+
 body {
   background: var(--background);
   color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: var(--font-geist-sans), system-ui, sans-serif;
+  overflow-x: hidden;
+  touch-action: manipulation;
+}
+
+/* Prefer 100dvh on supporting browsers for mobile browser chrome */
+.min-h-dvh {
+  min-height: 100vh;
+  min-height: 100dvh;
+}
+
+.h-dvh {
+  height: 100vh;
+  height: 100dvh;
+}
+
+/* Touch-friendly tap highlight */
+button,
+a,
+[role="button"] {
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* Utility: pad for fixed mobile bottom nav */
+.pb-mobile-nav {
+  padding-bottom: calc(5.5rem + var(--safe-bottom));
+}
+
+@media (min-width: 1024px) {
+  .pb-mobile-nav {
+    padding-bottom: 1.5rem;
+  }
+}
+
+/* Prevent accidental horizontal scroll on module tables */
+.mobile-scroll-x {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior-x: contain;
 }

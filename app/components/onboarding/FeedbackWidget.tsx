@@ -43,7 +43,7 @@ export function FeedbackWidget({ lang = 'fr' }: Props) {
       <button
         type="button"
         onClick={() => setOpen(true)}
-        className="fixed bottom-6 right-6 z-40 flex items-center gap-2 rounded-full bg-[#1B2A4A] text-white text-xs font-semibold px-4 py-2.5 shadow-lg hover:bg-[#243660]"
+        className="fixed bottom-[calc(5.5rem+env(safe-area-inset-bottom))] right-3 z-40 lg:bottom-6 lg:right-6 flex items-center gap-2 rounded-full bg-[#1B2A4A] text-white text-xs font-semibold px-4 py-2.5 min-h-11 shadow-lg hover:bg-[#243660] active:scale-[0.98]"
         data-tour="feedback"
         aria-label={t('Feedback', 'ملاحظات')}
       >
@@ -54,7 +54,7 @@ export function FeedbackWidget({ lang = 'fr' }: Props) {
   }
 
   return (
-    <div className="fixed bottom-6 right-6 z-40 w-[min(360px,calc(100vw-2rem))] rounded-2xl border border-gray-200 bg-white shadow-2xl p-4">
+    <div className="fixed bottom-[calc(5.5rem+env(safe-area-inset-bottom))] right-3 left-3 z-40 lg:bottom-6 lg:right-6 lg:left-auto w-auto lg:w-[min(360px,calc(100vw-2rem))] rounded-2xl border border-gray-200 bg-white shadow-2xl p-4">
       <div className="flex items-center justify-between">
         <p className="font-bold text-gray-900 text-sm">{t('Votre avis', 'رأيك')}</p>
         <button type="button" onClick={() => setOpen(false)} className="p-1 rounded hover:bg-gray-100">

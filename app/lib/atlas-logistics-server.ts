@@ -105,7 +105,7 @@ export async function insertTrackingEvent(
     location?: string | null;
   },
 ): Promise<void> {
-  await admin.from('zafirix_shipment_tracking_events').insert({
+  const { error } = await admin.from('zafirix_shipment_tracking_events').insert({
     user_id: params.userId,
     company_id: params.companyId,
     delivery_id: params.deliveryId,
@@ -114,4 +114,8 @@ export async function insertTrackingEvent(
     location: params.location ?? null,
     recorded_at: new Date().toISOString(),
   });
+  if (error) {
+    // Non-fatal: BL create/update must succeed even if tracking ledger isn't migrated yet.
+    console.warn('[logistics] insertTrackingEvent skipped:', error.message);
+  }
 }

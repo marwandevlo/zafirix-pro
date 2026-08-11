@@ -112,14 +112,6 @@ export default function InventairePage() {
     if (dash.warning) setLoadError(dash.warning);
   }, []);
 
-  const loadTransfers = useCallback(async (cid: string) => {
-    const result = await fetchEnterpriseModule<{ transfers?: AtlasStockTransfer[] }>(
-      `/api/inventory?companyId=${encodeURIComponent(cid)}&view=transfers`,
-    );
-    if (!result.ok) throw new Error(result.error);
-    setTransfers(result.data.transfers ?? []);
-  }, []);
-
   const loadMovements = useCallback(async (cid: string) => {
     const result = await fetchEnterpriseModule<{ movements?: AtlasStockMovement[] }>(
       `/api/inventory?companyId=${encodeURIComponent(cid)}&view=movements`,
@@ -133,7 +125,7 @@ export default function InventairePage() {
     setLoadError(null);
     try {
       await loadDashboard(cid);
-      if (activeTab === 'transfers') await loadTransfers(cid);
+      // Transfers already loaded with dashboard — only movements need a second round-trip.
       if (activeTab === 'movements') await loadMovements(cid);
     } catch (e) {
       setLoadError(e instanceof Error ? e.message : 'Erreur de chargement');
@@ -144,7 +136,7 @@ export default function InventairePage() {
       setMovements([]);
     }
     setLoading(false);
-  }, [tab, loadDashboard, loadTransfers, loadMovements]);
+  }, [tab, loadDashboard, loadMovements]);
 
   useEffect(() => {
     void (async () => {
@@ -162,9 +154,9 @@ export default function InventairePage() {
 
   useEffect(() => {
     if (!companyId) return;
-    if (tab === 'transfers') void loadTransfers(companyId);
-    if (tab === 'movements') void loadMovements(companyId);
-  }, [tab, companyId, loadTransfers, loadMovements]);
+    // Dashboard already hydrates transfers; only fetch movements on demand.
+    if (tab === 'movements' && movements.length === 0) void loadMovements(companyId);
+  }, [tab, companyId, loadMovements, movements.length]);
 
   const postInventory = async (payload: Record<string, unknown>) => {
     if (!companyId) return null;

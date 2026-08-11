@@ -69,6 +69,7 @@ function isPublicPath(pathname: string): boolean {
   if (pathname.startsWith('/zafirix-')) return true;
   if (pathname === '/favicon.ico') return true;
   if (pathname === '/manifest.json') return true;
+  if (pathname === '/sw.js') return true;
   if (pathname.startsWith('/robots.txt')) return true;
   if (pathname.startsWith('/sitemap')) return true;
   if (pathname === '/share' || pathname.startsWith('/share/')) return true;

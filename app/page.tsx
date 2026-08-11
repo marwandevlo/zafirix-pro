@@ -7,7 +7,7 @@ import {
   TrendingUp, Upload, Bell, ChevronRight,
   AlertCircle, Brain,
   ArrowUpRight, ArrowDownRight, Calendar, Globe,
-  Users, Zap, Shield, Menu, Package, Truck, Wallet, Gavel,
+  Users, Zap, Shield, Menu, Package, Truck, Wallet, Gavel, Briefcase, UserRound,
 } from 'lucide-react';
 import { listAtlasInvoices } from '@/app/lib/atlas-invoices-repository';
 import type { AtlasInvoice } from '@/app/types/atlas-invoice';
@@ -26,6 +26,7 @@ import { GuidedTourEngine } from '@/app/components/onboarding/GuidedTourEngine';
 import { FeedbackWidget } from '@/app/components/onboarding/FeedbackWidget';
 import { DashboardFunnelInsights } from '@/app/components/conversion/DashboardFunnelInsights';
 import { AppSidebar, AppSidebarMobileOverlay } from '@/app/components/shell/AppSidebar';
+import { MobileBottomNav } from '@/app/components/shell/MobileBottomNav';
 import { ReferralDashboardCard } from '@/app/components/referral/ReferralDashboardCard';
 import { formatMadAmountLabel } from '@/app/lib/atlas-format';
 import { LegalContractsWidget } from '@/app/components/dashboard/LegalContractsWidget';
@@ -42,10 +43,12 @@ import { CompanySwitcher } from '@/app/components/shell/CompanySwitcher';
 import { CompanyMasterExportMenu } from '@/app/components/company/CompanyMasterExportMenu';
 import { ConsolidatedDashboardWidget } from '@/app/components/cabinet/ConsolidatedDashboardWidget';
 import { SubscriptionWidget } from '@/app/components/billing/SubscriptionWidget';
+import { UsagePlanWidget } from '@/app/components/billing/UsagePlanWidget';
 import { DeadlineRadarWidget } from '@/app/components/dashboard/DeadlineRadarWidget';
 import { LegalCalendarWidget } from '@/app/components/dashboard/LegalCalendarWidget';
 import { NotificationCenterWidget } from '@/app/components/dashboard/NotificationCenterWidget';
 import { AuditorPassWidget } from '@/app/components/dashboard/AuditorPassWidget';
+import { fetchDashboardDeadlinesShared } from '@/app/lib/dashboard-deadlines-client';
 
 const ReferralPostOnboardingModal = dynamic(
   () =>
@@ -84,6 +87,8 @@ const modules = [
   { id: 'logistique', label: 'Logistique', labelAr: 'اللوجستيك', icon: Truck, color: 'bg-slate-600', href: '/logistique', deadline: null, urgent: false },
   { id: 'recouvrement', label: 'Recouvrement', labelAr: 'التحصيل', icon: Gavel, color: 'bg-red-600', href: '/recouvrement', deadline: null, urgent: false },
   { id: 'caisse', label: 'Caisse', labelAr: 'الصندوق', icon: Wallet, color: 'bg-yellow-600', href: '/caisse', deadline: null, urgent: false },
+  { id: 'auto-entrepreneur', label: 'Auto-entrepreneur', labelAr: 'المقاول الذاتي', icon: Briefcase, color: 'bg-sky-600', href: '/auto-entrepreneur', deadline: null, urgent: false },
+  { id: 'personne-physique', label: 'Personne physique', labelAr: 'شخص ذاتي', icon: UserRound, color: 'bg-indigo-600', href: '/personne-physique', deadline: null, urgent: false },
   { id: 'clients', label: 'Clients', labelAr: 'العملاء', icon: Users, color: 'bg-emerald-500', href: '/clients', deadline: null, urgent: false },
   { id: 'comptabilite', label: 'Comptabilité', labelAr: 'المحاسبة', icon: LayoutDashboard, color: 'bg-cyan-500', href: '/comptabilite', deadline: null, urgent: false },
   { id: 'documents', label: 'Documents IA', labelAr: 'وثائق الذكاء الاصطناعي', icon: Upload, color: 'bg-rose-500', href: '/documents', deadline: null, urgent: false },
@@ -97,6 +102,7 @@ export default function Home() {
   const [connected, setConnected] = useState(true);
   const [invoices, setInvoices] = useState<AtlasInvoice[]>([]);
   const [fiscalUrgentCount, setFiscalUrgentCount] = useState(0);
+  const [deadlinesError, setDeadlinesError] = useState(false);
   const [notificationUnread, setNotificationUnread] = useState(0);
   const [showNotifications, setShowNotifications] = useState(false);
   const t = (fr: string, ar: string) => lang === 'fr' ? fr : ar;
@@ -105,14 +111,16 @@ export default function Home() {
     let cancelled = false;
     (async () => {
       try {
-        const res = await fetch('/api/dashboard/deadlines', { credentials: 'include' });
-        if (!res.ok || cancelled) return;
-        const data = (await res.json()) as { counts?: { red: number; orange: number } };
-        if (!cancelled && data.counts) {
-          setFiscalUrgentCount((data.counts.red ?? 0) + (data.counts.orange ?? 0));
+        const data = await fetchDashboardDeadlinesShared();
+        if (cancelled) return;
+        if (!data?.counts) {
+          setDeadlinesError(true);
+          return;
         }
+        setDeadlinesError(false);
+        setFiscalUrgentCount((data.counts.red ?? 0) + (data.counts.orange ?? 0));
       } catch {
-        /* keep 0 */
+        if (!cancelled) setDeadlinesError(true);
       }
     })();
     return () => { cancelled = true; };
@@ -121,11 +129,15 @@ export default function Home() {
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      if (isAtlasSupabaseDataEnabled()) {
-        await refreshAtlasUsageState();
+      try {
+        if (isAtlasSupabaseDataEnabled()) {
+          await refreshAtlasUsageState();
+        }
+        const inv = await listAtlasInvoices();
+        if (!cancelled) setInvoices(inv);
+      } catch {
+        if (!cancelled) setInvoices([]);
       }
-      const inv = await listAtlasInvoices();
-      if (!cancelled) setInvoices(inv);
     })();
     return () => {
       cancelled = true;
@@ -151,8 +163,18 @@ export default function Home() {
     { label: "Chiffre d'affaires", labelAr: 'رقم الأعمال', value: formatMadAmountLabel(invoiceSummary.totalFacture), change: t('Factures enregistrées', 'فواتير مسجلة'), up: true, icon: TrendingUp, color: 'text-blue-600' },
     { label: 'TVA', labelAr: 'TVA', value: '—', change: t('En cours de stabilisation', 'قيد الاستقرار'), up: true, icon: Receipt, color: 'text-slate-500' },
     { label: 'Factures en attente', labelAr: 'فواتير معلقة', value: String(invoiceSummary.unpaidCount), change: `${invoiceSummary.overdueCount} ${t('en retard', 'متأخرة')}`, up: invoiceSummary.overdueCount === 0, icon: FileText, color: 'text-amber-600' },
-    { label: 'Rappels fiscaux', labelAr: 'تذكير ضريبي', value: String(pendingFiscalCount), change: t('Radar échéances', 'رادار المواعيد'), up: pendingFiscalCount === 0, icon: Calendar, color: 'text-purple-600' },
-  ]), [invoiceSummary, pendingFiscalCount, lang]);
+    {
+      label: 'Rappels fiscaux',
+      labelAr: 'تذكير ضريبي',
+      value: deadlinesError ? '!' : String(pendingFiscalCount),
+      change: deadlinesError
+        ? t('Échéances indisponibles', 'المواعيد غير متاحة')
+        : t('Radar échéances', 'رادار المواعيد'),
+      up: !deadlinesError && pendingFiscalCount === 0,
+      icon: Calendar,
+      color: deadlinesError ? 'text-red-600' : 'text-purple-600',
+    },
+  ]), [invoiceSummary, pendingFiscalCount, deadlinesError, lang]);
 
   const navigate = (href: string) => {
     setMenuOpen(false);
@@ -160,7 +182,7 @@ export default function Home() {
   };
 
   return (
-    <div className="flex h-screen bg-gray-50" dir={lang === 'ar' ? 'rtl' : 'ltr'}>
+    <div className="flex h-dvh bg-gray-50 overflow-hidden" dir={lang === 'ar' ? 'rtl' : 'ltr'}>
 
       <AppSidebarMobileOverlay open={menuOpen} onClose={() => setMenuOpen(false)} />
       <AppSidebar
@@ -175,20 +197,32 @@ export default function Home() {
       />
 
       <main className="flex-1 flex flex-col overflow-hidden min-w-0">
-        <header className="bg-white border-b border-gray-200 px-4 lg:px-8 py-4 flex items-center justify-between shrink-0">
-          <div className="flex items-center gap-3">
-            <button onClick={() => setMenuOpen(true)} className="lg:hidden p-2 rounded-lg hover:bg-gray-100">
-              <Menu size={20} className="text-gray-600" />
+        <header
+          className="bg-white border-b border-gray-200 px-3 sm:px-4 lg:px-8 py-3 lg:py-4 flex items-center justify-between shrink-0"
+          style={{ paddingTop: 'max(0.75rem, env(safe-area-inset-top))' }}
+        >
+          <div className="flex items-center gap-2 sm:gap-3 min-w-0">
+            <button
+              type="button"
+              onClick={() => setMenuOpen(true)}
+              className="lg:hidden min-h-11 min-w-11 inline-flex items-center justify-center rounded-xl hover:bg-gray-100"
+              aria-label={t('Menu', 'القائمة')}
+            >
+              <Menu size={22} className="text-gray-600" />
             </button>
-            <div>
-              <h1 className="text-lg lg:text-xl font-bold text-gray-800">{t('Tableau de bord', 'لوحة التحكم')}</h1>
+            <div className="min-w-0">
+              <h1 className="text-base sm:text-lg lg:text-xl font-bold text-gray-800 truncate">{t('Tableau de bord', 'لوحة التحكم')}</h1>
               <p className="text-xs text-gray-400 hidden sm:block">{new Date().toLocaleDateString(lang === 'fr' ? 'fr-MA' : 'ar-MA', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}</p>
             </div>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
             <CompanySwitcher className="hidden sm:block" />
             <CompanyMasterExportMenu />
-            <button onClick={() => navigate('/consultant')} className="hidden sm:flex items-center gap-2 px-3 py-2 bg-indigo-50 text-indigo-600 rounded-lg text-sm font-medium hover:bg-indigo-100 transition-colors">
+            <button
+              type="button"
+              onClick={() => navigate('/consultant')}
+              className="hidden sm:flex items-center gap-2 min-h-11 px-3 py-2 bg-indigo-50 text-indigo-600 rounded-xl text-sm font-medium hover:bg-indigo-100 transition-colors"
+            >
               <Brain size={16} />
               <span className="hidden md:inline">{t('Consultant IA', 'المستشار')}</span>
             </button>
@@ -196,7 +230,7 @@ export default function Home() {
             <button
               type="button"
               onClick={() => setShowNotifications((v) => !v)}
-              className="relative p-2 rounded-lg hover:bg-gray-100"
+              className="relative min-h-11 min-w-11 inline-flex items-center justify-center rounded-xl hover:bg-gray-100"
               aria-label={t('Notifications', 'الإشعارات')}
             >
               <Bell size={18} className="text-gray-500" />
@@ -213,7 +247,7 @@ export default function Home() {
           </div>
         </header>
 
-        <div className="flex-1 overflow-y-auto px-4 lg:px-8 py-4 lg:py-6 space-y-4 lg:space-y-6" data-tour="dashboard">
+        <div className="flex-1 overflow-y-auto overscroll-contain px-3 sm:px-4 lg:px-8 py-4 lg:py-6 space-y-4 lg:space-y-6 pb-mobile-nav" data-tour="dashboard">
           <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-xs sm:text-sm text-amber-950 flex gap-2 items-start">
             <Shield size={16} className="shrink-0 mt-0.5 text-amber-700" aria-hidden />
             <p>
@@ -267,10 +301,10 @@ export default function Home() {
               <div className="grid grid-cols-2 gap-2 lg:gap-3">
                 {modules.map(m => (
                   <button key={m.id} onClick={() => navigate(m.href)}
-                    className="bg-white rounded-xl p-3 lg:p-4 shadow-sm border border-gray-100 hover:border-blue-200 hover:shadow-md transition-all text-left group relative overflow-hidden">
+                    className="bg-white rounded-xl p-3 lg:p-4 shadow-sm border border-gray-100 hover:border-blue-200 hover:shadow-md transition-all text-left group relative overflow-hidden min-h-[4.5rem] active:scale-[0.99]">
                     {m.urgent && <span className="absolute top-2 right-2 w-2 h-2 bg-red-400 rounded-full animate-pulse"></span>}
                     <div className="flex items-center gap-2 lg:gap-3">
-                      <div className={`w-8 h-8 lg:w-9 lg:h-9 ${m.color} rounded-lg flex items-center justify-center shrink-0`}>
+                      <div className={`w-9 h-9 lg:w-9 lg:h-9 ${m.color} rounded-lg flex items-center justify-center shrink-0`}>
                         <m.icon size={16} className="text-white" />
                       </div>
                       <div className="flex-1 min-w-0">
@@ -335,8 +369,11 @@ export default function Home() {
           </div>
           <PayrollDashboardSection />
 
-          {/* ── Subscription (Phase 15) ───────────────────────────────────── */}
-          <SubscriptionWidget />
+          {/* ── Subscription + Utilisation & Forfait ─────────────────────── */}
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 lg:gap-6">
+            <SubscriptionWidget />
+            <UsagePlanWidget />
+          </div>
 
           {/* ── Cabinet consolidated (Phase 14) ─────────────────────────── */}
           <ConsolidatedDashboardWidget />
@@ -362,6 +399,7 @@ export default function Home() {
           </div>
         </div>
       </main>
+      <MobileBottomNav onOpenMenu={() => setMenuOpen(true)} />
       <GuidedTourEngine lang={lang} autoStart />
       <FeedbackWidget lang={lang} />
     </div>

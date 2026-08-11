@@ -6,6 +6,7 @@ import { Calendar, ChevronLeft, ChevronRight, Loader2 } from 'lucide-react';
 import { getActiveCompanyDbRowId } from '@/app/lib/atlas-active-company';
 import { onCompanySwitched } from '@/app/lib/atlas-company-switch-event';
 import { categoryLabelFr } from '@/app/lib/atlas-fiscal-calendar';
+import { fetchDashboardDeadlinesShared } from '@/app/lib/dashboard-deadlines-client';
 import type { FiscalDeadline, FiscalDeadlineSeverity } from '@/app/types/atlas-fiscal-calendar';
 
 type Props = { lang?: 'fr' | 'ar' };
@@ -30,14 +31,12 @@ export function LegalCalendarWidget({ lang = 'fr' }: Props) {
       setLoading(true);
       try {
         const cid = await getActiveCompanyDbRowId();
-        const qs = cid ? `?companyId=${encodeURIComponent(cid)}` : '';
-        const [deadRes, contractRes] = await Promise.all([
-          fetch(`/api/dashboard/deadlines${qs}`, { credentials: 'include' }),
+        const [deadData, contractRes] = await Promise.all([
+          fetchDashboardDeadlinesShared(cid),
           fetch('/api/legal/contracts?status=expiring', { credentials: 'include' }),
         ]);
-        if (!cancelled && deadRes.ok) {
-          const d = await deadRes.json() as { deadlines?: FiscalDeadline[] };
-          setDeadlines(d.deadlines ?? []);
+        if (!cancelled && deadData) {
+          setDeadlines((deadData.deadlines as FiscalDeadline[] | undefined) ?? []);
         }
         if (!cancelled && contractRes.ok) {
           const c = await contractRes.json() as { contracts?: typeof contracts };

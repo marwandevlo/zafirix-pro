@@ -8,6 +8,7 @@ import { isAtlasSupabaseDataEnabled } from '@/app/lib/atlas-data-source';
 import { adminAuthedFetch, fetchAdminBearerToken } from '@/app/lib/admin/admin-client-auth';
 import { isOwnerEmail, getOwnerEmail } from '@/app/lib/owner';
 import { AdminAlert, AdminEmptyState, AdminTableSkeleton } from '@/app/admin/_components/AdminUi';
+import { useDebouncedValue } from '@/app/lib/use-debounced-value';
 
 type AdminUserRow = {
   id: string;
@@ -30,6 +31,7 @@ export default function UsersAdminClient() {
   const [rows, setRows] = useState<AdminUserRow[]>([]);
   const [warning, setWarning] = useState<string>('');
   const [q, setQ] = useState('');
+  const debouncedQ = useDebouncedValue(q, 350);
   const [roleFilter, setRoleFilter] = useState<string>('all');
   const [planFilter, setPlanFilter] = useState<string>('all');
   const [statusFilter, setStatusFilter] = useState<string>('all');
@@ -51,7 +53,7 @@ export default function UsersAdminClient() {
       await fetchAdminBearerToken();
 
       const sp = new URLSearchParams();
-      if (q.trim()) sp.set('q', q.trim());
+      if (debouncedQ.trim()) sp.set('q', debouncedQ.trim());
       if (roleFilter !== 'all') sp.set('role', roleFilter);
       if (planFilter !== 'all') sp.set('plan', planFilter);
       if (statusFilter !== 'all') sp.set('status', statusFilter);
@@ -85,7 +87,7 @@ export default function UsersAdminClient() {
     } finally {
       if (!cancelledRef?.current && !silent) setLoading(false);
     }
-  }, [planFilter, q, roleFilter, statusFilter]);
+  }, [planFilter, debouncedQ, roleFilter, statusFilter]);
 
   useEffect(() => {
     const cancelled = { current: false };

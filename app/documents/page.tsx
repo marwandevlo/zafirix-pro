@@ -506,15 +506,19 @@ export default function DocumentsPage() {
         ocrPollAbortRef.current = controller;
 
         try {
-          let needsRefresh = false;
-          for (const id of ids) {
-            if (!isCurrentCompanyWorkspaceGeneration(scope)) {
-              ocrPollingIdsRef.current.clear();
-              stopOcrPoll();
-              return;
-            }
+          if (!isCurrentCompanyWorkspaceGeneration(scope)) {
+            ocrPollingIdsRef.current.clear();
+            stopOcrPoll();
+            return;
+          }
 
-            const live = await fetchOcrProgressFromApi(id, controller.signal);
+          // Parallel progress polls — serial awaits caused multi-second lag with many docs.
+          const lives = await Promise.all(
+            ids.map(async (id) => ({ id, live: await fetchOcrProgressFromApi(id, controller.signal) })),
+          );
+
+          let needsRefresh = false;
+          for (const { id, live } of lives) {
             if (!live?.ok) continue;
 
             if (live.processingStatus === 'processed') {

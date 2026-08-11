@@ -5,7 +5,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { asRecord } from '@/app/lib/atlas-json';
 import { resolvePortalCodeForCompany } from '@/app/lib/atlas-client-portal-links';
-import { clientPortalDemoCode } from '@/app/lib/atlas-sprint0-flags';
+import { clientPortalDemoCode, isClientPortalDemoEnabled } from '@/app/lib/atlas-sprint0-flags';
 
 export type ClientPortalSession = {
   companyId: string;
@@ -60,14 +60,43 @@ export async function resolveClientPortalSession(
 
   const demoCode = clientPortalDemoCode();
 
-  if (code === demoCode) {
+  // Demo PIN only when explicitly enabled — never accept default 1234 in production.
+  if (demoCode && isClientPortalDemoEnabled() && code === demoCode.toLowerCase()) {
     return resolveDemoCompanyFromDb(db);
   }
 
+  // Prefer indexed JSON path match over loading hundreds of company blobs.
+  // Only use PostgREST filter when the code is safe (no filter metacharacters).
+  const safeFilterCode = /^[a-z0-9][a-z0-9_-]{1,63}$/i.test(code) ? code : null;
+  if (safeFilterCode) {
+    const { data: byPortalCode } = await db
+      .from('atlas_companies')
+      .select('id, name, legal_name, trade_name, user_id, company_json')
+      .or(
+        `company_json->>clientPortalCode.eq.${safeFilterCode},company_json->>client_portal_code.eq.${safeFilterCode}`,
+      )
+      .limit(20);
+
+    for (const row of byPortalCode ?? []) {
+      const r = row as Record<string, unknown>;
+      const json = asRecord(r.company_json) ?? {};
+      const stored = String(json.clientPortalCode ?? json.client_portal_code ?? '').trim().toLowerCase();
+      if (stored === code) {
+        return {
+          companyId: String(r.id),
+          ownerUserId: String(r.user_id),
+          companyName: String(r.trade_name ?? r.legal_name ?? r.name ?? 'Société'),
+        };
+      }
+    }
+  }
+
+  // Fallback: derived codes (hash of company name/id) — bounded scan.
   const { data: companies } = await db
     .from('atlas_companies')
     .select('id, name, legal_name, trade_name, user_id, company_json')
-    .limit(500);
+    .order('updated_at', { ascending: false })
+    .limit(100);
 
   for (const row of companies ?? []) {
     const r = row as Record<string, unknown>;

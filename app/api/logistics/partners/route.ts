@@ -30,9 +30,14 @@ export async function GET(request: NextRequest) {
     .select('*')
     .eq('company_id', access.companyId)
     .eq('user_id', session.userId)
-    .order('name', { ascending: true });
+    .order('name', { ascending: true })
+    .limit(200);
 
-  if (error) return mapDbError(error, { partners: [] });
+  if (error) {
+    console.warn('[logistics/partners] list failed:', error.message);
+    return mapDbError(error, { partners: [] });
+  }
+
   return NextResponse.json({
     ok: true,
     partners: (data ?? []).map((r) => rowToPartner(r as Record<string, unknown>)),
@@ -73,6 +78,10 @@ export async function POST(request: NextRequest) {
     .select('*')
     .single();
 
-  if (error) return mapDbError(error);
+  if (error) {
+    console.warn('[logistics/partners] create failed:', error.message);
+    return mapDbError(error);
+  }
+
   return NextResponse.json({ ok: true, partner: rowToPartner(data as Record<string, unknown>) });
 }

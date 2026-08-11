@@ -45,6 +45,16 @@ const STEPS = [
     probeTable: 'zafirix_delivery_partners',
   },
   {
+    label: 'Logistics & COD hardening (indexes + RLS)',
+    file: '20260811220000_zafirix_logistics_cod_hardening.sql',
+    probeTable: 'zafirix_cod_reconciliations',
+  },
+  {
+    label: 'Individual tax profiles (AE + Personne physique)',
+    file: '20260811230000_zafirix_individual_tax_profiles.sql',
+    probeTable: 'zafirix_individual_profiles',
+  },
+  {
     label: 'Notification alert queue',
     file: '20260730140000_zafirix_notification_queue.sql',
     probeTable: 'zafirix_notification_queue',

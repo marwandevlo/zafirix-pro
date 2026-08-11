@@ -4,6 +4,8 @@
 -- This script does NOT recreate full schemas — apply timestamped migrations first:
 --   20260729160000_zafirix_enterprise_modules.sql
 --   20260730120000_zafirix_logistics_cod_tracking.sql
+--   20260811220000_zafirix_logistics_cod_hardening.sql
+--   20260811230000_zafirix_individual_tax_profiles.sql
 --   20260730140000_zafirix_notification_queue.sql
 --   20260730150000_zafirix_advanced_inventory.sql
 --   20260730160000_zafirix_petty_cash_advanced.sql
@@ -28,6 +30,9 @@ declare
     'zafirix_debt_collection_cases', 'zafirix_auditor_passes',
     -- Logistics COD (20260730120000)
     'zafirix_delivery_partners', 'zafirix_cod_reconciliations', 'zafirix_shipment_tracking_events',
+    -- Individual tax profiles (20260811230000)
+    'zafirix_individual_profiles', 'zafirix_ae_turnover_entries',
+    'zafirix_ae_quarterly_declarations', 'zafirix_pp_ledger_entries',
     -- Notification queue (20260730140000)
     'zafirix_notification_queue',
     -- Advanced inventory (20260730150000)
