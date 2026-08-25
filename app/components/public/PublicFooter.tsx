@@ -19,10 +19,10 @@ export function PublicFooter() {
             <div className="mt-4 inline-flex flex-col items-start gap-2 text-sm text-gray-600" dir="ltr">
               <a
                 className="inline-flex items-center gap-2 hover:underline"
-                href="mailto:contact@zafirix.group"
+                href="mailto:support@zafirixpro.com"
               >
                 <Mail size={16} className="text-gray-400 shrink-0" />
-                <span>contact@zafirix.group</span>
+                <span>support@zafirixpro.com</span>
               </a>
               <a
                 className="inline-flex items-center gap-2 hover:underline whitespace-nowrap [unicode-bidi:isolate]"
@@ -42,7 +42,7 @@ export function PublicFooter() {
               <li><Link className="hover:text-gray-900" href="/pricing">Pricing</Link></li>
               <li><Link className="hover:text-gray-900" href="/login">Login</Link></li>
               <li><Link className="hover:text-gray-900" href="/signup">Sign Up</Link></li>
-              <li><a className="hover:text-gray-900" href="mailto:contact@zafirix.group">Contact</a></li>
+              <li><a className="hover:text-gray-900" href="mailto:support@zafirixpro.com">Contact</a></li>
               <li><Link className="hover:text-gray-900" href="/terms">Terms of Service</Link></li>
               <li><Link className="hover:text-gray-900" href="/privacy">Privacy Policy</Link></li>
             </ul>
