@@ -6,6 +6,10 @@ import type { BlogLocale, BlogPost } from '@/app/lib/blog/types';
 const SITE_NAME = 'Zafirixpro';
 const OG_IMAGE = '/zafirix-icon-512.png';
 
+function postOgImage(post: BlogPost): string {
+  return post.image || OG_IMAGE;
+}
+
 export function blogPostPath(slug: string): string {
   return `/blog/${slug}`;
 }
@@ -92,13 +96,13 @@ export function postMetadata(post: BlogPost, alternate?: BlogPost): Metadata {
       modifiedTime: post.updatedAt ?? post.publishedAt,
       authors: [post.author],
       tags: post.tags,
-      images: [{ url: OG_IMAGE, width: 512, height: 512, alt: post.title }],
+      images: [{ url: postOgImage(post), alt: post.imageAlt ?? post.title }],
     },
     twitter: {
       card: 'summary_large_image',
       title: post.title,
       description: post.description,
-      images: [OG_IMAGE],
+      images: [postOgImage(post)],
     },
     robots: { index: true, follow: true },
   };
@@ -149,6 +153,7 @@ export function articleJsonLd(post: BlogPost) {
     keywords: post.tags.join(', '),
     articleSection: post.category,
     timeRequired: `PT${post.readingMinutes}M`,
+    image: post.image ? absoluteUrl(post.image) : absoluteUrl('/zafirix-icon-512.png'),
   };
 }
 

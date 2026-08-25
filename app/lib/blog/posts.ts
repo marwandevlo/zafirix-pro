@@ -19,18 +19,27 @@ function parseTags(raw: string | undefined): string[] {
     .filter(Boolean);
 }
 
+function parseReadTime(raw: string | undefined): number | undefined {
+  if (!raw) return undefined;
+  const n = Number.parseInt(raw.replace(/[^\d]/g, ''), 10);
+  return Number.isFinite(n) && n > 0 ? n : undefined;
+}
+
 function toPost(filename: string, raw: string): BlogPost {
   const { fields, body } = parseFrontmatter(raw);
   const locale = fields.locale === 'ar' ? 'ar' : 'fr';
   const slug = fields.slug?.trim();
   const title = fields.title?.trim();
   const description = fields.description?.trim();
-  const publishedAt = fields.publishedAt?.trim();
+  const publishedAt = fields.publishedAt?.trim() || fields.date?.trim();
   const alternateSlug = fields.alternateSlug?.trim();
 
   if (!slug || !title || !description || !publishedAt || !alternateSlug) {
     throw new Error(`Invalid blog frontmatter in ${filename}`);
   }
+
+  const image = fields.image?.trim() || undefined;
+  const overrideMinutes = parseReadTime(fields.readTime);
 
   const frontmatter: BlogFrontmatter = {
     slug,
@@ -43,19 +52,21 @@ function toPost(filename: string, raw: string): BlogPost {
     category: fields.category?.trim() || (locale === 'ar' ? 'رؤى' : 'Insights'),
     tags: parseTags(fields.tags),
     author: fields.author?.trim() || 'Rédaction Zafirixpro',
+    image,
+    imageAlt: fields.imageAlt?.trim() || undefined,
   };
 
   return {
     ...frontmatter,
     body,
-    readingMinutes: readingMinutes(body, locale),
+    readingMinutes: overrideMinutes ?? readingMinutes(body, locale),
   };
 }
 
 let cache: BlogPost[] | null = null;
 
 export function getAllBlogPosts(): BlogPost[] {
-  if (cache) return cache;
+  if (process.env.NODE_ENV === 'production' && cache) return cache;
   if (!fs.existsSync(BLOG_DIR)) {
     cache = [];
     return cache;

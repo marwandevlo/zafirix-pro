@@ -48,6 +48,15 @@ export function BlogMarkdown({ markdown }: { markdown: string }) {
           code: ({ children }) => (
             <code className="rounded-md bg-slate-100 px-1.5 py-0.5 text-[0.9em] text-slate-800">{children}</code>
           ),
+          img: ({ src, alt }) =>
+            src ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img
+                src={src}
+                alt={alt ?? ''}
+                className="my-6 w-full rounded-2xl border border-[#0F1F3D]/10 object-cover"
+              />
+            ) : null,
         }}
       >
         {markdown}

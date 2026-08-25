@@ -11,6 +11,8 @@ export type BlogFrontmatter = {
   category: string;
   tags: string[];
   author: string;
+  image?: string;
+  imageAlt?: string;
 };
 
 export type BlogPost = BlogFrontmatter & {
