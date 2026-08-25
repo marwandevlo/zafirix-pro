@@ -26,6 +26,7 @@ type Copy = {
   altHref: string;
   altLabel: string;
   navPricing: string;
+  navBlog: string;
   navLogin: string;
   badge: string;
   headline: string;
@@ -57,6 +58,7 @@ const COPY: Record<MarketingLocale, Copy> = {
     altHref: '/landing/ar',
     altLabel: 'العربية',
     navPricing: 'Tarifs',
+    navBlog: 'Blog',
     navLogin: 'Connexion',
     badge: 'Zafirixpro · Maroc',
     headline: 'La plateforme de gestion & conformité fiscale pour le Maroc.',
@@ -118,6 +120,7 @@ const COPY: Record<MarketingLocale, Copy> = {
     altHref: '/landing/fr',
     altLabel: 'FR',
     navPricing: 'الأسعار',
+    navBlog: 'المدونة',
     navLogin: 'تسجيل الدخول',
     badge: 'Zafirixpro · المغرب',
     headline: 'منصة الإدارة والامتثال الضريبي المصممة للمغرب.',
@@ -198,6 +201,12 @@ export function ZafirixMarketingLanding({ locale }: { locale: MarketingLocale })
               className="min-h-10 px-3 inline-flex items-center rounded-xl text-xs font-bold text-white/80 border border-white/15 hover:bg-white/10"
             >
               {c.altLabel}
+            </Link>
+            <Link
+              href={locale === 'ar' ? '/blog?lang=ar' : '/blog'}
+              className="inline-flex min-h-10 px-2 sm:px-3 items-center rounded-xl text-xs sm:text-sm font-semibold text-white/90 hover:bg-white/10"
+            >
+              {c.navBlog}
             </Link>
             <Link
               href="/pricing"

@@ -50,6 +50,7 @@ async function userHasAdminAccess(user: User, supabaseUrl: string): Promise<bool
 
 const PUBLIC_PATHS = new Set([
   '/landing',
+  '/blog',
   '/pricing',
   '/login',
   '/signup',
@@ -64,6 +65,7 @@ const PUBLIC_PATHS = new Set([
 function isPublicPath(pathname: string): boolean {
   if (PUBLIC_PATHS.has(pathname)) return true;
   if (pathname.startsWith('/landing')) return true;
+  if (pathname === '/blog' || pathname.startsWith('/blog/')) return true;
   if (pathname.startsWith('/auth/')) return true;
   if (pathname === '/legal' || pathname.startsWith('/legal/')) return true;
   if (pathname.startsWith('/_next')) return true;

@@ -37,6 +37,10 @@ body {
   touch-action: manipulation;
 }
 
+.blog-ar {
+  font-family: var(--font-blog-arabic), "Noto Naskh Arabic", Tahoma, sans-serif;
+}
+
 /* Prefer 100dvh on supporting browsers for mobile browser chrome */
 .min-h-dvh {
   min-height: 100vh;

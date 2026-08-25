@@ -31,6 +31,7 @@ export function PublicFooter() {
           <div>
             <p className="text-sm font-semibold text-gray-900">Liens rapides</p>
             <ul className="mt-3 space-y-2 text-sm text-gray-600">
+              <li><Link className="hover:text-gray-900" href="/blog">Blog</Link></li>
               <li><Link className="hover:text-gray-900" href="/pricing">Pricing</Link></li>
               <li><Link className="hover:text-gray-900" href="/login">Login</Link></li>
               <li><Link className="hover:text-gray-900" href="/signup">Sign Up</Link></li>
