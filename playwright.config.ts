@@ -9,8 +9,8 @@ const BASE_URL = process.env.PLAYWRIGHT_BASE_URL ?? `http://127.0.0.1:${E2E_PORT
  * exercise authenticated Supabase flows instead.
  */
 export default defineConfig({
-  testDir: './tests',
-  testMatch: /.*\.spec\.ts/,
+  testDir: '.',
+  testMatch: ['tests/**/*.spec.ts', 'e2e/**/*.spec.ts'],
   fullyParallel: true,
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 2 : 0,
