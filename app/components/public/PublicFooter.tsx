@@ -86,8 +86,10 @@ export function PublicFooter() {
               </a>
               <a
                 className={`${socialBase} bg-[#0A66C2]/10 hover:bg-[#0A66C2]/15`}
-                href="#"
+                href="https://www.linkedin.com/company/zafirixpro"
                 aria-label="LinkedIn"
+                rel="noopener noreferrer"
+                target="_blank"
               >
                 <span className="inline-flex h-8 w-8 items-center justify-center rounded-lg bg-white/70">
                   <svg width="18" height="18" viewBox="0 0 24 24" aria-hidden="true">

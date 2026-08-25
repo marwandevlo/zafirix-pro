@@ -201,19 +201,19 @@ export function ZafirixMarketingLanding({ locale }: { locale: MarketingLocale })
             </Link>
             <Link
               href="/pricing"
-              className="hidden sm:inline-flex min-h-10 px-3 items-center rounded-xl text-sm font-semibold text-white/90 hover:bg-white/10"
+              className="inline-flex min-h-10 px-2 sm:px-3 items-center rounded-xl text-xs sm:text-sm font-semibold text-white/90 hover:bg-white/10"
             >
               {c.navPricing}
             </Link>
             <Link
               href="/login"
-              className="hidden sm:inline-flex min-h-10 px-3 items-center rounded-xl text-sm font-semibold text-white/80 hover:bg-white/10"
+              className="inline-flex min-h-10 px-2 sm:px-3 items-center rounded-xl text-xs sm:text-sm font-semibold text-white/80 hover:bg-white/10"
             >
               {c.navLogin}
             </Link>
             <Link
               href="/pricing"
-              className="inline-flex min-h-10 items-center rounded-xl bg-cyan-400 px-3 sm:px-4 text-xs sm:text-sm font-bold text-[#0F1F3D] hover:bg-cyan-300"
+              className="hidden sm:inline-flex min-h-10 items-center rounded-xl bg-cyan-400 px-3 sm:px-4 text-xs sm:text-sm font-bold text-[#0F1F3D] hover:bg-cyan-300"
             >
               {c.ctaPrimary}
             </Link>
@@ -391,12 +391,20 @@ export function ZafirixMarketingLanding({ locale }: { locale: MarketingLocale })
         className="fixed bottom-0 inset-x-0 z-40 border-t border-slate-200 bg-white/95 backdrop-blur-md p-3 lg:hidden"
         style={{ paddingBottom: 'max(0.75rem, env(safe-area-inset-bottom))' }}
       >
-        <Link
-          href="/pricing"
-          className="flex min-h-12 items-center justify-center rounded-xl bg-[#0F1F3D] text-sm font-bold text-white"
-        >
-          {c.ctaPrimary}
-        </Link>
+        <div className="grid grid-cols-2 gap-2">
+          <Link
+            href="/login"
+            className="flex min-h-12 items-center justify-center rounded-xl border border-slate-200 bg-white text-sm font-bold text-[#0F1F3D]"
+          >
+            {c.navLogin}
+          </Link>
+          <Link
+            href="/pricing"
+            className="flex min-h-12 items-center justify-center rounded-xl bg-[#0F1F3D] text-sm font-bold text-white"
+          >
+            {c.ctaPrimary}
+          </Link>
+        </div>
       </div>
 
       <div className="mt-auto">

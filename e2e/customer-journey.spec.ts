@@ -46,6 +46,11 @@ const SOCIAL_EXPECTATIONS = [
     hrefIncludes: 'tiktok.com/@zafrix.pro',
     requireBlank: true,
   },
+  {
+    name: 'LinkedIn',
+    hrefIncludes: 'linkedin.com/company/zafirixpro',
+    requireBlank: true,
+  },
 ] as const;
 
 const REPORT_DIR = path.join(process.cwd(), 'e2e-reports');
@@ -280,22 +285,6 @@ test.describe('Prospective customer journey', () => {
         }
       }
 
-      const linkedIn = await socialLink(page, 'LinkedIn');
-      if (await linkedIn.isVisible().catch(() => false)) {
-        const href = (await linkedIn.getAttribute('href')) ?? '';
-        const target = (await linkedIn.getAttribute('target')) ?? '';
-        if (!href || href === '#' || href.startsWith('javascript:')) {
-          record('Footer', 'LinkedIn', 'Fail', `placeholder href="${href}" (not a real profile URL)`);
-          recommendations.push(
-            'Replace the LinkedIn footer href="#" with the official company page and add target="_blank" rel="noopener noreferrer".',
-          );
-        } else {
-          record('Footer', 'LinkedIn', 'Pass', `href=${href} target=${target || '(none)'}`);
-        }
-      } else {
-        record('Footer', 'LinkedIn', 'Warn', 'LinkedIn link not found');
-      }
-
       const popupPromise = page.waitForEvent('popup', { timeout: 5_000 });
       await (await socialLink(page, 'WhatsApp')).click();
       const popup = await popupPromise.catch(() => null);
@@ -389,13 +378,6 @@ test.describe('Prospective customer journey', () => {
           : 'no horizontal overflow',
       );
     });
-
-    recommendations.push(
-      'Surface Tarifs and Connexion in the mobile header (they are currently `hidden sm:inline-flex`); the sticky bottom CTA only points to pricing.',
-    );
-    recommendations.push(
-      'Align YouTube handle spelling (@ZafrixPro) with the Zafirixpro brand if the official channel name can be updated.',
-    );
   });
 
   test('Arabic landing RTL + mobile overflow', async ({ page }) => {
@@ -415,6 +397,21 @@ test.describe('Prospective customer journey', () => {
       );
     }
     expect(dir).toBe('rtl');
+
+    const headerPricing = page.locator('header').getByRole('link', { name: 'الأسعار', exact: true });
+    const headerLogin = page.locator('header').getByRole('link', { name: 'تسجيل الدخول' });
+    record(
+      'Landing AR',
+      'Mobile header Tarifs',
+      (await headerPricing.isVisible()) ? 'Pass' : 'Fail',
+      (await headerPricing.getAttribute('href')) ?? 'missing',
+    );
+    record(
+      'Landing AR',
+      'Mobile header Connexion',
+      (await headerLogin.isVisible()) ? 'Pass' : 'Fail',
+      (await headerLogin.getAttribute('href')) ?? 'missing',
+    );
 
     await page.getByRole('heading', { name: 'الوحدات الأساسية' }).scrollIntoViewIfNeeded();
     const moduleCount = await page.locator('h3').count();
