@@ -62,8 +62,10 @@ export function PublicFooter() {
               </a>
               <a
                 className={`${socialBase} bg-linear-to-br from-[#F58529]/15 via-[#DD2A7B]/15 to-[#8134AF]/15 hover:from-[#F58529]/25 hover:via-[#DD2A7B]/25 hover:to-[#8134AF]/25`}
-                href="#"
+                href="https://www.instagram.com/zafirixpro?igsh=MWw5MXNhemV3bjE5aw=="
                 aria-label="Instagram"
+                rel="noopener noreferrer"
+                target="_blank"
               >
                 <span className="inline-flex h-8 w-8 items-center justify-center rounded-lg bg-white/70">
                   <svg width="18" height="18" viewBox="0 0 24 24" aria-hidden="true">
