@@ -116,6 +116,40 @@ export function PublicFooter() {
                 </span>
                 WhatsApp
               </a>
+              <a
+                className={`${socialBase} bg-[#FF0000]/10 hover:bg-[#FF0000]/15`}
+                href="https://www.youtube.com/@ZafrixPro"
+                aria-label="YouTube"
+                rel="noopener noreferrer"
+                target="_blank"
+              >
+                <span className="inline-flex h-8 w-8 items-center justify-center rounded-lg bg-white/70">
+                  <svg width="18" height="18" viewBox="0 0 24 24" aria-hidden="true">
+                    <path
+                      fill="#FF0000"
+                      d="M23.5 6.2a3.05 3.05 0 0 0-2.15-2.16C19.5 3.6 12 3.6 12 3.6s-7.5 0-9.35.44A3.05 3.05 0 0 0 .5 6.2 32 32 0 0 0 0 12a32 32 0 0 0 .5 5.8 3.05 3.05 0 0 0 2.15 2.16C4.5 20.4 12 20.4 12 20.4s7.5 0 9.35-.44a3.05 3.05 0 0 0 2.15-2.16A32 32 0 0 0 24 12a32 32 0 0 0-.5-5.8ZM9.75 15.57V8.43L15.84 12l-6.09 3.57Z"
+                    />
+                  </svg>
+                </span>
+                YouTube
+              </a>
+              <a
+                className={`${socialBase} bg-[#0F1F3D]/8 hover:bg-cyan-400/15`}
+                href="https://www.tiktok.com/@zafrix.pro?_r=1&_t=ZS-99ARZvw5VWy"
+                aria-label="TikTok"
+                rel="noopener noreferrer"
+                target="_blank"
+              >
+                <span className="inline-flex h-8 w-8 items-center justify-center rounded-lg bg-white/70">
+                  <svg width="18" height="18" viewBox="0 0 24 24" aria-hidden="true">
+                    <path
+                      fill="#0F1F3D"
+                      d="M16.6 5.82c.9.95 2.1 1.6 3.45 1.78V10.4a7.9 7.9 0 0 1-3.45-.86v5.3a6.16 6.16 0 1 1-6.16-6.16c.2 0 .4.02.6.04v2.8a3.36 3.36 0 1 0 2.36 3.2V2.5h3.2c0 1.16.4 2.24 1 3.32Z"
+                    />
+                  </svg>
+                </span>
+                TikTok
+              </a>
             </div>
           </div>
         </div>
