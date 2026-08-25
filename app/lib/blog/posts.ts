@@ -27,7 +27,8 @@ function parseReadTime(raw: string | undefined): number | undefined {
 
 function toPost(filename: string, raw: string): BlogPost {
   const { fields, body } = parseFrontmatter(raw);
-  const locale = fields.locale === 'ar' ? 'ar' : 'fr';
+  const localeRaw = (fields.locale || fields.lang || '').trim();
+  const locale = localeRaw === 'ar' ? 'ar' : 'fr';
   const slug = fields.slug?.trim();
   const title = fields.title?.trim();
   const description = fields.description?.trim();
