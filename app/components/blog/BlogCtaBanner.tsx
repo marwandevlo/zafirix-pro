@@ -1,5 +1,6 @@
 import Link from 'next/link';
 import { ArrowRight, Shield, Sparkles } from 'lucide-react';
+import { isolateBlogBidi } from '@/app/lib/blog/bidi';
 import { BLOG_CYAN, BLOG_NAVY, BLOG_UI } from '@/app/lib/blog/copy';
 import type { BlogLocale } from '@/app/lib/blog/types';
 
@@ -24,7 +25,9 @@ export function BlogCtaBanner({ locale }: { locale: BlogLocale }) {
           {ui.ctaKicker}
         </p>
         <h2 className="mt-2 text-2xl sm:text-3xl font-extrabold text-balance max-w-2xl">{ui.ctaTitle}</h2>
-        <p className="mt-3 text-white/75 max-w-2xl leading-relaxed">{ui.ctaSupport}</p>
+        <p className="mt-3 text-white/75 max-w-2xl leading-relaxed">
+          {isAr ? isolateBlogBidi(ui.ctaSupport) : ui.ctaSupport}
+        </p>
         <div className="mt-6 flex flex-col sm:flex-row gap-3">
           <Link
             href="/signup"

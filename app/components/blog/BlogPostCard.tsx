@@ -1,5 +1,6 @@
 import Link from 'next/link';
 import { Clock } from 'lucide-react';
+import { isolateBlogBidi } from '@/app/lib/blog/bidi';
 import { BLOG_CYAN, BLOG_NAVY, BLOG_UI, formatBlogDate } from '@/app/lib/blog/copy';
 import { blogPostPath } from '@/app/lib/blog/seo';
 import type { BlogPost } from '@/app/lib/blog/types';
@@ -23,10 +24,12 @@ export function BlogPostCard({ post }: { post: BlogPost }) {
         </p>
         <h2 className="mt-2 text-lg sm:text-xl font-extrabold leading-snug text-balance" style={{ color: BLOG_NAVY }}>
           <Link href={blogPostPath(post.slug)} className="hover:underline underline-offset-4">
-            {post.title}
+            {post.locale === 'ar' ? isolateBlogBidi(post.title) : post.title}
           </Link>
         </h2>
-        <p className="mt-2 text-sm text-slate-600 leading-relaxed flex-1">{post.description}</p>
+        <p className="mt-2 text-sm text-slate-600 leading-relaxed flex-1">
+          {post.locale === 'ar' ? isolateBlogBidi(post.description) : post.description}
+        </p>
         <div className="mt-4 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-slate-500">
           <time dateTime={post.publishedAt}>{formatBlogDate(post.publishedAt, post.locale)}</time>
           <span className="inline-flex items-center gap-1">

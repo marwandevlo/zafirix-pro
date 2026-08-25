@@ -39,6 +39,24 @@ body {
 
 .blog-ar {
   font-family: var(--font-blog-arabic), "Noto Naskh Arabic", Tahoma, sans-serif;
+  unicode-bidi: isolate;
+}
+
+/* Isolate Arabic blocks as RTL without plaintext (plaintext would LTR-flip "1. …" list items). */
+.blog-ar h1,
+.blog-ar h2,
+.blog-ar h3,
+.blog-ar h4,
+.blog-ar p,
+.blog-ar li,
+.blog-ar .blog-prose {
+  unicode-bidi: isolate;
+}
+
+.blog-ltr-num {
+  direction: ltr;
+  unicode-bidi: isolate;
+  white-space: nowrap;
 }
 
 /* Prefer 100dvh on supporting browsers for mobile browser chrome */

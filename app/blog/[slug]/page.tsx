@@ -6,6 +6,7 @@ import { BlogChrome } from '@/app/components/blog/BlogChrome';
 import { BlogCtaBanner } from '@/app/components/blog/BlogCtaBanner';
 import { BlogMarkdown } from '@/app/components/blog/BlogMarkdown';
 import { BlogPostCard } from '@/app/components/blog/BlogPostCard';
+import { isolateBlogBidi } from '@/app/lib/blog/bidi';
 import { BLOG_CYAN, BLOG_NAVY, BLOG_UI, blogListingHref, formatBlogDate } from '@/app/lib/blog/copy';
 import { getBlogAlternate, getBlogPostBySlug, getBlogPostsByLocale, getBlogSlugs } from '@/app/lib/blog/posts';
 import { articleJsonLd, blogPostPath, postMetadata } from '@/app/lib/blog/seo';
@@ -41,7 +42,10 @@ export default async function BlogPostPage({ params }: Props) {
   return (
     <BlogChrome locale={post.locale} altHref={alternate ? blogPostPath(alternate.slug) : blogListingHref(post.locale === 'ar' ? 'fr' : 'ar')}>
       <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd) }} />
-      <article className="max-w-3xl mx-auto px-4 sm:px-6 pt-8 sm:pt-12 pb-16 w-full">
+      <article
+        className="max-w-3xl mx-auto px-4 sm:px-6 pt-8 sm:pt-12 pb-16 w-full"
+        dir={isAr ? 'rtl' : 'ltr'}
+      >
         <Link
           href={blogListingHref(post.locale)}
           className="inline-flex items-center gap-2 text-sm font-semibold text-slate-600 hover:text-slate-900"
@@ -55,11 +59,13 @@ export default async function BlogPostPage({ params }: Props) {
         </p>
         <h1
           className="mt-2 text-3xl sm:text-4xl font-extrabold tracking-tight text-balance leading-[1.2]"
-          style={{ color: BLOG_NAVY }}
+          style={{ color: BLOG_NAVY, unicodeBidi: isAr ? 'isolate' : undefined }}
         >
-          {post.title}
+          {isAr ? isolateBlogBidi(post.title) : post.title}
         </h1>
-        <p className="mt-4 text-base sm:text-lg text-slate-600 leading-relaxed">{post.description}</p>
+        <p className="mt-4 text-base sm:text-lg text-slate-600 leading-relaxed">
+          {isAr ? isolateBlogBidi(post.description) : post.description}
+        </p>
 
         <div className="mt-5 flex flex-wrap items-center gap-x-3 gap-y-2 text-sm text-slate-500">
           <span>
@@ -77,7 +83,7 @@ export default async function BlogPostPage({ params }: Props) {
         </div>
 
         <div className="mt-8 border-t border-slate-200 pt-2">
-          <BlogMarkdown markdown={post.body} />
+          <BlogMarkdown markdown={post.body} rtl={isAr} />
         </div>
 
         <BlogCtaBanner locale={post.locale} />
