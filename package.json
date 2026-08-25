@@ -14,7 +14,8 @@
     "simulate:journey": "node scripts/simulate-user-journey.mjs",
     "test:e2e": "playwright test",
     "test:e2e:ui": "playwright test --ui",
-    "test:e2e:journey": "playwright test e2e/customer-journey.spec.ts"
+    "test:e2e:journey": "playwright test e2e/customer-journey.spec.ts",
+    "test:e2e:internal": "playwright test e2e/internal-dashboard-tour.spec.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.90.0",

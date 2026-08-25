@@ -92,7 +92,12 @@ export default function AuditPage() {
     return (
       <div className="flex h-screen bg-gray-50">
         <AppSidebar variant="module" />
-        <main className="flex-1 flex items-center justify-center text-sm text-gray-500">Supabase requis.</main>
+        <main className="flex-1 overflow-y-auto">
+          <div className="p-6 space-y-4 max-w-5xl">
+            <TaxAuditWidget autoScan={false} />
+            <p className="text-sm text-gray-500">Audit assistant Atlas nécessite Supabase — le moteur Smart Tax Audit reste disponible.</p>
+          </div>
+        </main>
       </div>
     );
   }
