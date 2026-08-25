@@ -16,15 +16,22 @@ export function PublicFooter() {
               Plateforme SaaS de comptabilité, facturation et fiscalité au Maroc — pensée pour les PME, cabinets et groupes.
               تجربة حديثة، سهلة، ومهنية.
             </p>
-            <div className="mt-4 space-y-2 text-sm text-gray-600">
-              <div className="flex items-center gap-2">
-                <Mail size={16} className="text-gray-400" />
-                <a className="hover:underline" href="mailto:contact@zafirix.group">contact@zafirix.group</a>
-              </div>
-              <div className="flex items-center gap-2">
-                <Phone size={16} className="text-gray-400" />
-                <a className="hover:underline" href="tel:0665425852">06 65 4 2 5 8 5 2</a>
-              </div>
+            <div className="mt-4 inline-flex flex-col items-start gap-2 text-sm text-gray-600" dir="ltr">
+              <a
+                className="inline-flex items-center gap-2 hover:underline"
+                href="mailto:contact@zafirix.group"
+              >
+                <Mail size={16} className="text-gray-400 shrink-0" />
+                <span>contact@zafirix.group</span>
+              </a>
+              <a
+                className="inline-flex items-center gap-2 hover:underline whitespace-nowrap [unicode-bidi:isolate]"
+                href="tel:0665425852"
+                dir="ltr"
+              >
+                <Phone size={16} className="text-gray-400 shrink-0" />
+                <span dir="ltr">06 65 4 2 5 8 5 2</span>
+              </a>
             </div>
           </div>
 
