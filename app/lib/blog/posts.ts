@@ -39,7 +39,7 @@ function toPost(filename: string, raw: string): BlogPost {
     throw new Error(`Invalid blog frontmatter in ${filename}`);
   }
 
-  const image = fields.image?.trim() || undefined;
+  const image = fields.image?.trim() || fields.cover?.trim() || undefined;
   const overrideMinutes = parseReadTime(fields.readTime);
 
   const frontmatter: BlogFrontmatter = {
