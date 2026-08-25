@@ -67,7 +67,7 @@ import { DeadlineRadarWidget } from '@/app/components/dashboard/DeadlineRadarWid
 import { LegalCalendarWidget } from '@/app/components/dashboard/LegalCalendarWidget';
 import { NotificationCenterWidget } from '@/app/components/dashboard/NotificationCenterWidget';
 import { AuditorPassWidget } from '@/app/components/dashboard/AuditorPassWidget';
-import { MoroccoComplianceAuditWidget } from '@/app/components/dashboard/MoroccoComplianceAuditWidget';
+import { TaxAuditWidget } from '@/app/components/ai/TaxAuditWidget';
 import { fetchDashboardDeadlinesShared } from '@/app/lib/dashboard-deadlines-client';
 
 const ReferralPostOnboardingModal = dynamic(
@@ -491,7 +491,7 @@ export default function Home() {
 
           {/* ── Audit & Conformité Maroc ──────────────────────────────── */}
           <div id="morocco-audit">
-            <MoroccoComplianceAuditWidget lang={lang} />
+            <TaxAuditWidget lang={lang} />
           </div>
 
           {/* ── 4. Recent activity ──────────────────────────────────────── */}

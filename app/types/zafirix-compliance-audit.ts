@@ -16,7 +16,8 @@ export type ComplianceCheckCode =
   | 'accounting_unbalanced'
   | 'ae_ceiling_near'
   | 'ae_ceiling_exceeded'
-  | 'tva_period_gap';
+  | 'tva_period_gap'
+  | 'ras_rate_invalid';
 
 export type MoroccoComplianceFinding = {
   id: string;

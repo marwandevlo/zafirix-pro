@@ -53,6 +53,7 @@ const CRITICAL_PAGES = [
 const CRITICAL_API_ROUTES = [
   'app/api/usage/route.ts',
   'app/api/audit/compliance/route.ts',
+  'app/api/ai/tax-audit/route.ts',
   'app/api/logistics/deliveries/route.ts',
   'app/api/auto-entrepreneur/route.ts',
   'app/api/personne-physique/route.ts',
@@ -190,8 +191,10 @@ export function runStaticJourneyDiagnostics(projectRoot: string): DiagnoseCheck[
     'app/components/shell/ModuleAppShell.tsx',
     'app/components/billing/UsagePlanWidget.tsx',
     'app/components/dashboard/MoroccoComplianceAuditWidget.tsx',
+    'app/components/ai/TaxAuditWidget.tsx',
     'app/lib/zafirix-usage-server.ts',
     'app/lib/zafirix-compliance-audit-server.ts',
+    'app/lib/zafirix-smart-tax-audit.ts',
   ]) {
     const abs = path.join(projectRoot, rel);
     push(checks, {

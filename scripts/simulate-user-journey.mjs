@@ -38,6 +38,7 @@ const CRITICAL_PAGES = [
 const CRITICAL_APIS = [
   'app/api/usage/route.ts',
   'app/api/audit/compliance/route.ts',
+  'app/api/ai/tax-audit/route.ts',
   'app/api/logistics/deliveries/route.ts',
   'app/api/auto-entrepreneur/route.ts',
   'app/api/personne-physique/route.ts',
@@ -126,6 +127,10 @@ check('rules', 'ICE zéro rejeté', !isValidIce('000000000000000'));
 for (const r of [0, 7, 10, 14, 20]) check('rules', `TVA ${r}% OK`, isValidVat(r));
 check('rules', 'TVA 19% rejetée', !isValidVat(19));
 check('rules', 'HT+TVA=TTC', 1000 + 200 === 1200);
+check('rules', 'AE services 210k dépasse 200k', 210_000 >= 200_000);
+check('rules', 'AE commerce 400k sous 500k', 400_000 < 500_000);
+check('rules', 'RAS 10% dans barème', [0, 10, 15, 17, 20].includes(10));
+check('rules', 'RAS 12% hors barème', ![0, 10, 15, 17, 20].includes(12));
 
 console.log('\n5. Shell / dashboard components');
 for (const rel of [
@@ -134,8 +139,10 @@ for (const rel of [
   'app/components/shell/AppSidebar.tsx',
   'app/components/billing/UsagePlanWidget.tsx',
   'app/components/dashboard/MoroccoComplianceAuditWidget.tsx',
+  'app/components/ai/TaxAuditWidget.tsx',
   'app/lib/zafirix-usage-server.ts',
   'app/lib/zafirix-compliance-audit-server.ts',
+  'app/lib/zafirix-smart-tax-audit.ts',
   'app/lib/zafirix-journey-diagnose-server.ts',
 ]) {
   check('ui', path.basename(rel), fs.existsSync(path.join(ROOT, rel)), rel);
