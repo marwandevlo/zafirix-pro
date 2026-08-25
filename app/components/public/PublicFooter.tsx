@@ -23,7 +23,7 @@ export function PublicFooter() {
               </div>
               <div className="flex items-center gap-2">
                 <Phone size={16} className="text-gray-400" />
-                <a className="hover:underline" href="tel:+212600000000">+212 6 00 00 00 00</a>
+                <a className="hover:underline" href="tel:0665425852">06 65 4 2 5 8 5 2</a>
               </div>
             </div>
           </div>
@@ -97,7 +97,7 @@ export function PublicFooter() {
               </a>
               <a
                 className={`${socialBase} bg-[#25D366]/12 hover:bg-[#25D366]/18`}
-                href="https://wa.me/212600000000"
+                href="https://wa.me/212665425852"
                 aria-label="WhatsApp"
                 rel="noopener noreferrer"
                 target="_blank"

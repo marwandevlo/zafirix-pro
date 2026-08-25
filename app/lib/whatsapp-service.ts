@@ -75,6 +75,6 @@ export function getWhatsAppOpsPhoneDigits(): string {
   return (
     process.env.WHATSAPP_OPS_PHONE_E164?.trim() ||
     process.env.NEXT_PUBLIC_MANUAL_PAYMENT_WHATSAPP_E164?.trim() ||
-    '212600000000'
+    '212665425852'
   ).replace(/\D/g, '');
 }
