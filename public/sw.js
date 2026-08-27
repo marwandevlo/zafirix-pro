@@ -1,5 +1,5 @@
 /* ZAFIRIX PRO — lightweight service worker (cache-first static assets, network-first navigations). */
-const CACHE_VERSION = 'zafirix-pwa-v1';
+const CACHE_VERSION = 'zafirix-pwa-v2';
 const PRECACHE = [
   '/manifest.json',
   '/zafirix-icon-192.png',
@@ -26,6 +26,16 @@ function isStaticAsset(url) {
   if (pathname.startsWith('/_next/static/')) return true;
   if (pathname.startsWith('/_next/image')) return true;
   return /\.(?:js|css|png|jpg|jpeg|webp|svg|ico|woff2?)$/i.test(pathname);
+}
+
+function isCacheableStaticResponse(url, res) {
+  if (!res || !res.ok || res.redirected) return false;
+  const pathname = url.pathname;
+  const imagePath =
+    pathname.startsWith('/_next/image') || /\.(?:png|jpg|jpeg|webp|svg|ico|gif|avif)$/i.test(pathname);
+  if (!imagePath) return true;
+  const ct = (res.headers.get('content-type') || '').toLowerCase();
+  return ct.startsWith('image/');
 }
 
 self.addEventListener('fetch', (event) => {
@@ -72,13 +82,13 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  // Static assets: cache-first.
+  // Static assets: cache-first. Never cache auth redirects or HTML served at an image URL.
   if (isStaticAsset(url)) {
     event.respondWith(
       caches.match(request).then((cached) => {
-        if (cached) return cached;
+        if (cached && isCacheableStaticResponse(url, cached)) return cached;
         return fetch(request).then((res) => {
-          if (res.ok) {
+          if (isCacheableStaticResponse(url, res)) {
             const copy = res.clone();
             caches.open(CACHE_VERSION).then((cache) => cache.put(request, copy)).catch(() => {});
           }

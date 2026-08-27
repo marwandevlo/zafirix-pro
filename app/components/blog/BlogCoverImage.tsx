@@ -1,3 +1,5 @@
+import Image from 'next/image';
+
 export function BlogCoverImage({
   src,
   alt,
@@ -14,41 +16,30 @@ export function BlogCoverImage({
         ? 'blog-cover-frame my-6 overflow-hidden rounded-2xl border border-[#0F1F3D]/10'
         : 'blog-cover-frame overflow-hidden';
 
+  const sizes =
+    variant === 'card' ? '(max-width: 768px) 100vw, 420px' : '(max-width: 768px) 100vw, 768px';
+
   return (
-    <div
-      className={frame}
-      style={{ width: '100%', maxWidth: '100%', flexShrink: 0 }}
-    >
+    <div className={frame} style={{ width: '100%', maxWidth: '100%', flexShrink: 0 }}>
       <div
         className="blog-cover-ratio relative w-full overflow-hidden bg-[#0F1F3D]"
         style={{
           position: 'relative',
           width: '100%',
-          height: 0,
-          paddingBottom: '56.25%',
+          aspectRatio: '16 / 9',
+          minHeight: 160,
           overflow: 'hidden',
           background: '#0F1F3D',
         }}
       >
-        {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img
+        <Image
           src={src}
           alt={alt}
-          width={1536}
-          height={864}
-          className="absolute inset-0 block h-auto w-full max-w-full object-cover object-center"
-          style={{
-            position: 'absolute',
-            inset: 0,
-            display: 'block',
-            width: '100%',
-            height: '100%',
-            maxWidth: '100%',
-            objectFit: 'cover',
-            objectPosition: 'center',
-          }}
-          decoding="async"
-          loading={variant === 'header' ? 'eager' : 'lazy'}
+          fill
+          sizes={sizes}
+          className="object-cover object-center"
+          style={{ objectFit: 'cover', objectPosition: 'center' }}
+          priority={variant === 'header'}
         />
       </div>
     </div>

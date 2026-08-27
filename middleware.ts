@@ -62,7 +62,17 @@ const PUBLIC_PATHS = new Set([
   '/auth/callback',
 ]);
 
+/** Public files under /public must never hit the auth gate (covers, icons, fonts). */
+function isPublicStaticAsset(pathname: string): boolean {
+  if (pathname.startsWith('/images/')) return true;
+  if (pathname.startsWith('/fonts/')) return true;
+  return /\.(?:avif|css|gif|ico|jpe?g|js|map|mp4|png|svg|ttf|txt|webm|webmanifest|webp|woff2?|xml)$/i.test(
+    pathname,
+  );
+}
+
 function isPublicPath(pathname: string): boolean {
+  if (isPublicStaticAsset(pathname)) return true;
   if (PUBLIC_PATHS.has(pathname)) return true;
   if (pathname.startsWith('/landing')) return true;
   if (pathname === '/blog' || pathname.startsWith('/blog/')) return true;
@@ -323,6 +333,6 @@ export async function middleware(request: NextRequest) {
 
 export const config = {
   matcher: [
-    '/((?!_next/static|_next/image|favicon\\.ico|zafirix-favicon\\.png|zafirix-icon-192\\.png|zafirix-icon-512\\.png).*)',
+    '/((?!_next/static|_next/image|favicon\\.ico|.*\\.(?:avif|gif|ico|jpe?g|png|svg|ttf|txt|webm|webp|woff2?)$).*)',
   ],
 };
