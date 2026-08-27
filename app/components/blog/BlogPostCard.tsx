@@ -1,5 +1,6 @@
 import Link from 'next/link';
 import { Clock } from 'lucide-react';
+import { BlogCoverImage } from '@/app/components/blog/BlogCoverImage';
 import { isolateBlogBidi } from '@/app/lib/blog/bidi';
 import { BLOG_CYAN, BLOG_NAVY, BLOG_UI, formatBlogDate } from '@/app/lib/blog/copy';
 import { blogPostPath } from '@/app/lib/blog/seo';
@@ -11,12 +12,7 @@ export function BlogPostCard({ post }: { post: BlogPost }) {
   return (
     <article className="rounded-2xl border border-[#0F1F3D]/8 bg-white overflow-hidden shadow-sm flex flex-col h-full">
       {post.image ? (
-        // eslint-disable-next-line @next/next/no-img-element
-        <img
-          src={post.image}
-          alt={post.imageAlt ?? post.title}
-          className="h-40 sm:h-44 w-full object-cover"
-        />
+        <BlogCoverImage src={post.image} alt={post.imageAlt ?? post.title} variant="card" />
       ) : null}
       <div className="p-5 sm:p-6 flex flex-col flex-1">
         <p className="text-[11px] font-bold uppercase tracking-widest" style={{ color: BLOG_CYAN }}>

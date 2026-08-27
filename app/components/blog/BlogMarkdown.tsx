@@ -1,9 +1,24 @@
 'use client';
 
 import Link from 'next/link';
+import { isValidElement, type ReactNode } from 'react';
 import ReactMarkdown from 'react-markdown';
+import { BlogCoverImage } from '@/app/components/blog/BlogCoverImage';
 import { isolateBlogBidi } from '@/app/lib/blog/bidi';
 import { BLOG_CYAN, BLOG_NAVY } from '@/app/lib/blog/copy';
+
+function onlyCoverChild(children: ReactNode) {
+  const list = Array.isArray(children) ? children : [children];
+  const significant = list.filter((child) => {
+    if (child == null || child === false) return false;
+    if (typeof child === 'string') return child.trim().length > 0;
+    return true;
+  });
+  if (significant.length === 1 && isValidElement(significant[0]) && significant[0].type === BlogCoverImage) {
+    return significant[0];
+  }
+  return null;
+}
 
 export function BlogMarkdown({ markdown, rtl = false }: { markdown: string; rtl?: boolean }) {
   const text = (children: React.ReactNode) => (rtl ? isolateBlogBidi(children) : children);
@@ -22,7 +37,11 @@ export function BlogMarkdown({ markdown, rtl = false }: { markdown: string; rtl?
               {text(children)}
             </h3>
           ),
-          p: ({ children }) => <p className="my-4 text-slate-700">{text(children)}</p>,
+          p: ({ children }) => {
+            const cover = onlyCoverChild(children);
+            if (cover) return cover;
+            return <p className="my-4 text-slate-700">{text(children)}</p>;
+          },
           ul: ({ children }) => <ul className="my-4 space-y-2 ps-5 list-disc text-slate-700">{children}</ul>,
           ol: ({ children }) => <ol className="my-4 space-y-2 ps-5 list-decimal text-slate-700">{children}</ol>,
           li: ({ children }) => <li className="leading-relaxed">{text(children)}</li>,
@@ -54,14 +73,7 @@ export function BlogMarkdown({ markdown, rtl = false }: { markdown: string; rtl?
             </code>
           ),
           img: ({ src, alt }) =>
-            src ? (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img
-                src={src}
-                alt={alt ?? ''}
-                className="my-6 w-full rounded-2xl border border-[#0F1F3D]/10 object-cover"
-              />
-            ) : null,
+            typeof src === 'string' && src ? <BlogCoverImage src={src} alt={alt ?? ''} variant="body" /> : null,
         }}
       >
         {markdown}

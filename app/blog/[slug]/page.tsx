@@ -3,6 +3,7 @@ import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { ArrowLeft, Clock } from 'lucide-react';
 import { BlogChrome } from '@/app/components/blog/BlogChrome';
+import { BlogCoverImage, stripLeadCoverImage } from '@/app/components/blog/BlogCoverImage';
 import { BlogCtaBanner } from '@/app/components/blog/BlogCtaBanner';
 import { BlogMarkdown } from '@/app/components/blog/BlogMarkdown';
 import { BlogPostCard } from '@/app/components/blog/BlogPostCard';
@@ -82,8 +83,12 @@ export default async function BlogPostPage({ params }: Props) {
           </span>
         </div>
 
+        {post.image ? (
+          <BlogCoverImage src={post.image} alt={post.imageAlt ?? post.title} variant="header" />
+        ) : null}
+
         <div className="mt-8 border-t border-slate-200 pt-2">
-          <BlogMarkdown markdown={post.body} rtl={isAr} />
+          <BlogMarkdown markdown={stripLeadCoverImage(post.body, post.image)} rtl={isAr} />
         </div>
 
         <BlogCtaBanner locale={post.locale} />
