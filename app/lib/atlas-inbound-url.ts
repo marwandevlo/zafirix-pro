@@ -1,8 +1,9 @@
+import { ATLAS_PRODUCTION_HOST, ATLAS_PRODUCTION_ORIGIN } from '@/app/lib/atlas-app-url';
 import { normalizeReferralCode } from '@/app/lib/atlas-referral-utils';
 
 /** Apex production host (Facebook / WhatsApp often omit www). */
-export const ATLAS_CANONICAL_HOST = 'zafirixpro.com';
-export const ATLAS_CANONICAL_ORIGIN = `https://${ATLAS_CANONICAL_HOST}`;
+export const ATLAS_CANONICAL_HOST = ATLAS_PRODUCTION_HOST;
+export const ATLAS_CANONICAL_ORIGIN = ATLAS_PRODUCTION_ORIGIN;
 
 const PRODUCTION_ALIAS_HOSTS = new Set([
   ATLAS_CANONICAL_HOST,
@@ -87,16 +88,6 @@ export function shouldForceHttps(host: string): boolean {
 }
 
 export function configuredCanonicalHost(): string {
-  const raw = (process.env.NEXT_PUBLIC_APP_URL || process.env.NEXT_PUBLIC_SITE_URL || '').trim();
-  if (raw) {
-    try {
-      const u = new URL(raw.startsWith('http') ? raw : `https://${raw}`);
-      const h = u.hostname.toLowerCase();
-      if (h === ATLAS_CANONICAL_HOST || h === `www.${ATLAS_CANONICAL_HOST}`) return h;
-    } catch {
-      // fall through
-    }
-  }
   return ATLAS_CANONICAL_HOST;
 }
 

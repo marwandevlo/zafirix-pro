@@ -1,38 +1,69 @@
 /**
- * Canonical public URLs for Zafirix Pro (emails, shared links, OAuth redirects).
+ * Canonical public URLs for Zafirix Pro (emails, shared links, OAuth, metadata).
  *
- * Priority: NEXT_PUBLIC_APP_URL → NEXT_PUBLIC_SITE_URL → VERCEL_URL → localhost.
- * Set both APP_URL and SITE_URL to the same production origin on Vercel (no trailing slash).
+ * Production never emits `*.vercel.app`. Custom domain is always https://zafirixpro.com.
+ * Reads NEXT_PUBLIC_SITE_URL first, then NEXT_PUBLIC_APP_URL, then the production default.
  */
 
-function trimOrigin(value: string | undefined): string | null {
+export const ATLAS_PRODUCTION_HOST = 'zafirixpro.com';
+export const ATLAS_PRODUCTION_ORIGIN = `https://${ATLAS_PRODUCTION_HOST}`;
+
+function trimOrigin(value: string | undefined | null): string | null {
   const v = value?.trim();
   if (!v) return null;
   return v.replace(/\/$/, '');
 }
 
-/** Primary app origin (dashboard, auth, emails). */
-export function getPublicAppUrl(): string {
-  const explicit =
-    trimOrigin(process.env.NEXT_PUBLIC_APP_URL) ??
-    trimOrigin(process.env.NEXT_PUBLIC_SITE_URL);
-  if (explicit) return explicit;
+function isProductionRuntime(): boolean {
+  return process.env.VERCEL_ENV === 'production' || process.env.NODE_ENV === 'production';
+}
 
-  const vercel = trimOrigin(process.env.VERCEL_URL);
-  if (vercel) {
-    return vercel.startsWith('http') ? vercel : `https://${vercel}`;
+/** Reject Vercel preview hosts and fold www → apex. */
+export function normalizePublicOrigin(raw: string | undefined | null): string | null {
+  const trimmed = trimOrigin(raw);
+  if (!trimmed) return null;
+  const withProtocol = /^https?:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`;
+  try {
+    const url = new URL(withProtocol);
+    const host = url.hostname.toLowerCase();
+    if (host.endsWith('.vercel.app')) return ATLAS_PRODUCTION_ORIGIN;
+    if (host === ATLAS_PRODUCTION_HOST || host === `www.${ATLAS_PRODUCTION_HOST}`) {
+      return ATLAS_PRODUCTION_ORIGIN;
+    }
+    if (host === 'localhost' || host.endsWith('.localhost')) {
+      return `${url.protocol}//${url.host}`.replace(/\/$/, '');
+    }
+    return `${url.protocol}//${url.host}`.replace(/\/$/, '');
+  } catch {
+    return null;
   }
+}
 
-  if (typeof window !== 'undefined') {
-    return window.location.origin;
+/** Primary app origin (dashboard, auth, emails, Open Graph, sitemaps). */
+export function getPublicAppUrl(): string {
+  const fromSite = normalizePublicOrigin(process.env.NEXT_PUBLIC_SITE_URL);
+  if (fromSite) return fromSite;
+
+  const fromApp = normalizePublicOrigin(process.env.NEXT_PUBLIC_APP_URL);
+  if (fromApp) return fromApp;
+
+  if (isProductionRuntime()) return ATLAS_PRODUCTION_ORIGIN;
+
+  if (typeof window !== 'undefined' && window.location?.origin) {
+    const live = normalizePublicOrigin(window.location.origin);
+    if (live) return live;
   }
 
   return 'http://localhost:3000';
 }
 
+export function getMetadataBaseUrl(): URL {
+  return new URL(`${getPublicAppUrl()}/`);
+}
+
 /** Dedicated client portal origin (e.g. https://portal.zafirixpro.ma). Falls back to app URL. */
 export function getPortalBaseUrl(): string {
-  return trimOrigin(process.env.NEXT_PUBLIC_PORTAL_URL) ?? getPublicAppUrl();
+  return normalizePublicOrigin(process.env.NEXT_PUBLIC_PORTAL_URL) ?? getPublicAppUrl();
 }
 
 /** Hostname for portal subdomain rewrites (e.g. portal.zafirixpro.ma). */

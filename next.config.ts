@@ -15,6 +15,18 @@ function resolveBuildId(): string {
 }
 
 const appBuildId = resolveBuildId();
+const PRODUCTION_SITE_URL = 'https://zafirixpro.com';
+
+function resolveBundledSiteUrl(): string | undefined {
+  const isProd = process.env.VERCEL_ENV === 'production' || process.env.NODE_ENV === 'production';
+  if (!isProd) return process.env.NEXT_PUBLIC_SITE_URL?.trim() || process.env.NEXT_PUBLIC_APP_URL?.trim();
+  const raw = (process.env.NEXT_PUBLIC_SITE_URL || process.env.NEXT_PUBLIC_APP_URL || '').trim();
+  if (!raw || /vercel\.app/i.test(raw)) return PRODUCTION_SITE_URL;
+  if (/zafirixpro\.com/i.test(raw)) return PRODUCTION_SITE_URL;
+  return raw.replace(/\/$/, '');
+}
+
+const bundledSiteUrl = resolveBundledSiteUrl();
 
 const htmlNoStoreHeaders = [
   { key: 'Cache-Control', value: 'no-store, max-age=0, must-revalidate' },
@@ -48,6 +60,12 @@ const nativeTraceGlobs = [
 const nextConfig: NextConfig = {
   env: {
     NEXT_PUBLIC_APP_BUILD_ID: appBuildId,
+    ...(bundledSiteUrl
+      ? {
+          NEXT_PUBLIC_SITE_URL: bundledSiteUrl,
+          NEXT_PUBLIC_APP_URL: bundledSiteUrl,
+        }
+      : {}),
   },
   generateBuildId: async () => appBuildId,
   allowedDevOrigins: ['127.0.0.1'],

@@ -13,6 +13,7 @@ import { PageViewTracker } from "@/app/components/analytics/PageViewTracker";
 import { AppToastHost } from "@/app/components/ui/AppToastHost";
 import { PwaRegister } from "@/app/components/pwa/PwaRegister";
 import { APP_BUILD_ID } from "@/app/lib/app-build-id";
+import { getMetadataBaseUrl } from "@/app/lib/atlas-app-url";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -24,11 +25,35 @@ const geistMono = Geist_Mono({
   subsets: ["latin"],
 });
 
+const SITE_NAME = "Zafirixpro";
+const SITE_TITLE = "ZAFIRIX PRO — Gestion d'entreprise";
+const SITE_DESCRIPTION =
+  "Plateforme SaaS moderne pour la gestion d'entreprise, facturation et comptabilité au Maroc";
+
 export const metadata: Metadata = {
-  title: "ZAFIRIX PRO — Gestion d'entreprise",
-  description:
-    "Plateforme SaaS moderne pour la gestion d'entreprise, facturation et comptabilité au Maroc",
+  metadataBase: getMetadataBaseUrl(),
+  title: SITE_TITLE,
+  description: SITE_DESCRIPTION,
   applicationName: "ZAFIRIX PRO",
+  alternates: {
+    canonical: "/",
+  },
+  openGraph: {
+    type: "website",
+    locale: "fr_MA",
+    alternateLocale: ["ar_MA"],
+    url: "/",
+    siteName: SITE_NAME,
+    title: SITE_TITLE,
+    description: SITE_DESCRIPTION,
+    images: [{ url: "/zafirix-icon-512.png", width: 512, height: 512, alt: SITE_NAME }],
+  },
+  twitter: {
+    card: "summary_large_image",
+    title: SITE_TITLE,
+    description: SITE_DESCRIPTION,
+    images: ["/zafirix-icon-512.png"],
+  },
   appleWebApp: {
     capable: true,
     statusBarStyle: "black-translucent",

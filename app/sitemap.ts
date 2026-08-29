@@ -12,6 +12,7 @@ export default function sitemap(): MetadataRoute.Sitemap {
   }));
 
   return [
+    { url: absoluteUrl('/'), lastModified: new Date(), changeFrequency: 'weekly', priority: 1 },
     { url: absoluteUrl('/blog'), lastModified: new Date(), changeFrequency: 'weekly', priority: 0.8 },
     { url: absoluteUrl('/blog?lang=ar'), lastModified: new Date(), changeFrequency: 'weekly', priority: 0.8 },
     { url: absoluteUrl('/landing/fr'), lastModified: new Date(), changeFrequency: 'weekly', priority: 0.9 },

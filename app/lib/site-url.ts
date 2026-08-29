@@ -1,6 +1,6 @@
 /**
  * Canonical site origin for Supabase auth redirects (password reset, etc.).
- * Delegates to atlas-app-url for a single source of truth.
+ * Always https://zafirixpro.com in production — never *.vercel.app.
  */
 import { getPublicAppUrl } from '@/app/lib/atlas-app-url';
 
