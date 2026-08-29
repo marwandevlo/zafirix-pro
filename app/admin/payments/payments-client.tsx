@@ -4,7 +4,10 @@ import { useEffect, useMemo, useState } from 'react';
 import AdminShell from '@/app/admin/_components/AdminShell';
 import { isAtlasSupabaseDataEnabled } from '@/app/lib/atlas-data-source';
 import { supabase } from '@/app/lib/supabase';
-import { AdminAlert, AdminEmptyState, AdminTableSkeleton } from '@/app/admin/_components/AdminUi';
+import { AdminAlert } from '@/app/admin/_components/AdminUi';
+import { AdminDataTable, AdminFilterChip, type AdminColumn } from '@/app/admin/_components/AdminDataTable';
+import { AdminStatusBadge } from '@/app/admin/_components/AdminStatusBadge';
+import { MadAmount } from '@/app/components/ui/MadAmount';
 
 type PaymentRequestRow = {
   id: string;
@@ -22,13 +25,6 @@ type PaymentRequestRow = {
 
 const FILTERS = ['all', 'pending', 'paid', 'rejected'] as const;
 type Filter = (typeof FILTERS)[number];
-
-function statusBadge(status: string): { label: string; cls: string } {
-  if (status === 'pending') return { label: 'Pending', cls: 'bg-amber-50 text-amber-800 border-amber-200' };
-  if (status === 'paid') return { label: 'Paid', cls: 'bg-blue-50 text-blue-800 border-blue-200' };
-  if (status === 'rejected') return { label: 'Rejected', cls: 'bg-red-50 text-red-800 border-red-200' };
-  return { label: status, cls: 'bg-gray-50 text-gray-700 border-gray-200' };
-}
 
 export default function PaymentsAdminClient() {
   const [filter, setFilter] = useState<Filter>('pending');
@@ -95,91 +91,89 @@ export default function PaymentsAdminClient() {
     return { pending, paid, rejected, total: rows.length };
   }, [rows]);
 
-  return (
-    <AdminShell title="Admin · Payments">
-      <div className="space-y-4">
-        {loading ? <AdminAlert variant="info">Chargement…</AdminAlert> : null}
-        {error ? <AdminAlert variant="error">Unable to load payment requests. {error}</AdminAlert> : null}
-        {warning ? <AdminAlert variant="warning">{warning}</AdminAlert> : null}
-      </div>
-
-      <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
-        <div className="px-6 py-4 border-b border-gray-100 flex items-center justify-between gap-4">
-          <div>
-            <p className="text-sm font-semibold text-gray-900">Payment requests · طلبات الدفع</p>
-            <p className="text-xs text-gray-500 mt-0.5">Filter by status and review recent requests.</p>
-          </div>
-
-          <div className="flex flex-wrap items-center gap-2">
-            {FILTERS.map((f) => (
-              <button
-                key={f}
-                onClick={() => setFilter(f)}
-                className={`px-3 py-1.5 rounded-full text-xs font-semibold border transition-colors ${
-                  filter === f ? 'bg-[#0F1F3D] text-white border-[#0F1F3D]' : 'bg-white text-gray-600 border-gray-200 hover:bg-gray-50'
-                }`}
-              >
-                {f === 'all' ? `All (${stats.total})` : f === 'pending' ? `Pending (${stats.pending})` : f === 'paid' ? `Paid (${stats.paid})` : `Rejected (${stats.rejected})`}
-              </button>
-            ))}
-          </div>
+  const columns: AdminColumn<PaymentRequestRow>[] = [
+    {
+      key: 'id',
+      header: 'Reference',
+      sortValue: (r) => r.id,
+      className: 'font-mono text-[11px] whitespace-nowrap',
+      render: (r) => r.id,
+    },
+    {
+      key: 'plan',
+      header: 'Plan',
+      sortValue: (r) => r.planId,
+      render: (r) => r.planId,
+    },
+    {
+      key: 'amount',
+      header: 'Amount',
+      sortValue: (r) => r.amountMad,
+      className: 'text-right font-semibold',
+      headerClassName: 'text-right',
+      render: (r) => <MadAmount value={r.amountMad} />,
+    },
+    {
+      key: 'method',
+      header: 'Method',
+      sortValue: (r) => r.paymentMethod,
+      render: (r) => (r.paymentMethod === 'manual' ? `manual · ${r.manualProvider ?? '—'}` : r.paymentMethod),
+    },
+    {
+      key: 'status',
+      header: 'Status',
+      sortValue: (r) => r.status,
+      render: (r) => <AdminStatusBadge value={r.status} />,
+    },
+    {
+      key: 'created',
+      header: 'Created',
+      sortValue: (r) => r.createdAt,
+      className: 'whitespace-nowrap text-slate-500',
+      render: (r) => (r.createdAt ? r.createdAt.slice(0, 10) : '—'),
+    },
+    {
+      key: 'user',
+      header: 'User',
+      sortValue: (r) => r.userEmail || r.userId,
+      render: (r) => (
+        <div>
+          <p className="font-medium">{r.userEmail || '—'}</p>
+          <p className="font-mono text-[11px] text-slate-400">{r.userId}</p>
         </div>
+      ),
+    },
+  ];
 
-        {loading ? (
-          <div className="px-6 py-6">
-            <AdminTableSkeleton cols={7} rows={7} />
-          </div>
-        ) : rows.length === 0 ? (
-          <div className="px-6 py-8">
-            <AdminEmptyState
-              title="No payment requests"
-              description={filter === 'all' ? 'No requests found yet.' : `No requests with status “${filter}”.`}
-            />
-          </div>
-        ) : (
-          <div className="atlas-table-scroll">
-            <table className="min-w-[1100px] w-full text-sm">
-              <thead className="bg-gray-50 text-gray-500">
-                <tr className="text-left">
-                  <th className="px-6 py-4 font-semibold">Reference</th>
-                  <th className="px-6 py-4 font-semibold">Plan</th>
-                  <th className="px-6 py-4 font-semibold text-right">Amount</th>
-                  <th className="px-6 py-4 font-semibold">Method</th>
-                  <th className="px-6 py-4 font-semibold">Status</th>
-                  <th className="px-6 py-4 font-semibold">Created</th>
-                  <th className="px-6 py-4 font-semibold">User</th>
-                </tr>
-              </thead>
-              <tbody>
-                {rows.map((r) => {
-                  const badge = statusBadge(r.status);
-                  const method = r.paymentMethod === 'manual' ? `manual · ${r.manualProvider ?? '—'}` : r.paymentMethod;
-                  return (
-                    <tr key={r.id} className="border-t border-gray-100 hover:bg-gray-50">
-                      <td className="px-6 py-4 font-mono text-xs text-gray-700">{r.id}</td>
-                      <td className="px-6 py-4 text-gray-700">{r.planId}</td>
-                      <td className="px-6 py-4 text-right font-semibold text-gray-900">
-                        {Math.round(r.amountMad).toLocaleString()} {r.currency}
-                      </td>
-                      <td className="px-6 py-4 text-gray-700">{method}</td>
-                      <td className="px-6 py-4">
-                        <span className={`inline-flex items-center px-2.5 py-1 rounded-full text-xs font-semibold border ${badge.cls}`}>
-                          {badge.label}
-                        </span>
-                      </td>
-                      <td className="px-6 py-4 text-gray-600">{r.createdAt ? r.createdAt.slice(0, 10) : '—'}</td>
-                      <td className="px-6 py-4 text-gray-700">
-                        <div className="font-medium text-sm">{r.userEmail || '—'}</div>
-                        <div className="font-mono text-[11px] text-gray-400 mt-0.5">{r.userId}</div>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </div>
+  return (
+    <AdminShell title="Payments">
+      {error ? <AdminAlert variant="error">Unable to load payment requests. {error}</AdminAlert> : null}
+      {warning ? <AdminAlert variant="warning">{warning}</AdminAlert> : null}
+      <p className="text-sm text-slate-500">Demandes de paiement manuelles et Paddle — filtrez par statut.</p>
+      <AdminDataTable
+        rows={rows}
+        columns={columns}
+        rowKey={(r) => r.id}
+        loading={loading}
+        emptyTitle="No payment requests"
+        emptyDescription={filter === 'all' ? 'No requests found yet.' : `No requests with status “${filter}”.`}
+        minWidthClass="min-w-[1100px]"
+        toolbar={
+          <>
+            {FILTERS.map((f) => (
+              <AdminFilterChip key={f} active={filter === f} onClick={() => setFilter(f)}>
+                {f === 'all'
+                  ? `All (${stats.total})`
+                  : f === 'pending'
+                    ? `Pending (${stats.pending})`
+                    : f === 'paid'
+                      ? `Paid (${stats.paid})`
+                      : `Rejected (${stats.rejected})`}
+              </AdminFilterChip>
+            ))}
+          </>
+        }
+      />
     </AdminShell>
   );
 }

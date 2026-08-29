@@ -2,6 +2,8 @@
 
 import { useEffect, useState } from 'react';
 import AdminShell from '@/app/admin/_components/AdminShell';
+import { AdminDataTable, type AdminColumn } from '@/app/admin/_components/AdminDataTable';
+import { AdminStatusBadge } from '@/app/admin/_components/AdminStatusBadge';
 import {
   Activity, AlertCircle, BarChart3, Database, Gauge, HeartPulse, Route, Shield, Users,
 } from 'lucide-react';
@@ -155,36 +157,58 @@ export default function AdminOperationsPage() {
             <code className="text-[11px] bg-gray-50 px-1 rounded">/api/admin/diagnose</code>
           </p>
           {journey?.fails?.length ? (
-            <ul className="space-y-1.5 text-xs text-rose-700">
-              {journey.fails.map((f) => (
-                <li key={f.id}>
-                  ✗ [{f.area}] {f.title}
-                  {f.detail ? ` — ${f.detail}` : ''}
-                </li>
-              ))}
-            </ul>
+            <AdminDataTable
+              rows={journey.fails}
+              columns={
+                [
+                  { key: 'area', header: 'Area', sortValue: (f) => f.area, render: (f) => f.area },
+                  {
+                    key: 'severity',
+                    header: 'Status',
+                    sortValue: (f) => f.severity,
+                    render: (f) => <AdminStatusBadge value={f.severity} />,
+                  },
+                  { key: 'title', header: 'Check', sortValue: (f) => f.title, render: (f) => f.title },
+                  { key: 'detail', header: 'Detail', render: (f) => <span className="text-xs text-slate-500">{f.detail ?? '—'}</span> },
+                ] satisfies AdminColumn<JourneyCheck>[]
+              }
+              rowKey={(f) => f.id}
+              emptyTitle="Aucun échec"
+              pageSize={8}
+              minWidthClass="min-w-[720px]"
+              searchPlaceholder="Filtrer un check…"
+            />
           ) : journey ? (
             <p className="text-sm text-emerald-700 font-medium">Aucun échec dur détecté sur le parcours critique.</p>
           ) : null}
         </div>
 
         <div className="grid lg:grid-cols-2 gap-6">
-          <div className="rounded-2xl border border-gray-200 bg-white overflow-hidden">
-            <div className="px-5 py-3 border-b font-semibold text-gray-800 flex items-center gap-2">
+          <div>
+            <div className="mb-2 flex items-center gap-2 text-sm font-semibold text-gray-800">
               <Database className="w-4 h-4" /> Dépendances
             </div>
-            <ul className="divide-y">
-              {deps.map((d) => (
-                <li key={d.name} className="px-5 py-3 flex items-center justify-between text-sm">
-                  <span className="font-medium">{d.name}</span>
-                  <span className={`px-2 py-0.5 rounded text-xs font-semibold capitalize ${statusColor(d.status)}`}>
-                    {d.status}
-                    {d.latencyMs != null ? ` · ${d.latencyMs}ms` : ''}
-                  </span>
-                </li>
-              ))}
-              {deps.length === 0 ? <li className="px-5 py-6 text-gray-400 text-sm">Chargement…</li> : null}
-            </ul>
+            <AdminDataTable
+              rows={deps}
+              columns={
+                [
+                  { key: 'name', header: 'Service', sortValue: (d) => d.name, render: (d) => <span className="font-medium">{d.name}</span> },
+                  { key: 'status', header: 'Status', sortValue: (d) => d.status, render: (d) => <AdminStatusBadge value={d.status} /> },
+                  {
+                    key: 'latency',
+                    header: 'Latency',
+                    sortValue: (d) => d.latencyMs ?? 0,
+                    className: 'tabular-nums text-slate-500',
+                    render: (d) => (d.latencyMs != null ? `${d.latencyMs} ms` : '—'),
+                  },
+                  { key: 'detail', header: 'Detail', render: (d) => <span className="text-xs text-slate-500">{d.detail ?? '—'}</span> },
+                ] satisfies AdminColumn<DepCheck>[]
+              }
+              rowKey={(d) => d.name}
+              emptyTitle="Aucune dépendance"
+              pageSize={8}
+              minWidthClass="min-w-[640px]"
+            />
           </div>
 
           <div className="rounded-2xl border border-gray-200 bg-white overflow-hidden">

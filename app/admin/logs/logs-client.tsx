@@ -2,10 +2,11 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import AdminShell from '@/app/admin/_components/AdminShell';
+import { AdminDataTable, type AdminColumn } from '@/app/admin/_components/AdminDataTable';
+import { AdminStatusBadge } from '@/app/admin/_components/AdminStatusBadge';
+import { AdminAlert } from '@/app/admin/_components/AdminUi';
 import { isAtlasSupabaseDataEnabled } from '@/app/lib/atlas-data-source';
 import { supabase } from '@/app/lib/supabase';
-import { AdminAlert, AdminEmptyState, AdminTableSkeleton } from '@/app/admin/_components/AdminUi';
-import { TableScroll } from '@/app/components/ui/TableScroll';
 
 type LogRow = {
   id: string;
@@ -15,6 +16,14 @@ type LogRow = {
   details: unknown;
   created_at: string;
 };
+
+function actionTone(action: string): string {
+  const a = action.toLowerCase();
+  if (a.includes('ban') || a.includes('delete') || a.includes('error')) return 'error';
+  if (a.includes('suspend') || a.includes('reject')) return 'pending';
+  if (a.includes('approv') || a.includes('activ')) return 'active';
+  return action;
+}
 
 export default function AdminLogsClient() {
   const [loading, setLoading] = useState(false);
@@ -34,9 +43,7 @@ export default function AdminLogsClient() {
         const token = data.session?.access_token ?? '';
         if (!token) return;
 
-        const sp = new URLSearchParams();
-        if (q.trim()) sp.set('q', q.trim());
-        const res = await fetch(`/api/admin/logs${sp.toString() ? `?${sp.toString()}` : ''}`, {
+        const res = await fetch('/api/admin/logs', {
           headers: { Authorization: `Bearer ${token}` },
         });
         const json: unknown = await res.json().catch(() => ({}));
@@ -61,71 +68,74 @@ export default function AdminLogsClient() {
     return () => {
       cancelled = true;
     };
-  }, [q]);
+  }, []);
 
-  const visible = useMemo(() => rows, [rows]);
+  const visible = useMemo(() => {
+    const needle = q.trim().toLowerCase();
+    if (!needle) return rows;
+    return rows.filter((r) =>
+      `${r.action} ${r.admin_id} ${r.target_user_id ?? ''} ${JSON.stringify(r.details ?? {})}`
+        .toLowerCase()
+        .includes(needle),
+    );
+  }, [q, rows]);
+
+  const columns: AdminColumn<LogRow>[] = [
+    {
+      key: 'created_at',
+      header: 'Date',
+      sortValue: (r) => new Date(r.created_at || 0).getTime(),
+      className: 'whitespace-nowrap text-slate-500',
+      render: (r) => (r.created_at ? new Date(r.created_at).toLocaleString('fr-MA') : '—'),
+    },
+    {
+      key: 'action',
+      header: 'Action',
+      sortValue: (r) => r.action,
+      render: (r) => <AdminStatusBadge value={actionTone(r.action)} label={r.action} />,
+    },
+    {
+      key: 'admin_id',
+      header: 'Admin',
+      sortValue: (r) => r.admin_id,
+      className: 'font-mono text-xs whitespace-nowrap',
+      render: (r) => r.admin_id,
+    },
+    {
+      key: 'target_user_id',
+      header: 'Target',
+      sortValue: (r) => r.target_user_id ?? '',
+      className: 'font-mono text-xs whitespace-nowrap',
+      render: (r) => r.target_user_id ?? '—',
+    },
+    {
+      key: 'details',
+      header: 'Details',
+      className: 'min-w-[18rem]',
+      render: (r) => (
+        <pre className="max-w-[28rem] overflow-x-auto whitespace-pre font-mono text-[11px] text-slate-500">
+          {JSON.stringify(r.details ?? {}, null, 2)}
+        </pre>
+      ),
+    },
+  ];
 
   return (
-    <AdminShell title="Admin · Logs">
-      <div className="space-y-4">
-        {loading ? <AdminAlert variant="info">Chargement…</AdminAlert> : null}
-        {error ? <AdminAlert variant="error">{error}</AdminAlert> : null}
-      </div>
-
-      <div className="mt-6 bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden min-w-0">
-        <div className="px-6 py-4 border-b border-gray-100">
-          <p className="text-sm font-semibold text-gray-900">Admin logs</p>
-          <p className="text-xs text-gray-500 mt-0.5">Every privileged action should appear here.</p>
-          <div className="mt-4">
-            <input
-              value={q}
-              onChange={(e) => setQ(e.target.value)}
-              placeholder="Search action/admin/target…"
-              className="w-full px-3 py-2 rounded-xl border border-gray-200 text-sm focus:outline-none focus:ring-1 focus:ring-blue-400 focus:border-blue-400"
-            />
-          </div>
-        </div>
-
-        {loading ? (
-          <div className="px-6 py-6">
-            <AdminTableSkeleton cols={5} rows={8} />
-          </div>
-        ) : visible.length === 0 ? (
-          <div className="px-6 py-8">
-            <AdminEmptyState title="No logs yet" description="Actions like role changes, bans, and deletions will appear here." />
-          </div>
-        ) : (
-          <TableScroll>
-            <table className="min-w-[1100px] w-full text-sm">
-              <thead className="bg-gray-50 text-gray-500">
-                <tr className="text-left">
-                  <th className="px-6 py-4 font-semibold">Date</th>
-                  <th className="px-6 py-4 font-semibold">Action</th>
-                  <th className="px-6 py-4 font-semibold">Admin</th>
-                  <th className="px-6 py-4 font-semibold">Target</th>
-                  <th className="px-6 py-4 font-semibold">Details</th>
-                </tr>
-              </thead>
-              <tbody>
-                {visible.map((r) => (
-                  <tr key={r.id} className="border-t border-gray-100 hover:bg-gray-50">
-                    <td className="px-6 py-4 text-gray-700">{r.created_at ? new Date(r.created_at).toLocaleString() : '—'}</td>
-                    <td className="px-6 py-4 font-semibold text-gray-900">{r.action}</td>
-                    <td className="px-6 py-4 font-mono text-xs text-gray-700 whitespace-nowrap">{r.admin_id}</td>
-                    <td className="px-6 py-4 font-mono text-xs text-gray-700 whitespace-nowrap">{r.target_user_id ?? '—'}</td>
-                    <td className="px-6 py-4 min-w-[16rem]">
-                      <pre className="text-xs text-gray-700 whitespace-pre max-w-[36rem]">
-                        {JSON.stringify(r.details ?? {}, null, 2)}
-                      </pre>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </TableScroll>
-        )}
-      </div>
+    <AdminShell title="Logs">
+      {error ? <AdminAlert variant="error">{error}</AdminAlert> : null}
+      <p className="text-sm text-slate-500">Journal des actions privilégiées — rôles, bans, suppressions.</p>
+      <AdminDataTable
+        rows={visible}
+        columns={columns}
+        rowKey={(r) => r.id}
+        loading={loading}
+        search={q}
+        onSearchChange={setQ}
+        searchPlaceholder="Action, admin UUID, cible…"
+        emptyTitle="Aucun log"
+        emptyDescription="Les changements de rôle, bans et suppressions apparaîtront ici."
+        minWidthClass="min-w-[1100px]"
+      />
     </AdminShell>
   );
 }
-

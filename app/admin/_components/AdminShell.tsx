@@ -4,7 +4,21 @@ import type React from 'react';
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
-import { Building2, CreditCard, LayoutDashboard, ShieldCheck, Users, Boxes, BarChart3, Banknote, TrendingUp, ScrollText, HeartPulse, Activity } from 'lucide-react';
+import {
+  Activity,
+  Banknote,
+  BarChart3,
+  Boxes,
+  Building2,
+  CreditCard,
+  Gift,
+  HeartPulse,
+  LayoutDashboard,
+  ScrollText,
+  ShieldCheck,
+  TrendingUp,
+  Users,
+} from 'lucide-react';
 import { atlasDataBackend, isAtlasSupabaseDataEnabled } from '@/app/lib/atlas-data-source';
 import { supabase } from '@/app/lib/supabase';
 import { AdminTableSkeleton } from '@/app/admin/_components/AdminUi';
@@ -12,22 +26,41 @@ import { isLocalDevAdminEnabled } from '@/app/lib/atlas-sprint0-flags';
 
 const LOCAL_ADMIN_ROLE_KEY = 'atlas_user_role';
 
+const NAV = [
+  { href: '/admin/overview', icon: TrendingUp, label: 'Overview' },
+  { href: '/admin', icon: LayoutDashboard, label: 'Dashboard', exact: true },
+  { href: '/admin/users', icon: Users, label: 'Users' },
+  { href: '/admin/activity', icon: Activity, label: 'Activity' },
+  { href: '/admin/subscriptions', icon: CreditCard, label: 'Subscriptions' },
+  { href: '/admin/payments', icon: CreditCard, label: 'Payments' },
+  { href: '/admin/manual-payments', icon: Banknote, label: 'Manual (MA)' },
+  { href: '/admin/affiliate', icon: Gift, label: 'Affiliate' },
+  { href: '/admin/companies', icon: Building2, label: 'Companies' },
+  { href: '/admin/plans', icon: Boxes, label: 'Plans' },
+  { href: '/admin/billing', icon: CreditCard, label: 'Billing' },
+  { href: '/admin/analytics', icon: BarChart3, label: 'Analytics' },
+  { href: '/admin/logs', icon: ScrollText, label: 'Logs' },
+  { href: '/admin/operations', icon: HeartPulse, label: 'Operations' },
+  { href: '/admin/security', icon: ShieldCheck, label: 'Security' },
+] as const;
+
 function hasLocalAdminRole(): boolean {
   if (typeof window === 'undefined') return false;
   return (localStorage.getItem(LOCAL_ADMIN_ROLE_KEY) ?? '').trim() === 'admin';
 }
 
-function SidebarLink(props: { href: string; icon: React.ReactNode; label: string }) {
-  const pathname = usePathname();
-  const active = pathname === props.href;
+function SidebarLink(props: { href: string; icon: React.ReactNode; label: string; exact?: boolean }) {
+  const pathname = usePathname() || '';
+  const active = props.exact ? pathname === props.href : pathname === props.href || pathname.startsWith(`${props.href}/`);
   return (
     <Link
       href={props.href}
-      className={`flex items-center gap-2 px-3 py-2 rounded-xl text-sm font-semibold transition-colors ${
-        active ? 'bg-gray-50 border border-gray-100 text-gray-900' : 'text-gray-700 hover:bg-gray-50'
+      className={`flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-[13px] font-medium transition-colors ${
+        active ? 'bg-white/12 text-white' : 'text-white/55 hover:bg-white/8 hover:text-white'
       }`}
     >
-      {props.icon} {props.label}
+      {props.icon}
+      {props.label}
     </Link>
   );
 }
@@ -48,12 +81,10 @@ export default function AdminShell(props: { title: string; children: React.React
             router.push(`/login?next=${encodeURIComponent(window.location.pathname)}`);
             return;
           }
-          // Role enforcement happens server-side (middleware + admin APIs).
           if (!cancelled) setReady(true);
           return;
         }
 
-        // LOCAL TESTING ONLY: gated by env + localStorage role.
         if (!isLocalDevAdminEnabled() || !hasLocalAdminRole()) {
           router.push('/access-denied');
           return;
@@ -71,116 +102,84 @@ export default function AdminShell(props: { title: string; children: React.React
     };
   }, [router]);
 
+  const desktopNav = (
+    <nav className="space-y-0.5">
+      {NAV.map((item) => (
+        <SidebarLink
+          key={item.href}
+          href={item.href}
+          exact={'exact' in item ? item.exact : false}
+          icon={<item.icon size={15} className="shrink-0 text-[#06b6d4]" />}
+          label={item.label}
+        />
+      ))}
+    </nav>
+  );
+
+  const mobileNav = (
+    <nav className="flex gap-1 overflow-x-auto atlas-table-scroll">
+      {NAV.map((item) => (
+        <div key={item.href} className="shrink-0">
+          <SidebarLink
+            href={item.href}
+            exact={'exact' in item ? item.exact : false}
+            icon={<item.icon size={15} className="shrink-0 text-[#06b6d4]" />}
+            label={item.label}
+          />
+        </div>
+      ))}
+    </nav>
+  );
+
   if (!ready) {
     return (
-      <div className="min-h-screen bg-gray-50">
-        <header className="bg-white border-b border-gray-200 px-6 sm:px-8 py-5 flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <div className="w-9 h-9 rounded-2xl bg-gray-100 border border-gray-200 animate-pulse" />
-            <div>
-              <div className="h-3 w-24 bg-gray-200 rounded animate-pulse" />
-              <div className="h-4 w-48 bg-gray-200 rounded mt-2 animate-pulse" />
-            </div>
-          </div>
-          <div className="h-3 w-28 bg-gray-200 rounded animate-pulse" />
-        </header>
-        <main className="max-w-6xl mx-auto px-6 py-10 flex gap-6">
-          <aside className="hidden lg:block w-64 shrink-0">
-            <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4 sticky top-6">
-              <div className="h-10 bg-gray-100 rounded-xl animate-pulse" />
-              <div className="mt-4 space-y-2">
-                {Array.from({ length: 6 }).map((_, i) => (
-                  <div key={i} className="h-10 bg-gray-100 rounded-xl animate-pulse" />
-                ))}
-              </div>
-            </div>
-          </aside>
-          <div className="flex-1">
-            <div className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
-              <div className="px-6 py-4 border-b border-gray-100">
-                <div className="h-4 w-48 bg-gray-200 rounded animate-pulse" />
-                <div className="h-3 w-72 bg-gray-200 rounded mt-2 animate-pulse" />
-              </div>
-              <div className="px-6 py-6">
-                <AdminTableSkeleton cols={5} rows={6} />
-              </div>
-            </div>
-          </div>
-        </main>
+      <div className="min-h-screen bg-[#f4f6fa]">
+        <div className="mx-auto max-w-7xl px-4 py-10">
+          <AdminTableSkeleton cols={5} rows={6} />
+        </div>
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen bg-gray-50">
-      <header className="bg-white border-b border-gray-200 px-6 sm:px-8 py-5 flex items-center justify-between">
-        <div className="flex items-center gap-3">
-          <Link href="/admin" className="text-sm text-gray-500 hover:text-gray-700">
-            Dashboard
-          </Link>
-          <span className="text-gray-200">/</span>
-          <h1 className="text-lg font-bold text-gray-900 flex items-center gap-2">
-            <ShieldCheck size={18} /> {props.title}
-          </h1>
-        </div>
-        <div className="hidden sm:block text-xs text-gray-500">
-          Backend: <span className="font-semibold text-gray-700">{atlasDataBackend()}</span>
+    <div className="min-h-screen bg-[#f4f6fa]">
+      <header className="sticky top-0 z-20 border-b border-[#0F1F3D]/10 bg-white/90 backdrop-blur">
+        <div className="mx-auto flex max-w-7xl items-center justify-between gap-3 px-4 py-3 sm:px-6">
+          <div className="min-w-0">
+            <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-slate-400">Zafirixpro Admin</p>
+            <h1 className="truncate text-base font-bold text-[#0F1F3D]">{props.title}</h1>
+          </div>
+          <div className="hidden items-center gap-3 text-[11px] text-slate-500 sm:flex">
+            <span>
+              Backend <strong className="text-slate-700">{atlasDataBackend()}</strong>
+            </span>
+            <Link href="/dashboard/affiliate" className="font-semibold text-cyan-700 hover:underline">
+              Programme affilié →
+            </Link>
+          </div>
         </div>
       </header>
 
-      <main className="max-w-6xl mx-auto px-4 sm:px-6 py-8 sm:py-10 flex flex-col lg:flex-row gap-6 min-w-0">
+      <main className="mx-auto flex max-w-7xl min-w-0 flex-col gap-6 px-4 py-6 sm:px-6 lg:flex-row">
         <div className="lg:hidden">
-          <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-3 flex flex-wrap gap-2">
-            <SidebarLink href="/admin/overview" icon={<TrendingUp size={16} />} label="Overview" />
-            <SidebarLink href="/admin" icon={<LayoutDashboard size={16} />} label="Dashboard" />
-            <SidebarLink href="/admin/billing" icon={<CreditCard size={16} />} label="Billing" />
-            <SidebarLink href="/admin/subscriptions" icon={<CreditCard size={16} />} label="Subscriptions" />
-            <SidebarLink href="/admin/users" icon={<Users size={16} />} label="Users" />
-            <SidebarLink href="/admin/activity" icon={<Activity size={16} />} label="Activity" />
-            <SidebarLink href="/admin/companies" icon={<Building2 size={16} />} label="Companies" />
-            <SidebarLink href="/admin/plans" icon={<Boxes size={16} />} label="Plans" />
-            <SidebarLink href="/admin/payments" icon={<CreditCard size={16} />} label="Payments" />
-            <SidebarLink href="/admin/manual-payments" icon={<Banknote size={16} />} label="Manuel (MA)" />
-            <SidebarLink href="/admin/analytics" icon={<BarChart3 size={16} />} label="Analytics" />
-            <SidebarLink href="/admin/logs" icon={<ScrollText size={16} />} label="Logs" />
-            <SidebarLink href="/admin/security" icon={<ShieldCheck size={16} />} label="Security" />
-            <SidebarLink href="/admin/operations" icon={<HeartPulse size={16} />} label="Operations" />
-          </div>
+          <div className="rounded-2xl bg-[#0F1F3D] p-2">{mobileNav}</div>
         </div>
-        <aside className="hidden lg:block w-64 shrink-0">
-          <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4 sticky top-6">
-            <div className="flex items-center gap-2 px-2 py-2">
-              <div className="w-9 h-9 rounded-2xl bg-[#0F1F3D] text-white flex items-center justify-center">
-                <ShieldCheck size={18} />
+        <aside className="hidden w-56 shrink-0 lg:block">
+          <div className="sticky top-20 rounded-2xl bg-[#0F1F3D] p-3 shadow-lg">
+            <div className="mb-3 flex items-center gap-2 px-2 py-2">
+              <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-[#06b6d4] text-[#0F1F3D]">
+                <ShieldCheck size={16} />
               </div>
               <div>
-                <p className="text-xs text-gray-500">ZAFIRIX GROUP</p>
-                <p className="text-sm font-extrabold text-gray-900">Admin</p>
+                <p className="text-[10px] text-white/40">ZAFIRIX GROUP</p>
+                <p className="text-sm font-bold text-white">Control plane</p>
               </div>
             </div>
-
-            <nav className="mt-4 space-y-1">
-              <SidebarLink href="/admin/overview" icon={<TrendingUp size={16} />} label="Overview" />
-            <SidebarLink href="/admin" icon={<LayoutDashboard size={16} />} label="Dashboard" />
-              <SidebarLink href="/admin/billing" icon={<CreditCard size={16} />} label="Billing" />
-              <SidebarLink href="/admin/subscriptions" icon={<CreditCard size={16} />} label="Subscriptions" />
-              <SidebarLink href="/admin/users" icon={<Users size={16} />} label="Users" />
-            <SidebarLink href="/admin/activity" icon={<Activity size={16} />} label="Activity" />
-              <SidebarLink href="/admin/companies" icon={<Building2 size={16} />} label="Companies" />
-              <SidebarLink href="/admin/plans" icon={<Boxes size={16} />} label="Plans" />
-              <SidebarLink href="/admin/payments" icon={<CreditCard size={16} />} label="Payments" />
-              <SidebarLink href="/admin/manual-payments" icon={<Banknote size={16} />} label="Manuel (MA)" />
-              <SidebarLink href="/admin/analytics" icon={<BarChart3 size={16} />} label="Analytics" />
-              <SidebarLink href="/admin/logs" icon={<ScrollText size={16} />} label="Logs" />
-              <SidebarLink href="/admin/security" icon={<ShieldCheck size={16} />} label="Security" />
-              <SidebarLink href="/admin/operations" icon={<HeartPulse size={16} />} label="Operations" />
-            </nav>
+            {desktopNav}
           </div>
         </aside>
-
-        <div className="flex-1 min-w-0">{props.children}</div>
+        <div className="min-w-0 flex-1 space-y-4">{props.children}</div>
       </main>
     </div>
   );
 }
-

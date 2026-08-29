@@ -3,9 +3,13 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { todayYmd } from '@/app/lib/atlas-dates';
-import { ArrowLeft, BadgeCheck, Ban, Clock, Filter, ShieldCheck } from 'lucide-react';
+import { BadgeCheck, Ban, Clock } from 'lucide-react';
 import { isAtlasSupabaseDataEnabled } from '@/app/lib/atlas-data-source';
 import { adminAuthedFetch } from '@/app/lib/admin/admin-client-auth';
+import AdminShell from '@/app/admin/_components/AdminShell';
+import { AdminAlert } from '@/app/admin/_components/AdminUi';
+import { AdminDataTable, AdminFilterChip, type AdminColumn } from '@/app/admin/_components/AdminDataTable';
+import { AdminStatusBadge } from '@/app/admin/_components/AdminStatusBadge';
 
 type SubStatus = 'pending_manual' | 'active' | 'canceled' | string;
 
@@ -18,14 +22,6 @@ type AdminSubRow = {
   created_at: string;
   updated_at?: string;
 };
-
-function statusBadge(status: string): { label: string; cls: string } {
-  const s = String(status ?? '').toLowerCase();
-  if (s === 'pending_manual' || s === 'pending') return { label: 'Pending', cls: 'bg-amber-50 text-amber-800 border-amber-200' };
-  if (s === 'active') return { label: 'Active', cls: 'bg-emerald-50 text-emerald-800 border-emerald-200' };
-  if (s === 'canceled' || s === 'cancelled' || s === 'rejected') return { label: 'Canceled', cls: 'bg-red-50 text-red-800 border-red-200' };
-  return { label: s || '—', cls: 'bg-gray-50 text-gray-700 border-gray-200' };
-}
 
 function toYmdFromIso(iso: string): string {
   // safe fallback for malformed timestamps
@@ -142,181 +138,127 @@ export default function AdminSubscriptionsPage() {
     }
   };
 
-  return (
-    <div className="min-h-screen bg-gray-50">
-      <header className="bg-white border-b border-gray-200 px-8 py-5 flex items-center justify-between">
-        <div className="flex items-center gap-3">
+  const columns: AdminColumn<AdminSubRow>[] = [
+    {
+      key: 'user_id',
+      header: 'User',
+      sortValue: (p) => p.user_id,
+      className: 'font-mono text-[11px] whitespace-nowrap',
+      render: (p) => p.user_id,
+    },
+    {
+      key: 'email',
+      header: 'Email',
+      sortValue: (p) => p.email,
+      render: (p) => <span className="font-semibold text-[#0F1F3D]">{p.email || '—'}</span>,
+    },
+    {
+      key: 'plan',
+      header: 'Plan',
+      sortValue: (p) => p.plan,
+      render: (p) => p.plan || '—',
+    },
+    {
+      key: 'status',
+      header: 'Status',
+      sortValue: (p) => String(p.status),
+      render: (p) => <AdminStatusBadge value={String(p.status)} />,
+    },
+    {
+      key: 'created',
+      header: 'Created',
+      sortValue: (p) => p.created_at,
+      className: 'whitespace-nowrap text-slate-500',
+      render: (p) => toYmdFromIso(p.created_at),
+    },
+    {
+      key: 'actions',
+      header: 'Actions',
+      headerClassName: 'text-right',
+      className: 'text-right',
+      render: (p) => (
+        <div className="flex flex-wrap items-center justify-end gap-1.5">
           <button
             type="button"
-            onClick={() => router.push('/admin')}
-            className="flex items-center gap-2 text-sm text-gray-500 hover:text-gray-700"
+            onClick={() => void setStatus(p.id, 'active')}
+            disabled={busyId === p.id}
+            className="inline-flex h-8 items-center gap-1 rounded-lg bg-emerald-50 px-2.5 text-[11px] font-semibold text-emerald-800 ring-1 ring-emerald-200 disabled:opacity-40"
           >
-            <ArrowLeft size={16} /> Dashboard
+            <BadgeCheck size={12} /> Approve
           </button>
-          <span className="text-gray-200">/</span>
-          <h1 className="text-lg font-bold text-gray-900 flex items-center gap-2">
-            <ShieldCheck size={18} /> Admin · Subscriptions
-          </h1>
+          <button
+            type="button"
+            onClick={() => void setStatus(p.id, 'canceled')}
+            disabled={busyId === p.id}
+            className="inline-flex h-8 items-center gap-1 rounded-lg bg-rose-50 px-2.5 text-[11px] font-semibold text-rose-800 ring-1 ring-rose-200 disabled:opacity-40"
+          >
+            <Ban size={12} /> Reject
+          </button>
+          <select
+            value={String(p.status ?? '')}
+            onChange={(e) => void setStatus(p.id, e.target.value)}
+            disabled={busyId === p.id}
+            className="h-8 rounded-lg border border-slate-200 bg-white px-2 text-[11px] font-semibold disabled:opacity-40"
+          >
+            <option value="pending_manual">pending_manual</option>
+            <option value="active">active</option>
+            <option value="canceled">canceled</option>
+          </select>
         </div>
-      </header>
+      ),
+    },
+  ];
 
-      <main className="max-w-6xl mx-auto px-6 py-10 space-y-6">
-        {loading && (
-          <div className="bg-blue-50 border border-blue-200 rounded-xl p-4 text-sm text-blue-800">
-            Chargement…
-          </div>
-        )}
-        {error && (
-          <div className="bg-red-50 border border-red-200 rounded-xl p-4 text-sm text-red-800">
-            {error}
-          </div>
-        )}
-        {/* Stats */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-          <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5">
-            <div className="flex items-center justify-between">
-              <p className="text-xs text-gray-500">Pending</p>
-              <Clock size={16} className="text-amber-600" />
-            </div>
-            <p className="text-2xl font-extrabold text-gray-900 mt-2">{stats.pending}</p>
-            <p className="text-xs text-gray-400 mt-1">Status: pending_manual</p>
-          </div>
-
-          <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5">
-            <div className="flex items-center justify-between">
-              <p className="text-xs text-gray-500">Active</p>
-              <BadgeCheck size={16} className="text-emerald-600" />
-            </div>
-            <p className="text-2xl font-extrabold text-gray-900 mt-2">{stats.active}</p>
-            <p className="text-xs text-gray-400 mt-1">Status: active</p>
-          </div>
-
-          <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5">
-            <div className="flex items-center justify-between">
-              <p className="text-xs text-gray-500">Canceled</p>
-              <Ban size={16} className="text-red-600" />
-            </div>
-            <p className="text-2xl font-extrabold text-gray-900 mt-2">{stats.canceled}</p>
-            <p className="text-xs text-gray-400 mt-1">Status: canceled</p>
-          </div>
+  return (
+    <AdminShell title="Subscriptions">
+      {error ? <AdminAlert variant="error">{error}</AdminAlert> : null}
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+        <div className="rounded-2xl border border-slate-200 bg-white p-4">
+          <p className="flex items-center justify-between text-[11px] text-slate-500">
+            Pending <Clock size={14} className="text-amber-600" />
+          </p>
+          <p className="mt-1 text-2xl font-bold text-[#0F1F3D]">{stats.pending}</p>
         </div>
-
-        {/* Filters + Table */}
-        <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
-          <div className="px-6 py-4 border-b border-gray-100 flex items-center justify-between gap-4">
-            <div>
-              <p className="text-sm font-semibold text-gray-900">Subscriptions</p>
-              <p className="text-xs text-gray-500 mt-0.5">Source: Supabase table <span className="font-mono">public.subscriptions</span></p>
-            </div>
-
-            <div className="flex items-center gap-2">
-              <div className="hidden sm:flex items-center gap-2 text-xs text-gray-400 mr-2">
-                <Filter size={14} /> Filtre
-              </div>
-              {([
-                { id: 'pending', label: `Pending (${stats.pending})` },
-                { id: 'active', label: `Active (${stats.active})` },
-                { id: 'canceled', label: `Canceled (${stats.canceled})` },
-                { id: 'all', label: `All (${stats.total})` },
-              ] as const).map((t) => (
-                <button
-                  key={t.id}
-                  onClick={() => setFilter(t.id)}
-                  className={`px-3 py-1.5 rounded-full text-xs font-semibold border transition-colors ${
-                    filter === t.id ? 'bg-[#0F1F3D] text-white border-[#0F1F3D]' : 'bg-white text-gray-600 border-gray-200 hover:bg-gray-50'
-                  }`}
-                >
-                  {t.label}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          <div className="px-6 py-4 border-b border-gray-100">
-            <input
-              value={q}
-              onChange={(e) => setQ(e.target.value)}
-              placeholder="Search email / plan / user id…"
-              className="w-full px-3 py-2 rounded-xl border border-gray-200 text-sm focus:outline-none focus:ring-1 focus:ring-blue-400 focus:border-blue-400"
-            />
-          </div>
-
-          <div className="atlas-table-scroll">
-            <table className="min-w-[980px] w-full text-sm">
-              <thead className="bg-gray-50 text-gray-500">
-                <tr className="text-left">
-                  <th className="px-6 py-4 font-semibold">User</th>
-                  <th className="px-6 py-4 font-semibold">Email</th>
-                  <th className="px-6 py-4 font-semibold">Plan</th>
-                  <th className="px-6 py-4 font-semibold">Status</th>
-                  <th className="px-6 py-4 font-semibold">Created</th>
-                  <th className="px-6 py-4 font-semibold text-right">Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {filtered.length === 0 ? (
-                  <tr>
-                    <td colSpan={6} className="px-6 py-10 text-center text-sm text-gray-500">
-                      Aucun enregistrement pour ce filtre.
-                    </td>
-                  </tr>
-                ) : (
-                  filtered.map((p) => {
-                    const badge = statusBadge(p.status);
-                    return (
-                      <tr key={p.id} className="border-t border-gray-100 hover:bg-gray-50">
-                        <td className="px-6 py-4 font-mono text-xs text-gray-700">{p.user_id}</td>
-                        <td className="px-6 py-4 text-gray-900 font-semibold">{p.email || '—'}</td>
-                        <td className="px-6 py-4 text-gray-700">{p.plan || '—'}</td>
-                        <td className="px-6 py-4">
-                          <span className={`inline-flex items-center px-2.5 py-1 rounded-full text-xs font-semibold border ${badge.cls}`}>
-                            {badge.label}
-                          </span>
-                        </td>
-                        <td className="px-6 py-4 text-gray-600">{toYmdFromIso(p.created_at)}</td>
-                        <td className="px-6 py-4">
-                          <div className="flex items-center justify-end gap-2">
-                            <button
-                              type="button"
-                              onClick={() => void setStatus(p.id, 'active')}
-                              disabled={busyId === p.id}
-                              className="px-3 py-2 rounded-xl border border-emerald-200 bg-emerald-50 text-emerald-800 text-xs font-semibold hover:bg-emerald-100 flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
-                              title="Approve"
-                            >
-                              <BadgeCheck size={14} /> Approve
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => void setStatus(p.id, 'canceled')}
-                              disabled={busyId === p.id}
-                              className="px-3 py-2 rounded-xl border border-red-200 bg-red-50 text-red-800 text-xs font-semibold hover:bg-red-100 flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
-                              title="Reject"
-                            >
-                              <Ban size={14} /> Reject
-                            </button>
-                            <select
-                              value={String(p.status ?? '')}
-                              onChange={(e) => void setStatus(p.id, e.target.value)}
-                              disabled={busyId === p.id}
-                              className="px-2 py-2 rounded-xl border border-gray-200 bg-white text-xs font-semibold text-gray-700 disabled:opacity-50"
-                              title="Change status"
-                            >
-                              <option value="pending_manual">pending_manual</option>
-                              <option value="active">active</option>
-                              <option value="canceled">canceled</option>
-                            </select>
-                          </div>
-                        </td>
-                      </tr>
-                    );
-                  })
-                )}
-              </tbody>
-            </table>
-          </div>
+        <div className="rounded-2xl border border-slate-200 bg-white p-4">
+          <p className="flex items-center justify-between text-[11px] text-slate-500">
+            Active <BadgeCheck size={14} className="text-emerald-600" />
+          </p>
+          <p className="mt-1 text-2xl font-bold text-[#0F1F3D]">{stats.active}</p>
         </div>
-      </main>
-    </div>
+        <div className="rounded-2xl border border-slate-200 bg-white p-4">
+          <p className="flex items-center justify-between text-[11px] text-slate-500">
+            Canceled <Ban size={14} className="text-rose-600" />
+          </p>
+          <p className="mt-1 text-2xl font-bold text-[#0F1F3D]">{stats.canceled}</p>
+        </div>
+      </div>
+      <AdminDataTable
+        rows={filtered}
+        columns={columns}
+        rowKey={(p) => p.id}
+        loading={loading}
+        search={q}
+        onSearchChange={setQ}
+        searchPlaceholder="Email, plan, user id…"
+        emptyTitle="Aucun enregistrement"
+        emptyDescription="Aucun abonnement pour ce filtre."
+        minWidthClass="min-w-[980px]"
+        toolbar={
+          <>
+            {([
+              { id: 'pending' as const, label: `Pending (${stats.pending})` },
+              { id: 'active' as const, label: `Active (${stats.active})` },
+              { id: 'canceled' as const, label: `Canceled (${stats.canceled})` },
+              { id: 'all' as const, label: `All (${stats.total})` },
+            ]).map((t) => (
+              <AdminFilterChip key={t.id} active={filter === t.id} onClick={() => setFilter(t.id)}>
+                {t.label}
+              </AdminFilterChip>
+            ))}
+          </>
+        }
+      />
+    </AdminShell>
   );
 }
 
