@@ -124,7 +124,7 @@ export function AffiliateDashboardClient() {
     try {
       await navigator.clipboard.writeText(link);
       setCopied(true);
-      trackEvent('affiliate_link_copied', { surface: 'affiliate_dashboard' });
+      trackEvent('referral_share_clicked', { surface: 'affiliate_dashboard', action: 'copy' });
       window.setTimeout(() => setCopied(false), 2000);
     } catch {
       // ignore

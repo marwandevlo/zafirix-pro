@@ -269,7 +269,7 @@ async function creditAffiliateFallback(
   } | null;
   const lifetime = Number(row?.lifetime_earned || 0) + params.commission;
   const available = Number(row?.available_balance || 0) + params.commission;
-  const pending = Number(row?.pending_balance ?? row?.available_balance || 0) + params.commission;
+  const pending = Number(row?.pending_balance ?? row?.available_balance ?? 0) + params.commission;
   const paidOut = Number(row?.paid_out || 0);
 
   if (bal) {
