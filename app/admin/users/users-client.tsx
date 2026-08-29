@@ -184,7 +184,7 @@ export default function UsersAdminClient() {
         {warning ? <AdminAlert variant="warning">{warning}</AdminAlert> : null}
       </div>
 
-      <div className="mt-6 bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
+      <div className="mt-6 bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden min-w-0">
         <div className="px-6 py-4 border-b border-gray-100">
           <p className="text-sm font-semibold text-gray-900">Users · المستخدمون</p>
           <p className="text-xs text-gray-500 mt-0.5">Search, filter, and moderate accounts. Presence updates every 2 minutes.</p>
@@ -283,7 +283,7 @@ export default function UsersAdminClient() {
             <AdminEmptyState title="No users found" description="When users sign up, they’ll appear here." />
           </div>
         ) : (
-          <div className="overflow-x-auto">
+          <div className="atlas-table-scroll">
             <table className="min-w-[980px] w-full text-sm">
               <thead className="bg-gray-50 text-gray-500">
                 <tr className="text-left">

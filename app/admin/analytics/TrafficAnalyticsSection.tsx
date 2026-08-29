@@ -198,7 +198,7 @@ function GlassTable(props: {
         <p className="text-sm font-semibold text-white">{props.title}</p>
         <p className="text-[11px] text-white/50">{props.subtitle}</p>
       </div>
-      <div className="overflow-x-auto">
+      <div className="atlas-table-scroll">
         <table className="w-full text-left text-sm">
           <thead>
             <tr className="text-[10px] uppercase tracking-wide text-white/40">

@@ -98,7 +98,7 @@ export default function CompaniesAdminClient() {
             <AdminEmptyState title="No companies found" description="Once companies are created, they’ll show up here." />
           </div>
         ) : (
-          <div className="overflow-x-auto">
+          <div className="atlas-table-scroll">
             <table className="min-w-[980px] w-full text-sm">
               <thead className="bg-gray-50 text-gray-500">
                 <tr className="text-left">

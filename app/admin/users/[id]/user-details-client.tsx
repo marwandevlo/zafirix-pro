@@ -445,7 +445,7 @@ export default function UserDetailsAdminClient() {
                 <p className="text-sm font-semibold text-gray-900">Subscriptions</p>
                 <p className="text-xs text-gray-500 mt-0.5">Latest 25 from `atlas_subscriptions`.</p>
               </div>
-              <div className="overflow-x-auto">
+              <div className="atlas-table-scroll">
                 <table className="min-w-[900px] w-full text-sm">
                   <thead className="bg-gray-50 text-gray-500">
                     <tr className="text-left">

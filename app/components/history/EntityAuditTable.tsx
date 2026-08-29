@@ -168,7 +168,7 @@ export function EntityAuditTable({ entityType, entityId, limit = 50, title }: Pr
       )}
 
       {!loading && !error && events.length > 0 && (
-        <div className="overflow-x-auto">
+        <div className="atlas-table-scroll">
           <table className="w-full text-sm">
             <thead>
               <tr className="text-left text-[10px] font-semibold text-gray-400 uppercase tracking-wide border-b border-gray-100 bg-gray-50">

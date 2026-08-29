@@ -151,7 +151,7 @@ export default function FlexibleDataGrid({
         <span className="text-xs text-gray-500">اختر يدوياً أو عبر الزر</span>
       </div>
 
-      <div className="overflow-x-auto border border-gray-100 rounded-2xl bg-white shadow-sm">
+      <div className="atlas-table-scroll border border-gray-100 rounded-2xl bg-white shadow-sm">
         {normalizedData.length === 0 ? (
           <div className="px-6 py-10 text-center text-sm text-gray-500">{emptyLabel}</div>
         ) : (

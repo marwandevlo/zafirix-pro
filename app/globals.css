@@ -133,9 +133,47 @@ a,
   box-shadow: 0 1px 2px rgba(15, 31, 61, 0.04);
 }
 
-/* Prevent accidental horizontal scroll on module tables */
+/* Wide tables: keep the page from clipping; scroll inside the grid instead. */
+.atlas-table-scroll,
 .mobile-scroll-x {
+  display: block;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
   overflow-x: auto;
+  overflow-y: hidden;
   -webkit-overflow-scrolling: touch;
   overscroll-behavior-x: contain;
+  scrollbar-width: thin;
+  scrollbar-color: #06b6d4 #0f1f3d14;
+}
+
+.atlas-table-scroll > table,
+.mobile-scroll-x > table {
+  width: max-content;
+  min-width: 100%;
+}
+
+.atlas-table-scroll::-webkit-scrollbar,
+.mobile-scroll-x::-webkit-scrollbar {
+  height: 10px;
+}
+
+.atlas-table-scroll::-webkit-scrollbar-track,
+.mobile-scroll-x::-webkit-scrollbar-track {
+  background: #0f1f3d12;
+  border-radius: 999px;
+}
+
+.atlas-table-scroll::-webkit-scrollbar-thumb,
+.mobile-scroll-x::-webkit-scrollbar-thumb {
+  background: #06b6d4;
+  border-radius: 999px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+
+.atlas-table-scroll::-webkit-scrollbar-thumb:hover,
+.mobile-scroll-x::-webkit-scrollbar-thumb:hover {
+  background: #22d3ee;
 }

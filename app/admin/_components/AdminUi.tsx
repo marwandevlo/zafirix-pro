@@ -14,7 +14,7 @@ export function AdminAlert(props: { variant: 'info' | 'warning' | 'error'; child
 
 export function AdminSection(props: { title: string; subtitle?: string; right?: React.ReactNode; children: React.ReactNode }) {
   return (
-    <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
+    <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden min-w-0">
       <div className="px-6 py-4 border-b border-gray-100 flex items-start justify-between gap-4">
         <div>
           <p className="text-sm font-semibold text-gray-900">{props.title}</p>
@@ -39,7 +39,7 @@ export function AdminEmptyState(props: { title: string; description?: string }) 
 export function AdminTableSkeleton(props: { cols: number; rows?: number }) {
   const rows = props.rows ?? 6;
   return (
-    <div className="overflow-x-auto">
+    <div className="atlas-table-scroll">
       <div className="min-w-[980px]">
         <div className="bg-gray-50 border-b border-gray-100 grid" style={{ gridTemplateColumns: `repeat(${props.cols}, minmax(0, 1fr))` }}>
           {Array.from({ length: props.cols }).map((_, i) => (

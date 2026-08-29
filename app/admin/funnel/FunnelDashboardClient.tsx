@@ -164,7 +164,7 @@ export default function FunnelDashboardClient() {
             <div className="px-5 py-4 border-b border-gray-100">
               <p className="text-sm font-semibold text-gray-900">Comptage par événement</p>
             </div>
-            <div className="overflow-x-auto">
+            <div className="atlas-table-scroll">
               <table className="min-w-[400px] w-full text-sm">
                 <thead className="bg-gray-50 text-left text-gray-500">
                   <tr>

@@ -5,6 +5,7 @@ import AdminShell from '@/app/admin/_components/AdminShell';
 import { isAtlasSupabaseDataEnabled } from '@/app/lib/atlas-data-source';
 import { supabase } from '@/app/lib/supabase';
 import { AdminAlert, AdminEmptyState, AdminTableSkeleton } from '@/app/admin/_components/AdminUi';
+import { TableScroll } from '@/app/components/ui/TableScroll';
 
 type LogRow = {
   id: string;
@@ -71,7 +72,7 @@ export default function AdminLogsClient() {
         {error ? <AdminAlert variant="error">{error}</AdminAlert> : null}
       </div>
 
-      <div className="mt-6 bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
+      <div className="mt-6 bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden min-w-0">
         <div className="px-6 py-4 border-b border-gray-100">
           <p className="text-sm font-semibold text-gray-900">Admin logs</p>
           <p className="text-xs text-gray-500 mt-0.5">Every privileged action should appear here.</p>
@@ -94,7 +95,7 @@ export default function AdminLogsClient() {
             <AdminEmptyState title="No logs yet" description="Actions like role changes, bans, and deletions will appear here." />
           </div>
         ) : (
-          <div className="overflow-x-auto">
+          <TableScroll>
             <table className="min-w-[1100px] w-full text-sm">
               <thead className="bg-gray-50 text-gray-500">
                 <tr className="text-left">
@@ -110,10 +111,10 @@ export default function AdminLogsClient() {
                   <tr key={r.id} className="border-t border-gray-100 hover:bg-gray-50">
                     <td className="px-6 py-4 text-gray-700">{r.created_at ? new Date(r.created_at).toLocaleString() : '—'}</td>
                     <td className="px-6 py-4 font-semibold text-gray-900">{r.action}</td>
-                    <td className="px-6 py-4 font-mono text-xs text-gray-700">{r.admin_id}</td>
-                    <td className="px-6 py-4 font-mono text-xs text-gray-700">{r.target_user_id ?? '—'}</td>
-                    <td className="px-6 py-4">
-                      <pre className="text-xs text-gray-700 whitespace-pre-wrap wrap-break-word">
+                    <td className="px-6 py-4 font-mono text-xs text-gray-700 whitespace-nowrap">{r.admin_id}</td>
+                    <td className="px-6 py-4 font-mono text-xs text-gray-700 whitespace-nowrap">{r.target_user_id ?? '—'}</td>
+                    <td className="px-6 py-4 min-w-[16rem]">
+                      <pre className="text-xs text-gray-700 whitespace-pre max-w-[36rem]">
                         {JSON.stringify(r.details ?? {}, null, 2)}
                       </pre>
                     </td>
@@ -121,7 +122,7 @@ export default function AdminLogsClient() {
                 ))}
               </tbody>
             </table>
-          </div>
+          </TableScroll>
         )}
       </div>
     </AdminShell>

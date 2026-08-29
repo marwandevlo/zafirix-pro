@@ -128,7 +128,7 @@ export default function AdminShell(props: { title: string; children: React.React
         </div>
       </header>
 
-      <main className="max-w-6xl mx-auto px-4 sm:px-6 py-8 sm:py-10 flex flex-col lg:flex-row gap-6">
+      <main className="max-w-6xl mx-auto px-4 sm:px-6 py-8 sm:py-10 flex flex-col lg:flex-row gap-6 min-w-0">
         <div className="lg:hidden">
           <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-3 flex flex-wrap gap-2">
             <SidebarLink href="/admin/overview" icon={<TrendingUp size={16} />} label="Overview" />
@@ -178,7 +178,7 @@ export default function AdminShell(props: { title: string; children: React.React
           </div>
         </aside>
 
-        <div className="flex-1">{props.children}</div>
+        <div className="flex-1 min-w-0">{props.children}</div>
       </main>
     </div>
   );
