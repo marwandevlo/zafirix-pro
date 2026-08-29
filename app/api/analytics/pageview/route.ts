@@ -5,6 +5,7 @@ import { atlasDataBackend } from '@/app/lib/atlas-data-source';
 import { ATLAS_REFERRAL_COOKIE } from '@/app/lib/atlas-referral-cookie';
 import { classifyTrafficSource, normalizeReferralCodeLabel } from '@/app/lib/atlas-traffic-source';
 import { checkPaymentRateLimit } from '@/app/lib/payment-rate-limit';
+import { runAfterResponse } from '@/app/lib/atlas-wait-until';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -71,41 +72,24 @@ export async function POST(request: NextRequest) {
 
     const visitorId = typeof body.visitorId === 'string' ? body.visitorId.trim().slice(0, 80) : '';
 
-    let userId: string | null = null;
-    const authHeader = request.headers.get('authorization') ?? '';
-    const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY?.trim();
-    if (anonKey && authHeader.toLowerCase().startsWith('bearer ')) {
-      const token = authHeader.slice(7).trim();
-      if (token) {
-        try {
-          const userClient = createClient(supabaseUrl, anonKey, {
-            global: { headers: { Authorization: `Bearer ${token}` } },
-          });
-          const { data } = await userClient.auth.getUser();
-          userId = data.user?.id ?? null;
-        } catch {
-          userId = null;
-        }
-      }
-    }
+    const ipHash = hashIp(ip);
+    runAfterResponse(
+      (async () => {
+        const admin = createClient(supabaseUrl, serviceRoleKey, {
+          auth: { autoRefreshToken: false, persistSession: false },
+        });
+        const { error } = await admin.from('analytics_events').insert({
+          path,
+          referrer,
+          user_id: null,
+          ip_hash: ipHash,
+          visitor_id: visitorId || null,
+        });
+        if (error) console.warn('[analytics/pageview] insert failed', error.message);
+      })(),
+    );
 
-    const admin = createClient(supabaseUrl, serviceRoleKey, {
-      auth: { autoRefreshToken: false, persistSession: false },
-    });
-    const { error } = await admin.from('analytics_events').insert({
-      path,
-      referrer,
-      user_id: userId,
-      ip_hash: hashIp(ip),
-      visitor_id: visitorId || null,
-    });
-
-    if (error) {
-      console.warn('[analytics/pageview] insert failed', error.message);
-      return NextResponse.json({ ok: true, skipped: true, reason: 'db_error' });
-    }
-
-    return NextResponse.json({ ok: true });
+    return NextResponse.json({ ok: true }, { status: 202 });
   } catch (error) {
     console.warn('[analytics/pageview] unexpected', error instanceof Error ? error.message : error);
     return NextResponse.json({ ok: true, skipped: true });

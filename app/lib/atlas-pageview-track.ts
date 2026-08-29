@@ -2,6 +2,7 @@
 
 import { isAtlasSupabaseDataEnabled } from '@/app/lib/atlas-data-source';
 import { ATLAS_REFERRAL_CONFIG } from '@/app/lib/atlas-referral-config';
+import { sendTelemetry } from '@/app/lib/atlas-telemetry-client';
 import { normalizeReferralCode } from '@/app/lib/atlas-referral-utils';
 
 const SKIP_PREFIXES = ['/admin', '/api', '/auth', '/_next'];
@@ -64,16 +65,5 @@ export function trackPageView(pathOverride?: string): void {
     affiliateCode: pendingAffiliateCode(),
   };
 
-  try {
-    void fetch('/api/analytics/pageview', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload),
-      keepalive: true,
-    }).catch((error: unknown) => {
-      console.warn('[analytics] pageview failed', error instanceof Error ? error.message : error);
-    });
-  } catch (error) {
-    console.warn('[analytics] pageview skipped', error instanceof Error ? error.message : error);
-  }
+  sendTelemetry('/api/analytics/pageview', payload);
 }

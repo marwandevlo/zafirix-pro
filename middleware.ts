@@ -19,6 +19,8 @@ import {
 } from '@/app/types/auth';
 import { finalizeHtmlDocumentResponse } from '@/app/lib/html-cache-headers';
 import { applyReferralCookieFromRequest } from '@/app/lib/atlas-referral-cookie';
+import { requestHasSupabaseSessionCookie } from '@/app/lib/atlas-auth-cookie';
+import { normalizeReferralCode } from '@/app/lib/atlas-referral-utils';
 
 async function userHasAdminAccess(user: User, supabaseUrl: string): Promise<boolean> {
   if (jwtUserShowsAdmin(user)) return true;
@@ -71,6 +73,20 @@ function isPublicStaticAsset(pathname: string): boolean {
   return /\.(?:avif|css|gif|ico|jpe?g|js|map|mp4|png|svg|ttf|txt|webm|webmanifest|webp|woff2?|xml)$/i.test(
     pathname,
   );
+}
+
+function isAnonymousTelemetryPath(pathname: string): boolean {
+  return (
+    pathname === '/api/analytics/track' ||
+    pathname === '/api/analytics/pageview' ||
+    pathname === '/api/funnel/track' ||
+    pathname === '/api/referral/click'
+  );
+}
+
+function withReferralCookie(request: NextRequest, response: NextResponse): NextResponse {
+  applyReferralCookieFromRequest(request, response);
+  return response;
 }
 
 function isPublicPath(pathname: string): boolean {
@@ -200,38 +216,27 @@ async function resolveProfileStatusForGate(
 export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
-  if (pathname === '/register') {
-    const url = request.nextUrl.clone();
-    url.pathname = '/signup';
-    const redirect = NextResponse.redirect(url);
-    applyReferralCookieFromRequest(request, redirect);
-    return redirect;
-  }
-
-  if (isPublicPath(pathname)) {
-    const publicResponse = finalizeHtmlDocumentResponse(NextResponse.next(), pathname);
-    applyReferralCookieFromRequest(request, publicResponse);
-    return publicResponse;
+  if (isAnonymousTelemetryPath(pathname)) {
+    return NextResponse.next();
   }
 
   if (pathname === '/api/health' || pathname === '/api/health/dependencies') {
     return NextResponse.next();
   }
 
-  if (
-    pathname === '/api/analytics/track' ||
-    pathname === '/api/analytics/pageview' ||
-    pathname === '/api/funnel/track'
-  ) {
+  if (pathname === '/api/cron/email-lifecycle' || pathname === '/api/webhooks/paddle') {
     return NextResponse.next();
   }
 
-  if (pathname === '/api/cron/email-lifecycle') {
-    return NextResponse.next();
+  if (pathname === '/register') {
+    const url = request.nextUrl.clone();
+    url.pathname = '/signup';
+    return withReferralCookie(request, NextResponse.redirect(url));
   }
 
-  if (pathname === '/api/webhooks/paddle') {
-    return NextResponse.next();
+  if (isPublicPath(pathname)) {
+    const publicResponse = finalizeHtmlDocumentResponse(NextResponse.next(), pathname);
+    return withReferralCookie(request, publicResponse);
   }
 
   if (
@@ -241,9 +246,9 @@ export async function middleware(request: NextRequest) {
     atlasDataBackend() !== 'supabase'
   ) {
     const url = request.nextUrl.clone();
-    url.pathname = '/landing';
+    url.pathname = '/landing/fr';
     url.searchParams.delete('next');
-    return NextResponse.redirect(url);
+    return withReferralCookie(request, NextResponse.redirect(url));
   }
 
   if (pathname.startsWith('/admin') && atlasDataBackend() !== 'supabase') {
@@ -259,6 +264,40 @@ export async function middleware(request: NextRequest) {
   }
 
   if (atlasDataBackend() !== 'supabase') return NextResponse.next();
+
+  const hasSessionCookie = requestHasSupabaseSessionCookie(request.cookies);
+  const hasRef = Boolean(normalizeReferralCode(request.nextUrl.searchParams.get('ref')));
+
+  // First-time / referral visitors: no Supabase round-trip. Cookie + one hop to FR landing.
+  if (!hasSessionCookie && pathname === '/') {
+    const url = request.nextUrl.clone();
+    url.pathname = '/landing/fr';
+    url.searchParams.delete('next');
+    return withReferralCookie(request, finalizeHtmlDocumentResponse(NextResponse.redirect(url), '/landing/fr'));
+  }
+
+  if (!hasSessionCookie) {
+    if (pathname.startsWith('/api/')) {
+      return NextResponse.json(
+        {
+          ok: false,
+          error: 'auth_required',
+          message: 'Authentification requise.',
+          code: 'auth_required',
+          step: 'auth',
+        },
+        { status: 401 },
+      );
+    }
+    const url = request.nextUrl.clone();
+    url.pathname =
+      pathname.startsWith('/admin') || pathname === '/dashboard' || pathname.startsWith('/dashboard/')
+        ? '/login'
+        : '/landing/fr';
+    url.searchParams.set('next', pathname);
+    if (!hasRef) url.searchParams.delete('ref');
+    return withReferralCookie(request, NextResponse.redirect(url));
+  }
 
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
   const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
@@ -280,8 +319,7 @@ export async function middleware(request: NextRequest) {
     },
   });
 
-  // Refresh session — keeps server/middleware cookies aligned with @supabase/ssr.
-  await supabase.auth.getSession();
+  // getUser() refreshes cookies via setAll — do not also await getSession() (extra RTT).
   const { data } = await supabase.auth.getUser();
   let user = data.user;
 
@@ -319,9 +357,9 @@ export async function middleware(request: NextRequest) {
     url.pathname =
       pathname.startsWith('/admin') || pathname === '/dashboard' || pathname.startsWith('/dashboard/')
         ? '/login'
-        : '/landing';
+        : '/landing/fr';
     url.searchParams.set('next', pathname);
-    return NextResponse.redirect(url);
+    return withReferralCookie(request, NextResponse.redirect(url));
   }
 
   if (pathname.startsWith('/api/admin')) {
@@ -330,24 +368,25 @@ export async function middleware(request: NextRequest) {
     }
   }
 
-  warnIfMissingServiceRoleKey('middleware.profileGate');
-
-  const normalizedStatus = await resolveProfileStatusForGate(user, supabaseUrl, supabase);
-
-  if (normalizedStatus !== null) {
-    const gateRedirect = applyProfileGate(pathname, normalizedStatus, request, sessionResponse, user);
-    if (gateRedirect) return gateRedirect;
+  // APIs do not apply the profile gate — skip the extra profiles read.
+  if (!pathname.startsWith('/api/')) {
+    warnIfMissingServiceRoleKey('middleware.profileGate');
+    const normalizedStatus = await resolveProfileStatusForGate(user, supabaseUrl, supabase);
+    if (normalizedStatus !== null) {
+      const gateRedirect = applyProfileGate(pathname, normalizedStatus, request, sessionResponse, user);
+      if (gateRedirect) return withReferralCookie(request, gateRedirect);
+    }
   }
 
   if (pathname.startsWith('/admin')) {
     if (!(await userHasAdminAccess(user, supabaseUrl))) {
       const url = request.nextUrl.clone();
       url.pathname = '/access-denied';
-      return copySessionCookies(sessionResponse, NextResponse.redirect(url));
+      return withReferralCookie(request, copySessionCookies(sessionResponse, NextResponse.redirect(url)));
     }
   }
 
-  return finalizeHtmlDocumentResponse(sessionResponse, pathname);
+  return withReferralCookie(request, finalizeHtmlDocumentResponse(sessionResponse, pathname));
 }
 
 export const config = {

@@ -1,6 +1,7 @@
 import { ATLAS_REFERRAL_CONFIG } from '@/app/lib/atlas-referral-config';
 import { isAtlasSupabaseDataEnabled } from '@/app/lib/atlas-data-source';
 import { ATLAS_INCIDENT_HOTFIX_GROWTH } from '@/app/lib/atlas-hotfix';
+import { sendTelemetry } from '@/app/lib/atlas-telemetry-client';
 import { normalizeReferralCode as normalizeReferralCodeUtil } from '@/app/lib/atlas-referral-utils';
 
 export const ATLAS_REFERRAL_PENDING_KEY = ATLAS_REFERRAL_CONFIG.pendingCodeStorageKey;
@@ -76,14 +77,7 @@ export function logReferralLandingClick(code: string): void {
   } catch {
     // continue to fire click
   }
-  void fetch('/api/referral/click', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ code: n }),
-    keepalive: true,
-  }).catch((error: unknown) => {
-    console.warn('[referral] click log failed', error instanceof Error ? error.message : error);
-  });
+  sendTelemetry('/api/referral/click', { code: n });
 }
 
 /** Await referral attach after trial claim so welcome bonus can extend the new trial row. */

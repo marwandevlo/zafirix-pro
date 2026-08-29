@@ -15,6 +15,8 @@ import {
 import { PublicFooter } from '@/app/components/public/PublicFooter';
 import { ZafirixLogo } from '@/app/components/branding/ZafirixLogo';
 import { trackEvent } from '@/app/lib/analytics-track';
+import { captureReferralFromWindow, logReferralLandingClick } from '@/app/lib/atlas-referral-client';
+import { runWhenIdle } from '@/app/lib/atlas-telemetry-client';
 import { useEffect } from 'react';
 
 export type MarketingLocale = 'fr' | 'ar';
@@ -182,10 +184,17 @@ export function ZafirixMarketingLanding({ locale }: { locale: MarketingLocale })
   const isAr = locale === 'ar';
 
   useEffect(() => {
-    trackEvent('view_landing', { locale });
     document.documentElement.lang = c.htmlLang;
     document.documentElement.dir = c.dir;
-  }, [locale, c.htmlLang, c.dir]);
+  }, [c.htmlLang, c.dir]);
+
+  useEffect(() => {
+    return runWhenIdle(() => {
+      trackEvent('view_landing', { locale });
+      const code = captureReferralFromWindow();
+      if (code) logReferralLandingClick(code);
+    });
+  }, [locale]);
 
   return (
     <div className="min-h-dvh flex flex-col bg-[#f4f6fa] overflow-x-hidden" dir={c.dir} lang={c.htmlLang}>

@@ -3,6 +3,7 @@ import { createClient } from '@supabase/supabase-js';
 import { atlasDataBackend } from '@/app/lib/atlas-data-source';
 import { ATLAS_INCIDENT_HOTFIX_GROWTH } from '@/app/lib/atlas-hotfix';
 import { checkPaymentRateLimit } from '@/app/lib/payment-rate-limit';
+import { runAfterResponse } from '@/app/lib/atlas-wait-until';
 
 const ALLOWED = new Set([
   'view_landing',
@@ -90,46 +91,28 @@ export async function POST(request: NextRequest) {
   const metadata = sanitizeMetadata(body?.metadata);
 
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
-  const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
   const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY ?? process.env.SUPABASE_SERVICE_ROLE ?? '';
 
   if (!serviceRoleKey) {
-    return NextResponse.json({ ok: false, error: 'server_misconfigured' }, { status: 503 });
+    return NextResponse.json({ ok: true, skipped: true, reason: 'misconfigured' }, { status: 202 });
   }
 
-  let userId: string | null = null;
-  const authHeader = request.headers.get('authorization') ?? '';
-  if (authHeader.toLowerCase().startsWith('bearer ')) {
-    const token = authHeader.slice(7).trim();
-    if (token) {
-      const userClient = createClient(supabaseUrl, supabaseAnonKey, {
-        global: { headers: { Authorization: `Bearer ${token}` } },
+  runAfterResponse(
+    (async () => {
+      const admin = createClient(supabaseUrl, serviceRoleKey, {
+        auth: { autoRefreshToken: false, persistSession: false },
       });
-      const { data: auth } = await userClient.auth.getUser();
-      userId = auth.user?.id ?? null;
-    }
-  }
+      const { error } = await admin.from('events').insert({
+        user_id: null,
+        event_name: event,
+        path,
+        metadata,
+      });
+      if (error) console.warn('[analytics/track] insert failed', error.message);
+    })(),
+  );
 
-  const admin = createClient(supabaseUrl, serviceRoleKey);
-  const row: {
-    user_id: string | null;
-    event_name: string;
-    path: string | null;
-    metadata: Record<string, unknown> | null;
-  } = {
-    user_id: userId,
-    event_name: event,
-    path,
-    metadata,
-  };
-
-  const { error } = await admin.from('events').insert(row);
-
-  if (error) {
-    return NextResponse.json({ ok: false, error: 'db_error' }, { status: 500 });
-  }
-
-  return NextResponse.json({ ok: true });
+  return NextResponse.json({ ok: true }, { status: 202 });
 }
 
 export async function OPTIONS() {

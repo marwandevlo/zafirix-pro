@@ -8,7 +8,18 @@ import { supabase } from '@/app/lib/supabase';
 const PING_INTERVAL_MS = 2 * 60 * 1000;
 const PAGE_LOG_COOLDOWN_MS = 10 * 60 * 1000;
 
-const SKIP_PREFIXES = ['/login', '/signup', '/auth', '/access-denied'];
+const SKIP_PREFIXES = [
+  '/login',
+  '/signup',
+  '/auth',
+  '/access-denied',
+  '/landing',
+  '/pricing',
+  '/blog',
+  '/terms',
+  '/privacy',
+  '/share',
+];
 
 function shouldSkipPath(path: string): boolean {
   return SKIP_PREFIXES.some((p) => path === p || path.startsWith(`${p}/`));

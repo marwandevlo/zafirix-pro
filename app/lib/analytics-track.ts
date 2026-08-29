@@ -1,6 +1,7 @@
 import { appendLocalFunnelEvent } from '@/app/lib/atlas-funnel-local-buffer';
 import { isAtlasSupabaseDataEnabled } from '@/app/lib/atlas-data-source';
 import { ATLAS_INCIDENT_HOTFIX_GROWTH } from '@/app/lib/atlas-hotfix';
+import { sendTelemetry } from '@/app/lib/atlas-telemetry-client';
 
 export const ANALYTICS_EVENT_NAMES = [
   'view_landing',
@@ -96,27 +97,6 @@ export function trackEvent(eventName: AnalyticsEventName, metadata: Record<strin
     return;
   }
 
-  void (async () => {
-    try {
-      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-      try {
-        const { supabase } = await import('@/app/lib/supabase');
-        const { data } = await supabase.auth.getSession();
-        const token = data.session?.access_token;
-        if (token) headers.Authorization = `Bearer ${token}`;
-      } catch {
-        // ignore — anonymous tracking still works
-      }
-
-      const res = await fetch('/api/analytics/track', {
-        method: 'POST',
-        headers,
-        body: JSON.stringify(payload),
-        keepalive: true,
-      });
-      if (!res.ok) fallbackLocal();
-    } catch {
-      fallbackLocal();
-    }
-  })();
+  // Never await auth — landing / referral clicks must not wait on Supabase session.
+  sendTelemetry('/api/analytics/track', payload);
 }
