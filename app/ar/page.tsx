@@ -1,8 +1,8 @@
 import { redirect } from 'next/navigation';
 import { extractReferralCodeFromSearch } from '@/app/lib/atlas-inbound-url';
 
-/** Default marketing entry → French landing. Keep only `ref` (drop fbclid / utm / gclid). */
-export default async function LandingIndexPage({
+/** Filesystem fallback for `zafirixpro.com/ar?ref=` (Facebook / in-app browsers). */
+export default async function ArabicAliasPage({
   searchParams,
 }: {
   searchParams: Promise<Record<string, string | string[] | undefined>>;
@@ -14,7 +14,5 @@ export default async function LandingIndexPage({
     else if (Array.isArray(value) && value[0]) raw.set(key, value[0]);
   }
   const ref = extractReferralCodeFromSearch(raw.toString());
-  const lang = typeof params.lang === 'string' ? params.lang.trim().toLowerCase() : '';
-  const dest = lang === 'ar' ? '/landing/ar' : '/landing/fr';
-  redirect(ref ? `${dest}?ref=${encodeURIComponent(ref)}` : dest);
+  redirect(ref ? `/landing/ar?ref=${encodeURIComponent(ref)}` : '/landing/ar');
 }

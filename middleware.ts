@@ -20,6 +20,7 @@ import {
 import { finalizeHtmlDocumentResponse } from '@/app/lib/html-cache-headers';
 import { applyReferralCookieFromRequest } from '@/app/lib/atlas-referral-cookie';
 import { requestHasSupabaseSessionCookie } from '@/app/lib/atlas-auth-cookie';
+import { buildCanonicalUrl } from '@/app/lib/atlas-inbound-url';
 import { normalizeReferralCode } from '@/app/lib/atlas-referral-utils';
 
 async function userHasAdminAccess(user: User, supabaseUrl: string): Promise<boolean> {
@@ -92,6 +93,7 @@ function withReferralCookie(request: NextRequest, response: NextResponse): NextR
 function isPublicPath(pathname: string): boolean {
   if (isPublicStaticAsset(pathname)) return true;
   if (PUBLIC_PATHS.has(pathname)) return true;
+  if (pathname === '/fr' || pathname === '/ar' || pathname === '/home') return true;
   if (pathname.startsWith('/landing')) return true;
   if (pathname === '/blog' || pathname.startsWith('/blog/')) return true;
   if (pathname.startsWith('/auth/')) return true;
@@ -213,7 +215,33 @@ async function resolveProfileStatusForGate(
   return null;
 }
 
+function maybeCanonicalDocumentRedirect(request: NextRequest): NextResponse | null {
+  if (request.method !== 'GET' && request.method !== 'HEAD') return null;
+  const { pathname } = request.nextUrl;
+  if (pathname.startsWith('/api/') || pathname.startsWith('/_next/')) return null;
+
+  const { href, changed } = buildCanonicalUrl({
+    protocol: request.nextUrl.protocol,
+    host: request.nextUrl.host || request.headers.get('host') || '',
+    pathname,
+    search: request.nextUrl.search,
+    forwardedProto: request.headers.get('x-forwarded-proto'),
+  });
+  if (!changed) return null;
+
+  try {
+    const dest = new URL(href);
+    const redirect = NextResponse.redirect(dest, 308);
+    return withReferralCookie(request, finalizeHtmlDocumentResponse(redirect, dest.pathname));
+  } catch {
+    return null;
+  }
+}
+
 export async function middleware(request: NextRequest) {
+  const canonical = maybeCanonicalDocumentRedirect(request);
+  if (canonical) return canonical;
+
   const { pathname } = request.nextUrl;
 
   if (isAnonymousTelemetryPath(pathname)) {
@@ -290,13 +318,13 @@ export async function middleware(request: NextRequest) {
       );
     }
     const url = request.nextUrl.clone();
-    url.pathname =
-      pathname.startsWith('/admin') || pathname === '/dashboard' || pathname.startsWith('/dashboard/')
-        ? '/login'
-        : '/landing/fr';
-    url.searchParams.set('next', pathname);
+    const toLogin =
+      pathname.startsWith('/admin') || pathname === '/dashboard' || pathname.startsWith('/dashboard/');
+    url.pathname = toLogin ? '/login' : '/landing/fr';
+    if (toLogin) url.searchParams.set('next', pathname);
+    else url.searchParams.delete('next');
     if (!hasRef) url.searchParams.delete('ref');
-    return withReferralCookie(request, NextResponse.redirect(url));
+    return withReferralCookie(request, NextResponse.redirect(url, 307));
   }
 
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
@@ -354,12 +382,12 @@ export async function middleware(request: NextRequest) {
       );
     }
     const url = request.nextUrl.clone();
-    url.pathname =
-      pathname.startsWith('/admin') || pathname === '/dashboard' || pathname.startsWith('/dashboard/')
-        ? '/login'
-        : '/landing/fr';
-    url.searchParams.set('next', pathname);
-    return withReferralCookie(request, NextResponse.redirect(url));
+    const toLogin =
+      pathname.startsWith('/admin') || pathname === '/dashboard' || pathname.startsWith('/dashboard/');
+    url.pathname = toLogin ? '/login' : '/landing/fr';
+    if (toLogin) url.searchParams.set('next', pathname);
+    else url.searchParams.delete('next');
+    return withReferralCookie(request, NextResponse.redirect(url, 307));
   }
 
   if (pathname.startsWith('/api/admin')) {

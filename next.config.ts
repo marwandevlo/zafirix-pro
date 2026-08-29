@@ -103,6 +103,12 @@ const nextConfig: NextConfig = {
     return [
       { source: '/client', destination: '/portal', permanent: true },
       { source: '/register', destination: '/signup', permanent: false },
+      // Social / locale shortcuts — keep in sync with middleware `resolveMarketingAliasPath`.
+      { source: '/fr', destination: '/landing/fr', permanent: true },
+      { source: '/ar', destination: '/landing/ar', permanent: true },
+      { source: '/fr/:path*', destination: '/landing/fr', permanent: true },
+      { source: '/ar/:path*', destination: '/landing/ar', permanent: true },
+      { source: '/home', destination: '/landing/fr', permanent: true },
     ];
   },
   async rewrites() {
@@ -110,7 +116,9 @@ const nextConfig: NextConfig = {
     return {
       beforeFiles: [
         {
-          source: '/:companyCode',
+          // Never swallow marketing locales (`/fr`, `/ar`) or app shells on the portal host.
+          source:
+            '/:companyCode((?!fr|ar|landing|blog|pricing|login|signup|register|admin|api|dashboard|portal|home|auth)[^/]+)',
           has: [{ type: 'host', value: portalHost }],
           destination: '/portal/:companyCode',
         },

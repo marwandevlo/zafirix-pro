@@ -1,5 +1,6 @@
 import type { NextRequest, NextResponse } from 'next/server';
 import { ATLAS_REFERRAL_CONFIG } from '@/app/lib/atlas-referral-config';
+import { extractReferralCodeFromSearch } from '@/app/lib/atlas-inbound-url';
 import { normalizeReferralCode } from '@/app/lib/atlas-referral-utils';
 
 export const ATLAS_REFERRAL_COOKIE = ATLAS_REFERRAL_CONFIG.pendingCodeStorageKey;
@@ -26,7 +27,9 @@ export function readReferralCodeFromCookieHeader(value: string | undefined | nul
 
 export function applyReferralCookieFromRequest(request: NextRequest, response: NextResponse): void {
   try {
-    const code = normalizeReferralCode(request.nextUrl.searchParams.get('ref'));
+    const code =
+      extractReferralCodeFromSearch(request.nextUrl.search) ||
+      normalizeReferralCode(request.nextUrl.searchParams.get('ref'));
     if (!code) return;
     response.cookies.set(ATLAS_REFERRAL_COOKIE, code, referralCookieOptions());
   } catch (error) {
