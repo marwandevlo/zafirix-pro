@@ -6,6 +6,8 @@ import { revalidateAdminSurfaces } from '@/app/lib/admin/revalidate-admin-paths'
 import { isOwnerEmail } from '@/app/lib/owner';
 import { roleGrantsAdminAccess } from '@/app/lib/admin/can-access-admin';
 import { applyAdminProfilePlanToEntitlements } from '@/app/lib/atlas-subscription-sync';
+import { sendAccountNotificationEmail } from '@/app/lib/email';
+import { isAccountAcceptedStatus } from '@/app/lib/email-account-status';
 
 export const dynamic = 'force-dynamic';
 
@@ -37,6 +39,12 @@ function isPlan(v: string): v is Plan {
 }
 function isStatus(v: string): v is Status {
   return v === 'pending' || v === 'active' || v === 'suspended' || v === 'banned';
+}
+
+function normalizeIncomingStatus(raw: string): string {
+  const value = raw.trim().toLowerCase();
+  if (value === 'accepted' || value === 'approved') return 'active';
+  return value;
 }
 
 export async function GET(request: NextRequest, ctx: { params: Promise<{ id: string }> }) {
@@ -124,7 +132,7 @@ export async function PATCH(request: NextRequest, ctx: { params: Promise<{ id: s
 
   const role = typeof body?.role === 'string' ? body.role.trim() : undefined;
   const plan = typeof body?.plan === 'string' ? body.plan.trim() : undefined;
-  const status = typeof body?.status === 'string' ? body.status.trim() : undefined;
+  const status = typeof body?.status === 'string' ? normalizeIncomingStatus(body.status) : undefined;
   const fullName = typeof body?.full_name === 'string' ? body.full_name.trim() : undefined;
 
   if (role && !isRole(role)) return NextResponse.json({ error: 'invalid_role' }, { status: 400 });
@@ -227,7 +235,7 @@ export async function PATCH(request: NextRequest, ctx: { params: Promise<{ id: s
   }
 
   const nextStatus = typeof status === 'string' ? status.trim().toLowerCase() : '';
-  const isApproval = prevStatus === 'pending' && nextStatus === 'active';
+  const isApproval = !isAccountAcceptedStatus(prevStatus) && isAccountAcceptedStatus(nextStatus);
   const isRejection = prevStatus === 'pending' && nextStatus === 'banned';
 
   await writeAdminLog({
@@ -245,6 +253,24 @@ export async function PATCH(request: NextRequest, ctx: { params: Promise<{ id: s
     .eq('id', userId)
     .maybeSingle();
   const fp = (finalProf ?? {}) as AdminProfileRow;
+
+  if (isApproval) {
+    const recipientEmail = String(fp.email ?? targetAuthEmail ?? '').trim();
+    try {
+      await sendAccountNotificationEmail({
+        kind: 'user_accepted',
+        to: recipientEmail,
+        displayName: fp.full_name ?? recipientEmail,
+        userId,
+        admin,
+      });
+    } catch (error) {
+      console.error('[admin/users PATCH] accepted email failed', {
+        userId,
+        message: error instanceof Error ? error.message : error,
+      });
+    }
+  }
 
   return NextResponse.json({
     ok: true,

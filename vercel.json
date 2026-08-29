@@ -1,4 +1,5 @@
 {
+  "installCommand": "npm ci --include=optional",
   "headers": [
     {
       "source": "/_next/static/(.*)",

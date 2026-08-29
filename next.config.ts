@@ -1,37 +1,48 @@
 import type { NextConfig } from 'next';
 import { withSentryConfig } from '@sentry/nextjs';
-import { execSync } from 'node:child_process';
 
 const portalHost = process.env.NEXT_PUBLIC_PORTAL_HOST?.trim().replace(/^https?:\/\//, '').replace(/\/$/, '');
 
+/** Build id from Vercel env only — never spawn git/child processes (hangs Linux CI + traces the whole repo). */
 function resolveBuildId(): string {
-  if (process.env.NEXT_PUBLIC_APP_BUILD_ID?.trim()) {
-    return process.env.NEXT_PUBLIC_APP_BUILD_ID.trim();
-  }
-  if (process.env.VERCEL_GIT_COMMIT_SHA?.trim()) {
-    return process.env.VERCEL_GIT_COMMIT_SHA.trim();
-  }
-  if (process.env.VERCEL_DEPLOYMENT_ID?.trim()) {
-    return process.env.VERCEL_DEPLOYMENT_ID.trim();
-  }
-  if (process.env.APP_BUILD_ID?.trim()) {
-    return process.env.APP_BUILD_ID.trim();
-  }
-  try {
-    return execSync('node scripts/resolve-app-build-id.mjs', { encoding: 'utf8' }).trim();
-  } catch {
-    return `local-${Date.now()}`;
-  }
+  return (
+    process.env.NEXT_PUBLIC_APP_BUILD_ID?.trim() ||
+    process.env.VERCEL_GIT_COMMIT_SHA?.trim() ||
+    process.env.VERCEL_DEPLOYMENT_ID?.trim() ||
+    process.env.APP_BUILD_ID?.trim() ||
+    `local-${Date.now()}`
+  );
 }
 
 const appBuildId = resolveBuildId();
 
-/** HTML/RSC shells: never cache. Hashed bundles under /_next/static: immutable long cache. */
 const htmlNoStoreHeaders = [
   { key: 'Cache-Control', value: 'no-store, max-age=0, must-revalidate' },
   { key: 'CDN-Cache-Control', value: 'no-store' },
   { key: 'Vercel-CDN-Cache-Control', value: 'no-store' },
   { key: 'Pragma', value: 'no-cache' },
+];
+
+const nativeServerPackages = [
+  'pdf-to-img',
+  'pdfjs-dist',
+  'sharp',
+  '@img/sharp-linux-x64',
+  '@img/sharp-libvips-linux-x64',
+  '@napi-rs/canvas',
+  '@napi-rs/canvas-linux-x64-gnu',
+  'resend',
+  '@thednp/dommatrix',
+];
+
+const nativeTraceGlobs = [
+  './node_modules/pdf-to-img/**',
+  './node_modules/pdfjs-dist/**',
+  './node_modules/@napi-rs/canvas/**',
+  './node_modules/@napi-rs/canvas-linux-x64-gnu/**',
+  './node_modules/sharp/**',
+  './node_modules/@img/sharp-linux-x64/**',
+  './node_modules/@img/sharp-libvips-linux-x64/**',
 ];
 
 const nextConfig: NextConfig = {
@@ -43,7 +54,16 @@ const nextConfig: NextConfig = {
   experimental: {
     proxyClientMaxBodySize: '55mb',
   },
-  serverExternalPackages: ['pdf-to-img', 'pdfjs-dist', 'sharp', '@napi-rs/canvas'],
+  // Native addons must stay external — bundling them crashes the Vercel Linux compile.
+  // Do not add `canvas` (node-canvas / cairo) to dependencies or transpilePackages.
+  serverExternalPackages: nativeServerPackages,
+  outputFileTracingIncludes: {
+    '/api/documents/**': nativeTraceGlobs,
+    '/api/documents/upload/**': nativeTraceGlobs,
+  },
+  outputFileTracingExcludes: {
+    '/api/admin/diagnose': ['.git/**', '.next/**', 'public/images/blog/**'],
+  },
   async headers() {
     return [
       {
@@ -80,9 +100,7 @@ const nextConfig: NextConfig = {
     ];
   },
   async redirects() {
-    return [
-      { source: '/client', destination: '/portal', permanent: true },
-    ];
+    return [{ source: '/client', destination: '/portal', permanent: true }];
   },
   async rewrites() {
     if (!portalHost) return [];

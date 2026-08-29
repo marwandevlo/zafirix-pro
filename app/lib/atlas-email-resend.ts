@@ -1,12 +1,31 @@
-export type SendEmailResult = { ok: true; id?: string } | { ok: false; skipped: true; reason: string } | { ok: false; error: string };
+export type SendEmailResult =
+  | { ok: true; id?: string }
+  | { ok: false; skipped: true; reason: string }
+  | { ok: false; error: string };
 
 function resolveResendApiKey(): string {
   return (process.env.EMAIL_API_KEY ?? process.env.RESEND_API_KEY ?? '').trim();
 }
 
+function resolveFromAddress(): string {
+  return process.env.RESEND_FROM_EMAIL?.trim() || 'ZAFIRIX PRO <onboarding@resend.dev>';
+}
+
+function stripHtml(html: string): string {
+  return html.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
+}
+
+function errorMessage(error: unknown): string {
+  if (error && typeof error === 'object' && 'message' in error && typeof error.message === 'string' && error.message) {
+    return error.message;
+  }
+  return 'resend_error';
+}
+
 /**
- * Sends via [Resend](https://resend.com) when `EMAIL_API_KEY` or `RESEND_API_KEY` is set.
- * Otherwise skips (no throw) so builds and local dev keep working.
+ * Sends via the official Resend SDK when `EMAIL_API_KEY` or `RESEND_API_KEY` is set.
+ * Dynamic import keeps Edge middleware / client bundles free of the Node SDK.
+ * Missing keys skip (no throw) so Vercel builds succeed.
  */
 export async function sendEmailViaResend(params: {
   to: string;
@@ -15,7 +34,7 @@ export async function sendEmailViaResend(params: {
   text?: string;
 }): Promise<SendEmailResult> {
   const apiKey = resolveResendApiKey();
-  const from = process.env.RESEND_FROM_EMAIL?.trim() || 'ZAFIRIX PRO <onboarding@resend.dev>';
+  const from = resolveFromAddress();
 
   if (!apiKey) {
     return { ok: false, skipped: true, reason: 'EMAIL_API_KEY or RESEND_API_KEY not configured' };
@@ -25,31 +44,20 @@ export async function sendEmailViaResend(params: {
   if (!to) return { ok: false, error: 'missing_recipient' };
 
   try {
-    const res = await fetch('https://api.resend.com/emails', {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        from,
-        to: [to],
-        subject: params.subject,
-        html: params.html,
-        text: params.text ?? stripHtml(params.html),
-      }),
+    const { Resend } = await import('resend');
+    const { data, error } = await new Resend(apiKey).emails.send({
+      from,
+      to: [to],
+      subject: params.subject,
+      html: params.html,
+      text: params.text ?? stripHtml(params.html),
     });
 
-    const json = (await res.json().catch(() => ({}))) as { id?: string; message?: string };
-    if (!res.ok) {
-      return { ok: false, error: typeof json?.message === 'string' ? json.message : `http_${res.status}` };
+    if (error) {
+      return { ok: false, error: errorMessage(error) };
     }
-    return { ok: true, id: json.id };
+    return { ok: true, id: data?.id };
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : 'network_error' };
   }
-}
-
-function stripHtml(html: string): string {
-  return html.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
 }

@@ -35,9 +35,8 @@ export async function GET(request: NextRequest) {
     }
   }
 
-  const projectRoot = process.cwd();
   const report = await runFullJourneyDiagnose({
-    projectRoot: path.resolve(projectRoot),
+    projectRoot: path.join(/* turbopackIgnore: true */ process.cwd()),
     db,
     baseUrl,
   });

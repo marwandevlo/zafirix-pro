@@ -2,6 +2,7 @@ import { NextResponse, type NextRequest } from 'next/server';
 import { createServerClient } from '@supabase/ssr';
 import type { EmailOtpType } from '@supabase/supabase-js';
 import { createServiceRoleClient } from '@/app/lib/atlas-profile-status-server';
+import { notifyAfterEnsureUserProfile } from '@/app/lib/email';
 import { ensureUserProfile } from '@/app/lib/ensure-user-profile';
 import { ensurePlatformSuperAdminSession } from '@/app/lib/admin/platform-super-admin';
 import { recordUserLogin } from '@/app/lib/atlas-user-activity';
@@ -101,6 +102,21 @@ export async function GET(request: NextRequest) {
       });
       if (!ensured.ok) {
         console.warn('[auth/callback] ensureUserProfile failed', ensured.error);
+      } else {
+        const meta = userData.user.user_metadata as Record<string, unknown> | undefined;
+        const displayName =
+          typeof meta?.full_name === 'string'
+            ? meta.full_name
+            : typeof meta?.name === 'string'
+              ? meta.name
+              : userData.user.email;
+        notifyAfterEnsureUserProfile({
+          admin,
+          userId: userData.user.id,
+          email: userData.user.email,
+          displayName,
+          ensured,
+        });
       }
       await ensurePlatformSuperAdminSession(admin, userData.user);
     } else {

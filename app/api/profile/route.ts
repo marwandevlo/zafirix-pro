@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createClient, type SupabaseClient, type User } from '@supabase/supabase-js';
 import { atlasDataBackend } from '@/app/lib/atlas-data-source';
 import { requireAtlasSupabaseSession } from '@/app/lib/atlas-api-session';
+import { notifyAfterEnsureUserProfile } from '@/app/lib/email';
 import { ensureUserProfile } from '@/app/lib/ensure-user-profile';
 import {
   normalizeProfilePlan,
@@ -95,6 +96,16 @@ async function loadProfile(admin: SupabaseClient, user: User): Promise<AtlasProf
     console.warn('[api/profile] ensureUserProfile failed, returning fallback profile:', ensured.error);
     return fallbackProfile(user);
   }
+
+  const meta = user.user_metadata as Record<string, unknown> | undefined;
+  notifyAfterEnsureUserProfile({
+    admin,
+    userId: user.id,
+    email: user.email,
+    displayName:
+      typeof meta?.full_name === 'string' ? meta.full_name : typeof meta?.name === 'string' ? meta.name : user.email,
+    ensured,
+  });
 
   const { data, error } = await admin
     .from('profiles')
@@ -204,6 +215,15 @@ export async function PATCH(request: NextRequest) {
     }
 
     const email = authUser.user.email ?? '';
+    const meta = authUser.user.user_metadata as Record<string, unknown> | undefined;
+    notifyAfterEnsureUserProfile({
+      admin,
+      userId: authUser.user.id,
+      email,
+      displayName:
+        typeof meta?.full_name === 'string' ? meta.full_name : typeof meta?.name === 'string' ? meta.name : email,
+      ensured,
+    });
     const upsertPayload = {
       id: session.userId,
       email: email || null,

@@ -88,13 +88,18 @@ function push(
   checks.push(check);
 }
 
+/** Keep NFT from walking the whole repo (next.config.ts was being traced). */
+function diagnoseAbs(rel: string): string {
+  return path.join(/* turbopackIgnore: true */ process.cwd(), rel);
+}
+
 /** Static filesystem + rule simulations (safe offline). */
-export function runStaticJourneyDiagnostics(projectRoot: string): DiagnoseCheck[] {
+export function runStaticJourneyDiagnostics(_projectRoot?: string): DiagnoseCheck[] {
   const checks: DiagnoseCheck[] = [];
 
   for (const href of CRITICAL_PAGES) {
     const file = pageFileFromHref(href);
-    const abs = path.join(projectRoot, file);
+    const abs = diagnoseAbs(file);
     push(checks, {
       id: `page:${href}`,
       area: 'routes',
@@ -107,7 +112,7 @@ export function runStaticJourneyDiagnostics(projectRoot: string): DiagnoseCheck[
   for (const item of ATLAS_APP_NAV_ITEMS) {
     if (item.href.includes('[')) continue;
     const file = pageFileFromHref(item.href);
-    const abs = path.join(projectRoot, file);
+    const abs = diagnoseAbs(file);
     if (!fs.existsSync(abs)) {
       push(checks, {
         id: `nav-broken:${item.id}`,
@@ -120,7 +125,7 @@ export function runStaticJourneyDiagnostics(projectRoot: string): DiagnoseCheck[
   }
 
   for (const rel of CRITICAL_API_ROUTES) {
-    const abs = path.join(projectRoot, rel);
+    const abs = diagnoseAbs(rel);
     push(checks, {
       id: `api:${rel}`,
       area: 'api',
@@ -131,7 +136,7 @@ export function runStaticJourneyDiagnostics(projectRoot: string): DiagnoseCheck[
   }
 
   for (const rel of PWA_ASSETS) {
-    const abs = path.join(projectRoot, rel);
+    const abs = diagnoseAbs(rel);
     push(checks, {
       id: `pwa:${rel}`,
       area: 'pwa',
@@ -196,7 +201,7 @@ export function runStaticJourneyDiagnostics(projectRoot: string): DiagnoseCheck[
     'app/lib/zafirix-compliance-audit-server.ts',
     'app/lib/zafirix-smart-tax-audit.ts',
   ]) {
-    const abs = path.join(projectRoot, rel);
+    const abs = diagnoseAbs(rel);
     push(checks, {
       id: `component:${rel}`,
       area: 'ui',
