@@ -9,6 +9,7 @@ import { AppSubscriptionProviders } from "@/app/components/subscription/AppSubsc
 import { FirstRunManager } from "@/app/components/onboarding/FirstRunManager";
 import { SoundEffectsGlobalChrome } from "@/app/components/sound/SoundEffectsGlobalChrome";
 import { UserPresencePing } from "@/app/components/activity/UserPresencePing";
+import { PageViewTracker } from "@/app/components/analytics/PageViewTracker";
 import { AppToastHost } from "@/app/components/ui/AppToastHost";
 import { PwaRegister } from "@/app/components/pwa/PwaRegister";
 import { APP_BUILD_ID } from "@/app/lib/app-build-id";
@@ -106,6 +107,7 @@ export default function RootLayout({
         <AppSubscriptionProviders>
           <SoundEffectsGlobalChrome>{children}</SoundEffectsGlobalChrome>
         </AppSubscriptionProviders>
+        <PageViewTracker />
         <UserPresencePing />
         <FirstRunManager />
         {enableGlobalSearchOverlay ? <GlobalSearchOverlay /> : null}

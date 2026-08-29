@@ -11,6 +11,7 @@ import type {
 } from '@/app/types/zafirix-usage';
 import { ZAFIRIX_PLAN_LABELS_FR, ZAFIRIX_PLAN_UPGRADE } from '@/app/types/zafirix-usage';
 import { getActiveCompanyDbRowId } from '@/app/lib/atlas-active-company';
+import { formatMadAmountLabel } from '@/app/lib/atlas-format';
 
 const METER_ICONS: Record<string, typeof FileText> = {
   invoices: FileText,
@@ -69,7 +70,7 @@ export function UsagePlanWidget() {
 
   const highlightMeters = useMemo(() => {
     if (!summary) return [] as ZafirixMeterSnapshot[];
-    return summary.meters.filter((m) =>
+    return (summary.meters ?? []).filter((m) =>
       ['invoices', 'shipments', 'ai_requests'].includes(m.meterCode),
     );
   }, [summary]);
@@ -110,7 +111,9 @@ export function UsagePlanWidget() {
 
   const upgrade = async () => {
     if (!companyId || !summary) return;
-    const next = ZAFIRIX_PLAN_UPGRADE[summary.subscription.planCode];
+    const next = summary.subscription?.planCode
+      ? ZAFIRIX_PLAN_UPGRADE[summary.subscription.planCode]
+      : undefined;
     if (!next) return;
     setBusy('upgrade');
     try {
@@ -153,7 +156,14 @@ export function UsagePlanWidget() {
   }
 
   const plan = summary.subscription;
-  const upgradeTo = ZAFIRIX_PLAN_UPGRADE[plan.planCode];
+  if (!plan) {
+    return (
+      <section className="rounded-xl border border-gray-200 bg-white p-5 text-sm text-gray-500">
+        Forfait indisponible pour cette société.
+      </section>
+    );
+  }
+  const upgradeTo = plan.planCode ? ZAFIRIX_PLAN_UPGRADE[plan.planCode] : undefined;
 
   return (
     <section className="rounded-xl border border-gray-200 bg-white p-4 sm:p-5 space-y-4">
@@ -211,7 +221,7 @@ export function UsagePlanWidget() {
             Limite proche ou atteinte — ajoutez un pack ou changez de forfait.
           </p>
           <div className="flex flex-wrap gap-2">
-            {summary.addons
+            {(summary.addons ?? [])
               .filter((a) => nearOrOver.some((m) => m.meterCode === a.meterCode))
               .slice(0, 3)
               .map((pack) => (
@@ -223,7 +233,7 @@ export function UsagePlanWidget() {
                   className="inline-flex items-center gap-1.5 min-h-10 rounded-xl bg-white border border-amber-200 px-3 text-xs font-semibold text-[#0F1F3D] hover:bg-amber-50 disabled:opacity-60"
                 >
                   <PackagePlus size={13} />
-                  {pack.nameFr} · {pack.priceMad} MAD
+                  {pack.nameFr} · {formatMadAmountLabel(pack.priceMad)}
                 </button>
               ))}
           </div>

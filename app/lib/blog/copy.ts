@@ -26,6 +26,12 @@ type BlogUiCopy = {
   ctaAudit: string;
   backToBlog: string;
   writtenBy: string;
+  shareLabel: string;
+  shareCopy: string;
+  shareCopied: string;
+  shareTwitter: string;
+  shareLinkedIn: string;
+  shareWhatsApp: string;
 };
 
 export const BLOG_UI: Record<BlogLocale, BlogUiCopy> = {
@@ -54,6 +60,12 @@ export const BLOG_UI: Record<BlogLocale, BlogUiCopy> = {
     ctaAudit: 'Ouvrir Smart Tax Audit',
     backToBlog: 'Retour au blog',
     writtenBy: 'Par',
+    shareLabel: 'Partager',
+    shareCopy: 'Copier le lien',
+    shareCopied: 'Copié !',
+    shareTwitter: 'Partager sur X',
+    shareLinkedIn: 'Partager sur LinkedIn',
+    shareWhatsApp: 'Partager sur WhatsApp',
   },
   ar: {
     htmlLang: 'ar-MA',
@@ -80,6 +92,12 @@ export const BLOG_UI: Record<BlogLocale, BlogUiCopy> = {
     ctaAudit: 'فتح التدقيق الضريبي الذكي',
     backToBlog: 'العودة إلى المدونة',
     writtenBy: 'بقلم',
+    shareLabel: 'مشاركة',
+    shareCopy: 'نسخ الرابط',
+    shareCopied: 'تم النسخ!',
+    shareTwitter: 'مشاركة على X',
+    shareLinkedIn: 'مشاركة على LinkedIn',
+    shareWhatsApp: 'مشاركة على واتساب',
   },
 };
 

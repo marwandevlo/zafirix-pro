@@ -3,6 +3,9 @@ import { cookies } from 'next/headers';
 import { createServerClient } from '@supabase/ssr';
 import { createClient } from '@supabase/supabase-js';
 import { atlasDataBackend } from '@/app/lib/atlas-data-source';
+import { readAffiliateBalance } from '@/app/lib/atlas-affiliate-commission';
+import { resolveAffiliateCommissionPercent } from '@/app/lib/atlas-affiliate-tiers';
+import { getPublicAppUrl } from '@/app/lib/atlas-app-url';
 import {
   countActivatedReferralsForReferrer,
   ensureReferralCodeForUser,
@@ -55,10 +58,14 @@ export async function GET(request: NextRequest) {
         metadata: { referral_code: code },
       });
     }
-    const origin = request.nextUrl.origin;
-    const signupPath = `/signup?ref=${encodeURIComponent(code)}`;
+    const origin = getPublicAppUrl() || request.nextUrl.origin;
+    const signupPath = `/register?ref=${encodeURIComponent(code)}`;
     const signupUrl = `${origin}${signupPath}`;
-    const activatedReferrals = await countActivatedReferralsForReferrer(admin, user.id);
+    const referralLink = `${origin}/?ref=${encodeURIComponent(code)}`;
+    const [activatedReferrals, earnings] = await Promise.all([
+      countActivatedReferralsForReferrer(admin, user.id),
+      readAffiliateBalance(admin, user.id),
+    ]);
     const nextMilestone = getNextReferralMilestone(activatedReferrals);
     const { text: progressLabel, barPercent: progressBarPercent } = getReferralProgressLabel(activatedReferrals);
     const currentTierRewardDays = getTierProgramTotalDays(activatedReferrals);
@@ -69,6 +76,7 @@ export async function GET(request: NextRequest) {
       code,
       signupPath,
       signupUrl,
+      referralLink,
       activatedReferrals,
       nextMilestone,
       progressLabel,
@@ -76,6 +84,12 @@ export async function GET(request: NextRequest) {
       currentTierRewardDays,
       maxTierReached,
       bonusFeaturesUnlocked: activatedReferrals >= 5,
+      commissionPercent: resolveAffiliateCommissionPercent({ activatedReferrals }),
+      lifetimeEarned: earnings.lifetimeEarned,
+      availableBalance: earnings.availableBalance,
+      pendingBalance: earnings.pendingBalance,
+      paidOut: earnings.paidOut,
+      earningsCurrency: earnings.currency,
     });
   } catch {
     return NextResponse.json({ ok: false, error: 'server_error' }, { status: 500 });

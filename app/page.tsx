@@ -48,7 +48,8 @@ import { DashboardFunnelInsights } from '@/app/components/conversion/DashboardFu
 import { AppSidebar, AppSidebarMobileOverlay } from '@/app/components/shell/AppSidebar';
 import { MobileBottomNav } from '@/app/components/shell/MobileBottomNav';
 import { ReferralDashboardCard } from '@/app/components/referral/ReferralDashboardCard';
-import { formatMadAmountLabel } from '@/app/lib/atlas-format';
+import { DashboardSafeSection } from '@/app/components/dashboard/DashboardSafeSection';
+import { MadAmount } from '@/app/components/ui/MadAmount';
 import { LegalContractsWidget } from '@/app/components/dashboard/LegalContractsWidget';
 import { AuditStatsWidget } from '@/app/components/dashboard/AuditStatsWidget';
 import { AlertCenterWidget } from '@/app/components/dashboard/AlertCenterWidget';
@@ -238,7 +239,8 @@ export default function Home() {
       {
         label: "Chiffre d'affaires",
         labelAr: 'رقم الأعمال',
-        value: formatMadAmountLabel(invoiceSummary.totalFacture),
+        money: invoiceSummary.totalFacture,
+        value: null as string | null,
         change: t('Factures enregistrées', 'فواتير مسجلة'),
         up: true,
         icon: TrendingUp,
@@ -246,7 +248,8 @@ export default function Home() {
       {
         label: 'Encaissé',
         labelAr: 'المحصّل',
-        value: formatMadAmountLabel(invoiceSummary.paidAmount),
+        money: invoiceSummary.paidAmount,
+        value: null as string | null,
         change: t('Factures payées', 'فواتير مدفوعة'),
         up: true,
         icon: Wallet,
@@ -254,7 +257,8 @@ export default function Home() {
       {
         label: 'À encaisser',
         labelAr: 'المستحقات',
-        value: formatMadAmountLabel(invoiceSummary.pendingAmount),
+        money: invoiceSummary.pendingAmount,
+        value: null as string | null,
         change: `${invoiceSummary.overdueCount} ${t('en retard', 'متأخرة')}`,
         up: invoiceSummary.overdueCount === 0,
         icon: FileText,
@@ -262,6 +266,7 @@ export default function Home() {
       {
         label: 'Rappels fiscaux',
         labelAr: 'تذكير ضريبي',
+        money: null as number | null,
         value: deadlinesError ? '!' : String(pendingFiscalCount),
         change: deadlinesError
           ? t('Échéances indisponibles', 'المواعيد غير متاحة')
@@ -415,14 +420,16 @@ export default function Home() {
             <div className="dash-glass rounded-2xl border-rose-200/80 bg-rose-50/90 px-4 py-3 text-sm text-rose-900">
               <span className="font-semibold">{t('Paiements en retard', 'مدفوعات متأخرة')} — </span>
               {invoiceSummary.overdueCount} {t('facture(s)', 'فاتورة')} ·{' '}
-              {formatMadAmountLabel(invoiceSummary.overdueAmount)}
+              <MadAmount value={invoiceSummary.overdueAmount} locale={lang} />
             </div>
           )}
 
           {/* ── 2. Usage & KPIs ─────────────────────────────────────────── */}
           <section className="grid grid-cols-1 xl:grid-cols-5 gap-4 lg:gap-5">
             <div className="xl:col-span-2">
-              <UsagePlanWidget />
+              <DashboardSafeSection name="usage-plan">
+                <UsagePlanWidget />
+              </DashboardSafeSection>
             </div>
             <div className="xl:col-span-3 grid grid-cols-2 gap-3 sm:gap-4">
               {kpis.map((kpi) => (
@@ -439,7 +446,7 @@ export default function Home() {
                     </div>
                   </div>
                   <p className="text-lg sm:text-2xl font-bold text-[#0F1F3D] mt-2 tabular-nums truncate">
-                    {kpi.value}
+                    {kpi.money != null ? <MadAmount value={kpi.money} locale={lang} /> : kpi.value}
                   </p>
                   <div className="flex items-center gap-1 mt-1">
                     {kpi.up ? (
@@ -491,7 +498,9 @@ export default function Home() {
 
           {/* ── Audit & Conformité Maroc ──────────────────────────────── */}
           <div id="morocco-audit">
-            <TaxAuditWidget lang={lang} />
+            <DashboardSafeSection name="tax-audit">
+              <TaxAuditWidget lang={lang} />
+            </DashboardSafeSection>
           </div>
 
           {/* ── 4. Recent activity ──────────────────────────────────────── */}
@@ -537,7 +546,7 @@ export default function Home() {
                       </div>
                       <div className="text-right shrink-0">
                         <p className="text-sm font-bold text-[#0F1F3D] tabular-nums">
-                          {formatMadAmountLabel(inv.totalTTC || 0)}
+                          <MadAmount value={inv.totalTTC || 0} locale={lang} />
                         </p>
                         <p className="text-[10px] text-slate-500 mt-0.5">{statusLabel(inv.status, t)}</p>
                       </div>
@@ -582,7 +591,7 @@ export default function Home() {
                           </span>
                         </td>
                         <td className="px-5 py-3 text-right font-semibold tabular-nums text-[#0F1F3D]">
-                          {formatMadAmountLabel(inv.totalTTC || 0)}
+                          <MadAmount value={inv.totalTTC || 0} locale={lang} />
                         </td>
                       </tr>
                     ))
@@ -633,18 +642,34 @@ export default function Home() {
 
           {/* Deadlines strip */}
           <section className="grid grid-cols-1 lg:grid-cols-2 gap-4 lg:gap-5">
-            <DeadlineRadarWidget lang={lang} />
-            <LegalCalendarWidget lang={lang} />
+            <DashboardSafeSection name="deadline-radar">
+              <DeadlineRadarWidget lang={lang} />
+            </DashboardSafeSection>
+            <DashboardSafeSection name="legal-calendar">
+              <LegalCalendarWidget lang={lang} />
+            </DashboardSafeSection>
           </section>
 
           {/* Onboarding / growth (secondary) */}
           <div className="space-y-4">
-            <GettingStartedWidget lang={lang} />
-            <OnboardingChecklistWidget lang={lang} />
-            <SmartRecommendationsWidget lang={lang} />
-            <ReferralDashboardCard lang={lang} />
-            <TrialOnboardingChecklist lang={lang} />
-            <DashboardFunnelInsights lang={lang} pendingDeclarationsCount={pendingFiscalCount} />
+            <DashboardSafeSection name="getting-started">
+              <GettingStartedWidget lang={lang} />
+            </DashboardSafeSection>
+            <DashboardSafeSection name="onboarding-checklist">
+              <OnboardingChecklistWidget lang={lang} />
+            </DashboardSafeSection>
+            <DashboardSafeSection name="smart-recommendations">
+              <SmartRecommendationsWidget lang={lang} />
+            </DashboardSafeSection>
+            <DashboardSafeSection name="referral">
+              <ReferralDashboardCard lang={lang} />
+            </DashboardSafeSection>
+            <DashboardSafeSection name="trial-checklist">
+              <TrialOnboardingChecklist lang={lang} />
+            </DashboardSafeSection>
+            <DashboardSafeSection name="funnel-insights">
+              <DashboardFunnelInsights lang={lang} pendingDeclarationsCount={pendingFiscalCount} />
+            </DashboardSafeSection>
           </div>
 
           {/* Collapsible deeper insights */}
@@ -681,32 +706,60 @@ export default function Home() {
 
                 <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
                     <div className="lg:col-span-2">
-                      <NotificationCenterWidget onUnreadChange={setNotificationUnread} />
+                      <DashboardSafeSection name="notifications">
+                        <NotificationCenterWidget onUnreadChange={setNotificationUnread} />
+                      </DashboardSafeSection>
                     </div>
-                    <AuditorPassWidget />
+                    <DashboardSafeSection name="auditor-pass">
+                      <AuditorPassWidget />
+                    </DashboardSafeSection>
                   </div>
 
                 <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
                   <div className="lg:col-span-2">
-                    <AlertCenterWidget />
+                    <DashboardSafeSection name="alert-center">
+                      <AlertCenterWidget />
+                    </DashboardSafeSection>
                   </div>
-                  <LegalContractsWidget />
+                  <DashboardSafeSection name="legal-contracts">
+                    <LegalContractsWidget />
+                  </DashboardSafeSection>
                 </div>
 
                 <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-                  <LiasseReadinessWidget />
-                  <ReconciliationWidget />
-                  <BankAlertCenter compact />
+                  <DashboardSafeSection name="liasse">
+                    <LiasseReadinessWidget />
+                  </DashboardSafeSection>
+                  <DashboardSafeSection name="reconciliation">
+                    <ReconciliationWidget />
+                  </DashboardSafeSection>
+                  <DashboardSafeSection name="bank-alerts">
+                    <BankAlertCenter compact />
+                  </DashboardSafeSection>
                 </div>
-                <PayrollDashboardSection />
-                <ConsolidatedDashboardWidget />
+                <DashboardSafeSection name="payroll">
+                  <PayrollDashboardSection />
+                </DashboardSafeSection>
+                <DashboardSafeSection name="consolidated">
+                  <ConsolidatedDashboardWidget />
+                </DashboardSafeSection>
                 <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-                  <AIInsightsWidget />
-                  <FiscalClosingAssistantWidget />
-                  <ExecutiveSummaryWidget />
+                  <DashboardSafeSection name="ai-insights">
+                    <AIInsightsWidget />
+                  </DashboardSafeSection>
+                  <DashboardSafeSection name="fiscal-closing">
+                    <FiscalClosingAssistantWidget />
+                  </DashboardSafeSection>
+                  <DashboardSafeSection name="executive-summary">
+                    <ExecutiveSummaryWidget />
+                  </DashboardSafeSection>
                 </div>
-                <DashboardIaSection />
-                <AuditStatsWidget />
+                <DashboardSafeSection name="ia-validation">
+                  <DashboardIaSection lang={lang} />
+                </DashboardSafeSection>
+                <DashboardSafeSection name="audit-stats">
+                  <AuditStatsWidget />
+                </DashboardSafeSection>
               </div>
             ) : null}
           </section>

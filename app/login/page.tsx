@@ -7,7 +7,11 @@ import { PublicFooter } from '@/app/components/public/PublicFooter';
 import { ZafirixLogo } from '@/app/components/branding/ZafirixLogo';
 import { isAtlasSupabaseDataEnabled } from '@/app/lib/atlas-data-source';
 import { claimAtlasFreeTrialAfterAuth, shouldPersistAtlasTrialNotice } from '@/app/lib/atlas-trial-claim-client';
-import { awaitCompleteReferralSignupWithSession } from '@/app/lib/atlas-referral-client';
+import {
+  awaitCompleteReferralSignupWithSession,
+  captureReferralFromWindow,
+  logReferralLandingClick,
+} from '@/app/lib/atlas-referral-client';
 import { resolvePostAuthRoute } from '@/app/lib/atlas-auth-routing';
 import { fetchSessionProfileStatus } from '@/app/lib/atlas-profile-status-client';
 
@@ -52,6 +56,8 @@ export default function LoginPage() {
   const [mode, setMode] = useState<'login' | 'register'>('login');
 
   useEffect(() => {
+    const code = captureReferralFromWindow();
+    if (code) logReferralLandingClick(code);
     if (!isAtlasSupabaseDataEnabled()) return;
     void (async () => {
       const { data } = await supabase.auth.getSession();
@@ -88,6 +94,15 @@ export default function LoginPage() {
           await awaitCompleteReferralSignupWithSession();
           if (typeof window !== 'undefined' && shouldPersistAtlasTrialNotice(claim)) {
             sessionStorage.setItem('zafirix_trial_notice', claim.message ?? '');
+          }
+          const access = data.session.access_token;
+          if (access) {
+            void fetch('/api/email/welcome', {
+              method: 'POST',
+              headers: { Authorization: `Bearer ${access}` },
+            }).catch((error: unknown) => {
+              console.warn('[login] welcome email failed', error instanceof Error ? error.message : error);
+            });
           }
         }
         setSuccess('Compte créé ! Vérifiez votre e-mail si une confirmation est requise, puis connectez-vous pour activer l’essai selon l’éligibilité.');

@@ -12,8 +12,21 @@ export const ATLAS_REFERRAL_CONFIG = {
     /** Used only when mode is company_slots (each activation). */
     extraCompanySlots: 3,
   },
-  /** SessionStorage key for pending ?ref= code until signup/login completes. */
+  /** SessionStorage + httpOnly cookie key for pending ?ref= until signup/login completes. */
   pendingCodeStorageKey: 'atlas_ref_code',
+  cookieMaxAgeSec: 60 * 60 * 24 * 30,
+  /**
+   * Base / first-tier commission % (see `atlas-affiliate-tiers.ts` for 20–40% ladder).
+   * Override ladder with AFFILIATE_COMMISSION_TIERS or flat AFFILIATE_COMMISSION_PERCENT.
+   */
+  affiliateCommissionPercent: 20,
+  affiliateCurrency: 'MAD',
   /** After onboarding completion, open referral celebrate modal once (`pending` / `done`). */
   postOnboardingReferralKey: 'zafirix_referral_celebrate',
 } as const;
+
+export {
+  resolveAffiliateCommissionPercent,
+  getAffiliateCommissionTiers,
+  resolveAffiliateCommissionBreakdown,
+} from '@/app/lib/atlas-affiliate-tiers';

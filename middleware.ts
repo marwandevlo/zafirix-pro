@@ -18,6 +18,7 @@ import {
   type ProfileStatus,
 } from '@/app/types/auth';
 import { finalizeHtmlDocumentResponse } from '@/app/lib/html-cache-headers';
+import { applyReferralCookieFromRequest } from '@/app/lib/atlas-referral-cookie';
 
 async function userHasAdminAccess(user: User, supabaseUrl: string): Promise<boolean> {
   if (jwtUserShowsAdmin(user)) return true;
@@ -54,6 +55,7 @@ const PUBLIC_PATHS = new Set([
   '/pricing',
   '/login',
   '/signup',
+  '/register',
   '/forgot-password',
   '/reset-password',
   '/terms',
@@ -198,15 +200,29 @@ async function resolveProfileStatusForGate(
 export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
+  if (pathname === '/register') {
+    const url = request.nextUrl.clone();
+    url.pathname = '/signup';
+    const redirect = NextResponse.redirect(url);
+    applyReferralCookieFromRequest(request, redirect);
+    return redirect;
+  }
+
   if (isPublicPath(pathname)) {
-    return finalizeHtmlDocumentResponse(NextResponse.next(), pathname);
+    const publicResponse = finalizeHtmlDocumentResponse(NextResponse.next(), pathname);
+    applyReferralCookieFromRequest(request, publicResponse);
+    return publicResponse;
   }
 
   if (pathname === '/api/health' || pathname === '/api/health/dependencies') {
     return NextResponse.next();
   }
 
-  if (pathname === '/api/analytics/track' || pathname === '/api/funnel/track') {
+  if (
+    pathname === '/api/analytics/track' ||
+    pathname === '/api/analytics/pageview' ||
+    pathname === '/api/funnel/track'
+  ) {
     return NextResponse.next();
   }
 
@@ -300,7 +316,10 @@ export async function middleware(request: NextRequest) {
       );
     }
     const url = request.nextUrl.clone();
-    url.pathname = pathname.startsWith('/admin') || pathname === '/dashboard' ? '/login' : '/landing';
+    url.pathname =
+      pathname.startsWith('/admin') || pathname === '/dashboard' || pathname.startsWith('/dashboard/')
+        ? '/login'
+        : '/landing';
     url.searchParams.set('next', pathname);
     return NextResponse.redirect(url);
   }

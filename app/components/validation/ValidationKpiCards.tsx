@@ -1,7 +1,9 @@
 'use client';
 
-import { memo, useEffect, useState } from 'react';
+import { memo, useEffect, useState, type ReactNode } from 'react';
 import { FileCheck, Clock, XCircle, RefreshCw, CheckCircle2, TrendingUp } from 'lucide-react';
+import { MadAmount } from '@/app/components/ui/MadAmount';
+import type { AtlasUiLocale } from '@/app/lib/atlas-format';
 
 type KpiData = {
   kpis: {
@@ -19,18 +21,11 @@ type KpiData = {
   };
 };
 
-function formatMad(n: number): string {
-  if (n === 0) return '0 MAD';
-  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M MAD`;
-  if (n >= 1_000) return `${(n / 1_000).toFixed(0)}K MAD`;
-  return `${n.toLocaleString('fr-MA')} MAD`;
-}
-
 type CardProps = {
   icon: React.ReactNode;
   label: string;
   value: number | string;
-  sub?: string;
+  sub?: ReactNode;
   color: string;
   loading?: boolean;
 };
@@ -54,9 +49,10 @@ function KpiCard({ icon, label, value, sub, color, loading }: CardProps) {
 
 type ValidationKpiCardsProps = {
   className?: string;
+  locale?: AtlasUiLocale;
 };
 
-export const ValidationKpiCards = memo(function ValidationKpiCards({ className = '' }: ValidationKpiCardsProps) {
+export const ValidationKpiCards = memo(function ValidationKpiCards({ className = '', locale = 'fr' }: ValidationKpiCardsProps) {
   const [data, setData] = useState<KpiData | null>(null);
   const [loading, setLoading] = useState(true);
 
@@ -77,7 +73,7 @@ export const ValidationKpiCards = memo(function ValidationKpiCards({ className =
         icon={<Clock size={20} className="text-amber-600" />}
         label="En attente (brouillons)"
         value={kpis?.pending_draft ?? 0}
-        sub={amounts ? formatMad(amounts.draft_total) : undefined}
+        sub={amounts ? <MadAmount value={amounts.draft_total} locale={locale} /> : undefined}
         color="bg-amber-50 border-amber-100"
         loading={loading}
       />
@@ -85,7 +81,7 @@ export const ValidationKpiCards = memo(function ValidationKpiCards({ className =
         icon={<RefreshCw size={20} className="text-purple-600" />}
         label="En révision"
         value={kpis?.reviewed ?? 0}
-        sub={amounts ? formatMad(amounts.reviewed_total) : undefined}
+        sub={amounts ? <MadAmount value={amounts.reviewed_total} locale={locale} /> : undefined}
         color="bg-purple-50 border-purple-100"
         loading={loading}
       />
@@ -93,7 +89,7 @@ export const ValidationKpiCards = memo(function ValidationKpiCards({ className =
         icon={<CheckCircle2 size={20} className="text-green-600" />}
         label="Validés aujourd'hui"
         value={kpis?.validated_today ?? 0}
-        sub={amounts ? formatMad(amounts.validated_total) : undefined}
+        sub={amounts ? <MadAmount value={amounts.validated_total} locale={locale} /> : undefined}
         color="bg-green-50 border-green-100"
         loading={loading}
       />
@@ -101,7 +97,7 @@ export const ValidationKpiCards = memo(function ValidationKpiCards({ className =
         icon={<XCircle size={20} className="text-red-600" />}
         label="Rejetés"
         value={kpis?.rejected ?? 0}
-        sub={amounts ? formatMad(amounts.rejected_total) : undefined}
+        sub={amounts ? <MadAmount value={amounts.rejected_total} locale={locale} /> : undefined}
         color="bg-red-50 border-red-100"
         loading={loading}
       />

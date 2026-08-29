@@ -129,6 +129,21 @@ const STEPS = [
     file: '20260730280000_atlas_user_activity_tracking.sql',
     probeTable: 'atlas_user_activity',
   },
+  {
+    label: 'Affiliate commissions (referral payments)',
+    file: '20260829220000_atlas_affiliate_commissions.sql',
+    probeTable: 'atlas_affiliate_transactions',
+  },
+  {
+    label: 'Analytics page-view traffic',
+    file: '20260829230000_analytics_events.sql',
+    probeTable: 'analytics_events',
+  },
+  {
+    label: 'Affiliate earnings dashboard (tiers + pending/paid)',
+    file: '20260830010000_atlas_affiliate_earnings_dashboard.sql',
+    probeTable: 'atlas_affiliate_tier_config',
+  },
 ];
 
 const VERIFY_TABLES = [
@@ -163,6 +178,11 @@ const VERIFY_TABLES = [
   'zafirix_governance_documents',
   'zafirix_board_members',
   'atlas_user_activity',
+  'atlas_affiliate_balances',
+  'atlas_affiliate_transactions',
+  'atlas_affiliate_tier_config',
+  'atlas_affiliate_plan_rates',
+  'analytics_events',
 ];
 
 function parseCliArgs() {

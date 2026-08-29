@@ -176,6 +176,29 @@ export async function completeReferralSignup(
   return { ok: true, already: false };
 }
 
+/** Never throws — registration / auth must continue if referral attach fails. */
+export async function attachReferralSafely(
+  admin: SupabaseClient,
+  referredUserId: string,
+  rawCode: string,
+): Promise<CompleteSignupResult | { ok: false; reason: 'error' }> {
+  try {
+    const result = await completeReferralSignup(admin, referredUserId, rawCode);
+    if (!result.ok) {
+      console.info('[referral] attach skipped', { referredUserId, reason: result.reason });
+    } else {
+      console.info('[referral] relationship saved', { referredUserId, already: result.already });
+    }
+    return result;
+  } catch (error) {
+    console.error('[referral] attach failed (non-blocking)', {
+      referredUserId,
+      message: error instanceof Error ? error.message : error,
+    });
+    return { ok: false, reason: 'error' };
+  }
+}
+
 export type ActivateReferralResult =
   | {
       ok: true;
@@ -205,6 +228,27 @@ export async function countActivatedReferralsForReferrer(admin: SupabaseClient, 
     .eq('status', 'activated');
   if (error) return 0;
   return typeof count === 'number' ? count : 0;
+}
+
+export async function countReferralFunnelForReferrer(
+  admin: SupabaseClient,
+  referrerUserId: string,
+): Promise<{ clicks: number; signups: number; activated: number }> {
+  const { data, error } = await admin
+    .from('atlas_referrals')
+    .select('status')
+    .eq('referrer_user_id', referrerUserId);
+  if (error || !Array.isArray(data)) return { clicks: 0, signups: 0, activated: 0 };
+  let clicks = 0;
+  let signups = 0;
+  let activated = 0;
+  for (const row of data) {
+    const status = String((row as { status?: string }).status ?? '');
+    if (status === 'clicked') clicks += 1;
+    else if (status === 'signed_up') signups += 1;
+    else if (status === 'activated') activated += 1;
+  }
+  return { clicks, signups: signups + activated, activated };
 }
 
 /** Applies tiered trial extension + bonus-features flag on referrer free-trial row. Instant delta vs last applied. */

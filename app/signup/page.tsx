@@ -17,8 +17,11 @@ import {
 import { PublicFooter } from '@/app/components/public/PublicFooter';
 import { isAtlasSupabaseDataEnabled } from '@/app/lib/atlas-data-source';
 import { claimAtlasFreeTrialAfterAuth, shouldPersistAtlasTrialNotice } from '@/app/lib/atlas-trial-claim-client';
-import { awaitCompleteReferralSignupWithSession, storePendingReferralCode } from '@/app/lib/atlas-referral-client';
-import { normalizeReferralCode } from '@/app/lib/atlas-referral-utils';
+import {
+  awaitCompleteReferralSignupWithSession,
+  captureReferralFromWindow,
+  logReferralLandingClick,
+} from '@/app/lib/atlas-referral-client';
 import { trackEvent } from '@/app/lib/analytics-track';
 import { getUsage, setUsage } from '@/app/lib/atlas-usage-limits';
 import { ZafirixLogo } from '@/app/components/branding/ZafirixLogo';
@@ -93,20 +96,10 @@ export default function SignUpPage() {
   useEffect(() => {
     if (typeof window === 'undefined') return;
     try {
-      const sp = new URLSearchParams(window.location.search);
-      const raw = sp.get('ref');
-      const code = normalizeReferralCode(raw);
+      const code = captureReferralFromWindow();
       if (!code) return;
-      storePendingReferralCode(code);
-      if (sessionStorage.getItem('atlas_ref_signup_started') === '1') return;
-      sessionStorage.setItem('atlas_ref_signup_started', '1');
       trackEvent('referral_signup_started', { referral_code: code });
-      void fetch('/api/referral/click', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ code }),
-        keepalive: true,
-      });
+      logReferralLandingClick(code);
     } catch {
       // ignore
     }

@@ -6,6 +6,7 @@ import { ATLAS_INCIDENT_HOTFIX_GROWTH } from '@/app/lib/atlas-hotfix';
 import { isAtlasSupabaseDataEnabled } from '@/app/lib/atlas-data-source';
 import { trackEvent } from '@/app/lib/analytics-track';
 import { buildReferralShareTextBilingual, openWhatsAppReferralShareText } from '@/app/lib/atlas-referral-client';
+import { formatMadAmountLabel } from '@/app/lib/atlas-format';
 
 export type ReferralMePayload = {
   ok?: boolean;
@@ -17,6 +18,10 @@ export type ReferralMePayload = {
   currentTierRewardDays?: number;
   maxTierReached?: boolean;
   bonusFeaturesUnlocked?: boolean;
+  commissionPercent?: number;
+  lifetimeEarned?: number;
+  availableBalance?: number;
+  earningsCurrency?: string;
 };
 
 type Props = {
@@ -74,6 +79,9 @@ export function ReferralDashboardCard({ lang, compact = false }: Props) {
   const days = data?.currentTierRewardDays ?? 0;
   const maxed = data?.maxTierReached ?? false;
   const bonus = data?.bonusFeaturesUnlocked ?? false;
+  const commissionPercent = data?.commissionPercent ?? 20;
+  const available = data?.availableBalance ?? 0;
+  const lifetime = data?.lifetimeEarned ?? 0;
 
   return (
     <div
@@ -141,6 +149,18 @@ export function ReferralDashboardCard({ lang, compact = false }: Props) {
                 <Sparkles size={12} /> {t('Fonctions bonus débloquées', 'تم فتح الميزات الإضافية')}
               </p>
             ) : null}
+            <p className="mt-2 text-[11px] text-slate-700">
+              {t(
+                `Commission ${commissionPercent}% · solde ${formatMadAmountLabel(available, 'fr')} (cumul ${formatMadAmountLabel(lifetime, 'fr')})`,
+                `عمولة ${commissionPercent}% · الرصيد ${formatMadAmountLabel(available, 'ar')} (إجمالي ${formatMadAmountLabel(lifetime, 'ar')})`,
+              )}
+            </p>
+            <a
+              href="/dashboard/affiliate"
+              className="mt-2 inline-block text-[11px] font-semibold text-emerald-800 hover:underline"
+            >
+              {t('Ouvrir le tableau affilié →', 'فتح لوحة الإحالة ←')}
+            </a>
           </div>
         </div>
 

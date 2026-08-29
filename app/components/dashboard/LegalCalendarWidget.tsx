@@ -126,7 +126,7 @@ export function LegalCalendarWidget({ lang = 'fr' }: Props) {
                       <span
                         key={j}
                         title={ev.label}
-                        className={`w-1.5 h-1.5 rounded-full ${ev.severity === 'contract' ? 'bg-indigo-500' : SEVERITY_DOT[ev.severity]}`}
+                        className={`w-1.5 h-1.5 rounded-full ${ev.severity === 'contract' ? 'bg-indigo-500' : (SEVERITY_DOT[ev.severity] ?? SEVERITY_DOT.green)}`}
                       />
                     ))}
                   </div>
@@ -143,7 +143,7 @@ export function LegalCalendarWidget({ lang = 'fr' }: Props) {
                 onClick={() => router.push(d.href)}
                 className="w-full text-left flex items-center gap-2 text-xs hover:bg-gray-50 rounded px-1 py-0.5"
               >
-                <span className={`w-2 h-2 rounded-full shrink-0 ${SEVERITY_DOT[d.severity]}`} />
+                <span className={`w-2 h-2 rounded-full shrink-0 ${SEVERITY_DOT[d.severity] ?? SEVERITY_DOT.green}`} />
                 <span className="truncate flex-1">{d.labelFr}</span>
                 <span className="text-gray-400 shrink-0">{categoryLabelFr(d.category)} · {d.dueDate}</span>
               </button>

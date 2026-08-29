@@ -123,23 +123,23 @@ export function MoroccoComplianceAuditWidget({ lang = 'fr' }: Props) {
                 {t('Score', 'النقطة')} {audit.score}/100
               </span>
               <span className="text-[11px] text-slate-500">
-                {audit.counts.invoicesScanned} {t('factures', 'فواتير')} ·{' '}
-                {audit.counts.supplierInvoicesScanned} {t('achats', 'مشتريات')} ·{' '}
-                {audit.counts.accountingEntriesScanned} {t('écritures', 'قيود')}
+                {audit.counts?.invoicesScanned ?? 0} {t('factures', 'فواتير')} ·{' '}
+                {audit.counts?.supplierInvoicesScanned ?? 0} {t('achats', 'مشتريات')} ·{' '}
+                {audit.counts?.accountingEntriesScanned ?? 0} {t('écritures', 'قيود')}
               </span>
             </div>
             <p className="text-sm text-slate-700 leading-relaxed">
               {lang === 'ar' ? audit.summaryAr : audit.summaryFr}
             </p>
 
-            {audit.findings.length === 0 ? (
+            {(audit.findings ?? []).length === 0 ? (
               <div className="rounded-xl bg-emerald-50 border border-emerald-100 px-3 py-3 text-sm text-emerald-800 flex items-center gap-2">
                 <CheckCircle2 size={16} />
                 {t('Aucune anomalie critique sur l’échantillon.', 'لا توجد مخالفات حرجة في العينة.')}
               </div>
             ) : (
               <ul className="space-y-2.5 max-h-[28rem] overflow-y-auto overscroll-contain">
-                {audit.findings.slice(0, 40).map((f) => (
+                {(audit.findings ?? []).slice(0, 40).map((f) => (
                   <li
                     key={f.id}
                     className="rounded-xl border border-slate-100 bg-white/80 p-3 sm:p-3.5"

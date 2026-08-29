@@ -36,6 +36,7 @@ import {
   ScrollText,
   UserRound,
   Briefcase,
+  Gift,
 } from 'lucide-react';
 
 export type AtlasNavItemId =
@@ -79,6 +80,7 @@ export type AtlasNavItemId =
   | 'ir'
   | 'subscription'
   | 'billing'
+  | 'affiliate'
   | 'pricing'
   | 'settings'
   | 'admin'
@@ -138,6 +140,7 @@ export const ATLAS_APP_NAV_ITEMS: AtlasAppNavItem[] = [
   { id: 'liasse', label: 'Liasse fiscale', labelAr: 'الحزمة الضريبية', icon: ClipboardList, href: '/liasse' },
   { id: 'ir', label: 'IR / Salaires', labelAr: 'الرواتب والضرائب', icon: TrendingUp, href: '/ir' },
   { id: 'billing', label: 'Facturation', labelAr: 'الفوترة', icon: CreditCard, href: '/billing' },
+  { id: 'affiliate', label: 'Affiliation', labelAr: 'الإحالة', icon: Gift, href: '/dashboard/affiliate' },
   { id: 'subscription', label: 'Abonnement', labelAr: 'الاشتراك', icon: CreditCard, href: '/subscription' },
   { id: 'pricing', label: 'Tarifs', labelAr: 'الأسعار', icon: Tags, href: '/pricing' },
   { id: 'settings', label: 'Paramètres', labelAr: 'الإعدادات', icon: Settings, href: '/settings' },
@@ -265,7 +268,7 @@ export const ATLAS_NAV_GROUPS: AtlasNavGroup[] = [
     id: 'platform',
     labelFr: 'Compte & plateforme',
     labelAr: 'الحساب والمنصة',
-    itemIds: ['billing', 'subscription', 'pricing', 'settings', 'admin'],
+    itemIds: ['billing', 'affiliate', 'subscription', 'pricing', 'settings', 'admin'],
   },
 ];
 

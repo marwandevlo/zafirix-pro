@@ -8,6 +8,10 @@ import {
   paddleSubscriptionWindowFromPayload,
   upsertPaddleAtlasSubscription,
 } from '@/app/lib/atlas-subscription-sync';
+import {
+  creditAffiliateCommissionOnPayment,
+  resolvePaidSubscriptionAmount,
+} from '@/app/lib/atlas-affiliate-commission';
 
 export const dynamic = 'force-dynamic';
 
@@ -103,6 +107,64 @@ export async function POST(request: NextRequest) {
       endYmd,
     });
     if (!atlas.ok) console.warn('[paddle:webhook] atlas_entitlement', atlas.error);
+
+    try {
+      const paid = resolvePaidSubscriptionAmount({ paddleData: data, planId });
+      const commission = await creditAffiliateCommissionOnPayment({
+        admin,
+        referredUserId: userId,
+        source: 'paddle',
+        sourceRef: `sub:${subscriptionId}`,
+        paymentAmount: paid.amount,
+        currency: paid.currency,
+        planId,
+        metadata: { event_type: eventType, paddle_subscription_id: subscriptionId },
+      });
+      if (!commission.ok) {
+        console.warn('[paddle:webhook] affiliate_commission_failed', commission.error);
+      } else if (commission.credited) {
+        console.info('[paddle:webhook] affiliate_commission', {
+          userId,
+          amount: commission.commissionAmount,
+        });
+      }
+    } catch (error) {
+      console.error('[paddle:webhook] affiliate_commission unexpected', {
+        message: error instanceof Error ? error.message : error,
+      });
+    }
+  }
+
+  if (eventType === 'transaction.completed') {
+    try {
+      const txnCustom = (data.custom_data ?? customData) as Record<string, unknown>;
+      const txnUserId = typeof txnCustom.user_id === 'string' ? txnCustom.user_id : userId;
+      const txnPlanId = typeof txnCustom.plan_id === 'string' ? txnCustom.plan_id : planId;
+      const txnSubId =
+        (typeof data.subscription_id === 'string' && data.subscription_id) ||
+        subscriptionId ||
+        (typeof data.id === 'string' ? data.id : '');
+      if (txnUserId && txnSubId) {
+        const paid = resolvePaidSubscriptionAmount({ paddleData: data, planId: txnPlanId });
+        const commission = await creditAffiliateCommissionOnPayment({
+          admin,
+          referredUserId: txnUserId,
+          source: 'paddle',
+          sourceRef: `sub:${txnSubId}`,
+          paymentAmount: paid.amount,
+          currency: paid.currency,
+          planId: txnPlanId,
+          metadata: { event_type: eventType, paddle_transaction_id: data.id ?? null },
+        });
+        if (!commission.ok) {
+          console.warn('[paddle:webhook] affiliate_commission_failed', commission.error);
+        }
+      }
+    } catch (error) {
+      console.error('[paddle:webhook] transaction.completed affiliate unexpected', {
+        message: error instanceof Error ? error.message : error,
+      });
+    }
   }
 
   return NextResponse.json({ ok: true });

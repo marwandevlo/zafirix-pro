@@ -47,7 +47,7 @@ export const ValidationQueueTable = memo(function ValidationQueueTable({ compact
   useEffect(() => {
     fetch('/api/validation/queue?status=draft,reviewed,validated,rejected', { credentials: 'include' })
       .then(r => r.json())
-      .then((d: QueueResponse) => { if (d.ok) setSummary(d.summary); })
+      .then((d: QueueResponse) => { if (d.ok) setSummary(Array.isArray(d.summary) ? d.summary : []); })
       .catch(() => null)
       .finally(() => setLoading(false));
   }, []);

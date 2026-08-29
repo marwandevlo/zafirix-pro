@@ -46,7 +46,8 @@ export function AuditStatsWidget() {
     return () => { cancelled = true; };
   }, []);
 
-  const maxDaily = Math.max(1, ...(stats?.daily.map(d => d.count) ?? [1]));
+  const daily = stats?.daily ?? [];
+  const maxDaily = Math.max(1, ...daily.map((d) => d.count), 1);
 
   return (
     <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
@@ -72,7 +73,7 @@ export function AuditStatsWidget() {
         <div className="p-4 space-y-4">
           {/* Action breakdown pills */}
           <div className="flex flex-wrap gap-2">
-            {Object.entries(stats.by_action)
+            {Object.entries(stats.by_action ?? {})
               .sort(([, a], [, b]) => b - a)
               .map(([action, count]) => {
                 const cfg = ACTION_CONFIG[action] ?? { label: action, color: 'text-gray-700', bg: 'bg-gray-100' };
@@ -89,7 +90,7 @@ export function AuditStatsWidget() {
           <div>
             <p className="text-[10px] text-gray-400 mb-1.5">Activité quotidienne</p>
             <div className="flex items-end gap-0.5 h-12">
-              {stats.daily.map(d => {
+              {daily.map(d => {
                 const height = Math.max(2, Math.round((d.count / maxDaily) * 44));
                 const isToday = d.date === new Date().toISOString().split('T')[0];
                 return (

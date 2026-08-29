@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { BadgeCheck, Ban, BarChart3, DollarSign, RefreshCw, ShieldAlert, Users } from 'lucide-react';
 import { isAtlasSupabaseDataEnabled } from '@/app/lib/atlas-data-source';
 import { supabase } from '@/app/lib/supabase';
+import { TrafficAnalyticsSection } from '@/app/admin/analytics/TrafficAnalyticsSection';
 
 type Metrics = {
   users: {
@@ -217,6 +218,8 @@ export default function AnalyticsDashboardClient() {
           </button>
         </div>
       </div>
+
+      <TrafficAnalyticsSection days={days} />
 
       {error ? <div className="bg-red-50 border border-red-200 rounded-xl p-4 text-sm text-red-800">{error}</div> : null}
 

@@ -100,7 +100,10 @@ const nextConfig: NextConfig = {
     ];
   },
   async redirects() {
-    return [{ source: '/client', destination: '/portal', permanent: true }];
+    return [
+      { source: '/client', destination: '/portal', permanent: true },
+      { source: '/register', destination: '/signup', permanent: false },
+    ];
   },
   async rewrites() {
     if (!portalHost) return [];

@@ -144,7 +144,7 @@ export function TaxAuditWidget({ lang: initialLang = 'fr', autoScan = true }: Pr
     if (!audit) return [];
     const seen = new Set<string>();
     const out: string[] = [];
-    for (const f of audit.findings) {
+    for (const f of audit.findings ?? []) {
       const rec = lang === 'ar' ? f.recommendationAr : f.recommendationFr;
       if (!rec || seen.has(rec)) continue;
       seen.add(rec);
@@ -236,10 +236,10 @@ export function TaxAuditWidget({ lang: initialLang = 'fr', autoScan = true }: Pr
                   {lang === 'ar' ? audit.summaryAr : audit.summaryFr}
                 </p>
                 <p className="text-[11px] text-slate-400 mt-1.5">
-                  {audit.counts.invoicesScanned} {t('factures', 'فواتير')} ·{' '}
-                  {audit.counts.supplierInvoicesScanned} {t('achats', 'مشتريات')} ·{' '}
-                  {audit.counts.accountingEntriesScanned} {t('écritures', 'قيود')} ·{' '}
-                  {audit.counts.critical} {t('critiques', 'حرجة')} · {audit.counts.warning}{' '}
+                  {audit.counts?.invoicesScanned ?? 0} {t('factures', 'فواتير')} ·{' '}
+                  {audit.counts?.supplierInvoicesScanned ?? 0} {t('achats', 'مشتريات')} ·{' '}
+                  {audit.counts?.accountingEntriesScanned ?? 0} {t('écritures', 'قيود')} ·{' '}
+                  {audit.counts?.critical ?? 0} {t('critiques', 'حرجة')} · {audit.counts?.warning ?? 0}{' '}
                   {t('alertes', 'تنبيهات')}
                 </p>
               </div>
@@ -266,13 +266,13 @@ export function TaxAuditWidget({ lang: initialLang = 'fr', autoScan = true }: Pr
               </div>
             )}
 
-            {audit.findings.length > 0 ? (
+            {(audit.findings ?? []).length > 0 ? (
               <div>
                 <p className="text-xs font-bold text-[#0F1F3D] mb-2">
                   {t('Risques détectés', 'المخاطر المكتشفة')}
                 </p>
                 <ul className="space-y-2.5 max-h-[28rem] overflow-y-auto overscroll-contain">
-                  {audit.findings.slice(0, 40).map((f) => (
+                  {(audit.findings ?? []).slice(0, 40).map((f) => (
                     <li key={f.id} className="rounded-xl border border-slate-100 bg-white/80 p-3 sm:p-3.5">
                       <div className="flex items-start gap-2">
                         {severityIcon(f.severity)}

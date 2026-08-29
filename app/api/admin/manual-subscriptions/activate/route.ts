@@ -9,6 +9,7 @@ import { syncProfileEntitlementFromAtlas } from '@/app/lib/atlas-subscription-sy
 import { getSupabaseServiceRoleClient } from '@/app/lib/supabase-admin';
 import { logAtlasAdminAction } from '@/app/lib/admin/atlas-admin-audit';
 import { revalidateAdminSurfaces } from '@/app/lib/admin/revalidate-admin-paths';
+import { creditAffiliateCommissionOnPayment } from '@/app/lib/atlas-affiliate-commission';
 
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
@@ -155,6 +156,33 @@ export async function POST(request: NextRequest) {
 
   const sync = await syncProfileEntitlementFromAtlas(admin, userId);
   if (!sync.ok) console.warn('[manual-subscriptions/activate] profile_sync', sync.error);
+
+  try {
+    const amountMad = Number((row as { amount_mad?: number | null }).amount_mad ?? plan.price ?? 0);
+    const commission = await creditAffiliateCommissionOnPayment({
+      admin,
+      referredUserId: userId,
+      source: 'manual',
+      sourceRef: `manual:${id}`,
+      paymentAmount: amountMad,
+      currency: 'MAD',
+      planId: plan.id,
+      metadata: { payment_request_id: id },
+    });
+    if (!commission.ok) {
+      console.warn('[manual-subscriptions/activate] affiliate_commission_failed', commission.error);
+    } else if (commission.credited) {
+      console.info('[manual-subscriptions/activate] affiliate_commission', {
+        userId,
+        amount: commission.commissionAmount,
+      });
+    }
+  } catch (error) {
+    console.error('[manual-subscriptions/activate] affiliate_commission unexpected', {
+      userId,
+      message: error instanceof Error ? error.message : error,
+    });
+  }
 
   await logAtlasAdminAction({
     actorUserId: guard.adminUserId,

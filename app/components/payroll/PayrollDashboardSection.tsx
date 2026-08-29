@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { AlertTriangle, ArrowRight, Loader2, Users } from 'lucide-react';
+import { MadAmount } from '@/app/components/ui/MadAmount';
 
 type PayrollKpis = {
   employees: number;
@@ -42,8 +43,6 @@ export function PayrollDashboardSection() {
     return () => { cancelled = true; };
   }, []);
 
-  const fmt = (n: number) => n.toLocaleString('fr-FR', { maximumFractionDigits: 0 }) + ' MAD';
-
   return (
     <section className="space-y-4">
       <div className="flex items-center justify-between">
@@ -77,12 +76,16 @@ export function PayrollDashboardSection() {
           </div>
           <div className="bg-white rounded-xl p-4 border border-gray-100 shadow-sm">
             <p className="text-xs text-gray-400">CNSS (période)</p>
-            <p className="text-lg font-bold text-blue-700 mt-1">{fmt(cnss?.total_cnss ?? kpis?.cnss_total ?? 0)}</p>
+            <p className="text-lg font-bold text-blue-700 mt-1">
+              <MadAmount value={cnss?.total_cnss ?? kpis?.cnss_total ?? 0} />
+            </p>
             <p className="text-[10px] text-gray-400">{cnss?.pending_declarations ?? 0} décl. en attente</p>
           </div>
           <div className="bg-white rounded-xl p-4 border border-gray-100 shadow-sm">
             <p className="text-xs text-gray-400">IR retenu — {ir?.period}</p>
-            <p className="text-lg font-bold text-purple-700 mt-1">{fmt(ir?.retained_ir ?? kpis?.ir_total ?? 0)}</p>
+            <p className="text-lg font-bold text-purple-700 mt-1">
+              <MadAmount value={ir?.retained_ir ?? kpis?.ir_total ?? 0} />
+            </p>
           </div>
         </div>
       )}

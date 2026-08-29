@@ -90,7 +90,7 @@ export function DeadlineRadarWidget({ lang = 'fr', compact = false, maxItems = 6
       ) : (
         <div className={`p-3 space-y-2 ${compact ? 'max-h-64 overflow-y-auto' : ''}`}>
           {visible.map((d) => {
-            const style = SEVERITY_STYLE[d.severity];
+            const style = SEVERITY_STYLE[d.severity] ?? SEVERITY_STYLE.green;
             const Icon = style.icon;
             return (
               <button

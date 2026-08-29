@@ -121,7 +121,7 @@ export function AlertCenterWidget() {
       ) : (
         <div className="divide-y divide-gray-50 max-h-72 overflow-y-auto">
           {visible.slice(0, 10).map(alert => {
-            const cfg = SEVERITY_CONFIG[alert.severity];
+            const cfg = SEVERITY_CONFIG[alert.severity] ?? SEVERITY_CONFIG.yellow;
             const Icon = cfg.icon;
             return (
               <div

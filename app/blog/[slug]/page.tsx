@@ -7,10 +7,11 @@ import { BlogCoverImage, stripLeadCoverImage } from '@/app/components/blog/BlogC
 import { BlogCtaBanner } from '@/app/components/blog/BlogCtaBanner';
 import { BlogMarkdown } from '@/app/components/blog/BlogMarkdown';
 import { BlogPostCard } from '@/app/components/blog/BlogPostCard';
+import { SharePost } from '@/app/components/blog/SharePost';
 import { isolateBlogBidi } from '@/app/lib/blog/bidi';
 import { BLOG_CYAN, BLOG_NAVY, BLOG_UI, blogListingHref, formatBlogDate } from '@/app/lib/blog/copy';
 import { getBlogAlternate, getBlogPostBySlug, getBlogPostsByLocale, getBlogSlugs } from '@/app/lib/blog/posts';
-import { articleJsonLd, blogPostPath, postMetadata } from '@/app/lib/blog/seo';
+import { articleJsonLd, blogPostPath, blogPostUrl, postMetadata } from '@/app/lib/blog/seo';
 
 type Props = {
   params: Promise<{ slug: string }>;
@@ -83,6 +84,8 @@ export default async function BlogPostPage({ params }: Props) {
           </span>
         </div>
 
+        <SharePost title={post.title} url={blogPostUrl(post.slug)} locale={post.locale} />
+
         {post.image ? (
           <BlogCoverImage src={post.image} alt={post.imageAlt ?? post.title} variant="header" />
         ) : null}
@@ -90,6 +93,8 @@ export default async function BlogPostPage({ params }: Props) {
         <div className="mt-8 border-t border-slate-200 pt-2">
           <BlogMarkdown markdown={stripLeadCoverImage(post.body, post.image)} rtl={isAr} />
         </div>
+
+        <SharePost title={post.title} url={blogPostUrl(post.slug)} locale={post.locale} />
 
         <BlogCtaBanner locale={post.locale} />
 

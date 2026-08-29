@@ -1,6 +1,7 @@
 'use client';
 
 import { AlertTriangle, Calculator } from 'lucide-react';
+import { formatMadAmountLabel } from '@/app/lib/atlas-format';
 
 type TvaConsistencyAlertProps = {
   amountHt: number | null | undefined;
@@ -37,9 +38,6 @@ export function TvaConsistencyAlert({
 
   if (diff <= threshold) return null;
 
-  const fmt = (n: number) =>
-    n.toLocaleString('fr-MA', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-
   const overOrUnder = vatAmount < expectedVat ? 'sous-estimée' : 'surestimée';
 
   return (
@@ -57,19 +55,19 @@ export function TvaConsistencyAlert({
         <div className="mt-1.5 grid grid-cols-3 gap-2 text-xs">
           <div className="bg-white border border-orange-100 rounded-lg px-2 py-1.5">
             <p className="text-gray-500">Montant HT</p>
-            <p className="font-semibold text-gray-800">{fmt(amountHt)} MAD</p>
+            <p className="font-semibold text-gray-800 notranslate" translate="no">{formatMadAmountLabel(amountHt)}</p>
           </div>
           <div className="bg-white border border-orange-100 rounded-lg px-2 py-1.5">
             <p className="text-gray-500">TVA attendue ({vatRate}%)</p>
-            <p className="font-semibold text-green-700">{fmt(expectedVat)} MAD</p>
+            <p className="font-semibold text-green-700 notranslate" translate="no">{formatMadAmountLabel(expectedVat)}</p>
           </div>
           <div className="bg-orange-100 border border-orange-200 rounded-lg px-2 py-1.5">
             <p className="text-gray-600">TVA détectée</p>
-            <p className="font-semibold text-orange-800">{fmt(vatAmount)} MAD</p>
+            <p className="font-semibold text-orange-800 notranslate" translate="no">{formatMadAmountLabel(vatAmount)}</p>
           </div>
         </div>
         <p className="text-xs text-orange-600 mt-1.5">
-          La TVA est {overOrUnder} de <span className="font-semibold">{fmt(diff)} MAD</span> par rapport à la formule HT × taux.
+          La TVA est {overOrUnder} de <span className="font-semibold notranslate" translate="no">{formatMadAmountLabel(diff)}</span> par rapport à la formule HT × taux.
           Vérifiez et corrigez si nécessaire avant validation.
         </p>
       </div>

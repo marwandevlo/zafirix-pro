@@ -3,7 +3,8 @@ import { cookies } from 'next/headers';
 import { createServerClient } from '@supabase/ssr';
 import { createClient } from '@supabase/supabase-js';
 import { atlasDataBackend } from '@/app/lib/atlas-data-source';
-import { completeReferralSignup } from '@/app/lib/atlas-referral-server';
+import { ATLAS_REFERRAL_COOKIE, readReferralCodeFromCookieHeader } from '@/app/lib/atlas-referral-cookie';
+import { attachReferralSafely } from '@/app/lib/atlas-referral-server';
 import { normalizeReferralCode } from '@/app/lib/atlas-referral-utils';
 
 export async function POST(request: NextRequest) {
@@ -39,21 +40,28 @@ export async function POST(request: NextRequest) {
   }
 
   const body = (await request.json().catch(() => ({}))) as { code?: string };
-  const code = normalizeReferralCode(body?.code ?? '');
+  const code =
+    normalizeReferralCode(body?.code ?? '') ||
+    readReferralCodeFromCookieHeader(cookieStore.get(ATLAS_REFERRAL_COOKIE)?.value);
   if (!code) {
-    return NextResponse.json({ ok: false, error: 'missing_code' }, { status: 400 });
+    return NextResponse.json({ ok: true, skipped: true, reason: 'missing_code' });
   }
 
   try {
     const admin = createClient(supabaseUrl, serviceRoleKey, {
       auth: { autoRefreshToken: false, persistSession: false },
     });
-    const result = await completeReferralSignup(admin, user.id, code);
+    const result = await attachReferralSafely(admin, user.id, code);
     if (!result.ok) {
-      return NextResponse.json({ ok: false, reason: result.reason }, { status: 400 });
+      console.warn('[referral/complete-signup] attach skipped', { reason: result.reason, userId: user.id });
+      return NextResponse.json({ ok: true, skipped: true, reason: result.reason });
     }
     return NextResponse.json({ ok: true, already: result.already });
-  } catch {
-    return NextResponse.json({ ok: false, error: 'server_error' }, { status: 500 });
+  } catch (error) {
+    console.error('[referral/complete-signup] non-blocking error', {
+      userId: user.id,
+      message: error instanceof Error ? error.message : error,
+    });
+    return NextResponse.json({ ok: true, skipped: true, error: 'server_error' });
   }
 }

@@ -5,8 +5,10 @@ import { useRouter } from 'next/navigation';
 import { CheckCheck, ClipboardList, ArrowRight } from 'lucide-react';
 import { ValidationKpiCards } from '@/app/components/validation/ValidationKpiCards';
 import { ValidationQueueTable } from '@/app/components/validation/ValidationQueueTable';
+import { DashboardSafeSection } from '@/app/components/dashboard/DashboardSafeSection';
+import type { AtlasUiLocale } from '@/app/lib/atlas-format';
 
-export const DashboardIaSection = memo(function DashboardIaSection() {
+export const DashboardIaSection = memo(function DashboardIaSection({ lang = 'fr' }: { lang?: AtlasUiLocale }) {
   const router = useRouter();
 
   return (
@@ -40,11 +42,13 @@ export const DashboardIaSection = memo(function DashboardIaSection() {
         </div>
       </div>
 
-      {/* KPI cards */}
-      <ValidationKpiCards />
+      <DashboardSafeSection name="validation-kpis">
+        <ValidationKpiCards locale={lang} />
+      </DashboardSafeSection>
 
-      {/* Queue table */}
-      <ValidationQueueTable />
+      <DashboardSafeSection name="validation-queue">
+        <ValidationQueueTable />
+      </DashboardSafeSection>
     </section>
   );
 });
