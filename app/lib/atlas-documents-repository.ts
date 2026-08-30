@@ -20,6 +20,7 @@ import { isBankStatementType, extractionFieldKeysForType } from '@/app/lib/atlas
 import {
   buildDetectedInvoicesFromExtraction,
   creatableOcrInvoices,
+  enrichDetectedInvoiceFromStructured,
   summaryExtractionFromInvoices,
 } from '@/app/lib/atlas-ocr-invoices-detect';
 import { ATLAS_STORAGE_KEYS } from '@/app/lib/atlas-storage-keys';
@@ -762,6 +763,8 @@ function parseOcrInvoicesArray(raw: unknown): AtlasOcrDetectedInvoice[] {
     const status = rec.status;
     if (typeof pageNumber !== 'number') continue;
     if (status !== 'detected' && status !== 'needs_review' && status !== 'no_invoice_detected') continue;
+    const iceRaw = rec.supplier_ice ?? rec.ice;
+    const ifRaw = rec.supplier_if ?? rec.if;
     parsed.push({
       page_number: pageNumber,
       source_pages: Array.isArray(rec.source_pages)
@@ -769,6 +772,8 @@ function parseOcrInvoicesArray(raw: unknown): AtlasOcrDetectedInvoice[] {
         : [pageNumber],
       invoice_number: typeof rec.invoice_number === 'string' ? rec.invoice_number : undefined,
       supplier_name: typeof rec.supplier_name === 'string' ? rec.supplier_name : undefined,
+      supplier_ice: typeof iceRaw === 'string' ? iceRaw.replace(/\D/g, '') || undefined : undefined,
+      supplier_if: typeof ifRaw === 'string' ? ifRaw.replace(/\D/g, '') || undefined : undefined,
       invoice_date: typeof rec.invoice_date === 'string' ? rec.invoice_date : undefined,
       amount_ht: typeof rec.amount_ht === 'number' ? rec.amount_ht : undefined,
       vat_amount: typeof rec.vat_amount === 'number' ? rec.vat_amount : undefined,
@@ -782,28 +787,51 @@ function parseOcrInvoicesArray(raw: unknown): AtlasOcrDetectedInvoice[] {
 }
 
 export function ocrInvoicesFromDocument(doc: AtlasDocument): AtlasOcrDetectedInvoice[] {
+  const structured =
+    doc.metadata?.extraction && typeof doc.metadata.extraction === 'object'
+      ? (doc.metadata.extraction as AtlasStructuredExtraction)
+      : null;
   const raw = doc.metadata?.ocr;
+  let invoices: AtlasOcrDetectedInvoice[] = [];
   if (raw && typeof raw === 'object') {
-    const fromArray = parseOcrInvoicesArray((raw as Record<string, unknown>).invoices);
-    if (fromArray.length) return fromArray;
+    invoices = parseOcrInvoicesArray((raw as Record<string, unknown>).invoices);
   }
-  const extraction = pickOcrFields(doc.metadata?.ocr) ?? (doc.content && typeof doc.content === 'object'
-    ? pickOcrFields(doc.content)
-    : null);
-  return buildDetectedInvoicesFromExtraction(extraction);
+  if (!invoices.length) {
+    const extraction = pickOcrFields(doc.metadata?.ocr) ?? (doc.content && typeof doc.content === 'object'
+      ? pickOcrFields(doc.content)
+      : null);
+    invoices = buildDetectedInvoicesFromExtraction(extraction);
+  }
+  return invoices.map((inv) => enrichDetectedInvoiceFromStructured(inv, structured));
 }
 
 export function ocrCreatableInvoiceCountFromDocument(doc: AtlasDocument): number {
   return creatableOcrInvoices(ocrInvoicesFromDocument(doc)).length;
 }
 
+function unwrapOcrScalar(raw: unknown): string | undefined {
+  if (typeof raw === 'string') {
+    const t = raw.trim();
+    return t || undefined;
+  }
+  if (typeof raw === 'number' && Number.isFinite(raw)) return String(raw);
+  if (raw && typeof raw === 'object') {
+    const rec = raw as Record<string, unknown>;
+    const v = rec.user_corrected_value ?? rec.normalized_value ?? rec.value;
+    if (v != null && String(v).trim()) return String(v).trim();
+  }
+  return undefined;
+}
+
 function pickOcrFields(raw: unknown): AtlasOcrExtraction | null {
   if (!raw || typeof raw !== 'object') return null;
   const rec = raw as Record<string, unknown>;
   const fields: AtlasOcrExtraction = {
-    numero_facture: rec.numero_facture as string | undefined,
-    date: rec.date as string | undefined,
-    fournisseur: rec.fournisseur as string | undefined,
+    numero_facture: unwrapOcrScalar(rec.numero_facture) || unwrapOcrScalar(rec.invoice_number),
+    date: unwrapOcrScalar(rec.date) || unwrapOcrScalar(rec.invoice_date),
+    fournisseur: unwrapOcrScalar(rec.fournisseur) || unwrapOcrScalar(rec.supplier_name),
+    supplier_ice: unwrapOcrScalar(rec.supplier_ice) || unwrapOcrScalar(rec.ice),
+    supplier_if: unwrapOcrScalar(rec.supplier_if) || unwrapOcrScalar(rec.if) || unwrapOcrScalar(rec.identifiant_fiscal),
     montant_ht: rec.montant_ht as number | undefined,
     taux_tva: rec.taux_tva as number | undefined,
     montant_tva: rec.montant_tva as number | undefined,

@@ -106,13 +106,16 @@ function withNormalizedField(
 export function applyMoroccoIdentifierNormalization(
   extraction: AtlasStructuredExtraction,
   llmIds?: Partial<MoroccoSupplierIds> | null,
+  extraText?: string | null,
 ): AtlasStructuredExtraction {
   const iceNorm =
     findIceCandidate(fieldSourceString(extraction.supplier_ice)) ||
-    findIceCandidate(String(llmIds?.ice ?? ''));
+    findIceCandidate(String(llmIds?.ice ?? '')) ||
+    findIceCandidate(extraText ?? '');
   const ifNorm =
     findIfCandidate(fieldSourceString(extraction.supplier_if)) ||
-    findIfCandidate(String(llmIds?.if ?? ''));
+    findIfCandidate(String(llmIds?.if ?? '')) ||
+    findIfCandidate(extraText ?? '');
   const rcNorm =
     normalizeRc(fieldSourceString(extraction.supplier_rc)) ||
     normalizeRc(String(llmIds?.rc ?? ''));

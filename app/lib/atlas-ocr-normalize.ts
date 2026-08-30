@@ -26,6 +26,8 @@ export type InvoiceOcrPayload = {
   numero_facture?: string;
   date?: string;
   fournisseur?: string;
+  supplier_ice?: string;
+  supplier_if?: string;
   montant_ht?: number;
   taux_tva?: number;
   montant_tva?: number;
@@ -127,11 +129,26 @@ export function normalizeOcrAiResponse(rawText: string): NormalizedOcrPayload {
       ? (parsed.extraction as Record<string, unknown>)
       : parsed;
 
+  const moroccoIds =
+    parsed.morocco_supplier_ids && typeof parsed.morocco_supplier_ids === 'object'
+      ? (parsed.morocco_supplier_ids as Record<string, unknown>)
+      : {};
+
   return {
     type: 'invoice',
     numero_facture: fieldValue(extraction.invoice_number) || String(parsed.numero_facture ?? '') || undefined,
     date: fieldValue(extraction.invoice_date) || String(parsed.date ?? '') || undefined,
     fournisseur: fieldValue(extraction.supplier_name) || String(parsed.fournisseur ?? '') || undefined,
+    supplier_ice:
+      fieldValue(extraction.supplier_ice) ||
+      fieldValue(extraction.ice) ||
+      String(moroccoIds.ice ?? parsed.supplier_ice ?? parsed.ice ?? '') ||
+      undefined,
+    supplier_if:
+      fieldValue(extraction.supplier_if) ||
+      fieldValue(extraction.identifiant_fiscal) ||
+      String(moroccoIds.if ?? parsed.supplier_if ?? parsed.if ?? '') ||
+      undefined,
     montant_ht: fieldNumber(extraction.subtotal_ht) || (typeof parsed.montant_ht === 'number' ? parsed.montant_ht : undefined),
     taux_tva: fieldNumber(extraction.tva_rate) || (typeof parsed.taux_tva === 'number' ? parsed.taux_tva : undefined),
     montant_tva: fieldNumber(extraction.tva_amount) || (typeof parsed.montant_tva === 'number' ? parsed.montant_tva : undefined),

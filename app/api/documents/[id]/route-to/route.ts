@@ -57,10 +57,14 @@ function extractNumeric(field?: { value?: string | number | null; user_corrected
   return null;
 }
 
-function extractString(field?: { value?: string | number | null; user_corrected_value?: string } | null): string | null {
+function extractString(field?: { value?: string | number | null; normalized_value?: string; user_corrected_value?: string } | null): string | null {
   if (!field) return null;
-  const raw = field.user_corrected_value != null ? field.user_corrected_value : field.value;
-  return raw != null ? String(raw) : null;
+  const raw = field.user_corrected_value != null
+    ? field.user_corrected_value
+    : (field.normalized_value != null ? field.normalized_value : field.value);
+  if (raw == null) return null;
+  const text = String(raw).trim();
+  return text || null;
 }
 
 function parseDate(dateStr: string | null): string | null {
@@ -150,8 +154,8 @@ async function routePurchaseToComptabilite(
       user_id: userId, company_id: companyId,
       document_id: documentId, source_document_id: documentId,
       supplier_name: extractString(extraction.supplier_name) ?? 'Fournisseur inconnu',
-      supplier_ice: extractString(extraction.supplier_ice),
-      supplier_if: extractString(extraction.supplier_if),
+      supplier_ice: extractString(extraction.supplier_ice) ?? extraction.morocco_supplier_ids?.ice ?? null,
+      supplier_if: extractString(extraction.supplier_if) ?? extraction.morocco_supplier_ids?.if ?? null,
       supplier_rc: extractString(extraction.supplier_rc),
       supplier_address: extractString(extraction.supplier_address),
       customer_name: extractString(extraction.customer_name),

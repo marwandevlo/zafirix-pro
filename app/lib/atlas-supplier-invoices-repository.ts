@@ -23,6 +23,7 @@ import { ocrExtractionFromDocument, ocrInvoicesFromDocument } from '@/app/lib/at
 import {
   buildDetectedInvoicesFromExtraction,
   creatableOcrInvoices,
+  enrichDetectedInvoiceFromStructured,
   pageLooksLikeInvoice,
   sourcePageForDetectedInvoice,
   supplierInvoiceDedupeKey,
@@ -76,14 +77,26 @@ export function writeSupplierInvoicesToLocalStorage(invoices: AtlasSupplierInvoi
 
 function rowToSupplierInvoice(row: AtlasSupplierInvoiceRow): AtlasSupplierInvoice {
   const metadata = asRecord(row.metadata);
+  const moroccoIds =
+    metadata?.morocco_supplier_ids && typeof metadata.morocco_supplier_ids === 'object'
+      ? (metadata.morocco_supplier_ids as Record<string, unknown>)
+      : {};
   const issueDate = row.invoice_date ? String(row.invoice_date) : todayYmd();
   return {
     id: String(row.id),
     companyId: row.company_id ? String(row.company_id) : undefined,
     documentId: row.document_id ? String(row.document_id) : undefined,
     supplierName: String(row.supplier_name ?? '').trim(),
-    supplierIce: row.supplier_ice ? String(row.supplier_ice) : undefined,
-    supplierIf: row.supplier_if ? String(row.supplier_if) : undefined,
+    supplierIce: row.supplier_ice
+      ? String(row.supplier_ice)
+      : moroccoIds.ice
+        ? String(moroccoIds.ice)
+        : undefined,
+    supplierIf: row.supplier_if
+      ? String(row.supplier_if)
+      : moroccoIds.if
+        ? String(moroccoIds.if)
+        : undefined,
     invoiceNumber: row.invoice_number ?? undefined,
     issueDate,
     paymentTerms: normalizePaymentTerms({ kind: 'preset', days: 60 }),
@@ -110,6 +123,8 @@ type SupplierInvoiceWriteInput = {
   documentId?: string;
   sourcePage?: number;
   supplierName: string;
+  supplierIce?: string;
+  supplierIf?: string;
   invoiceNumber?: string;
   issueDate: string;
   status: AtlasSupplierInvoiceStatus;
@@ -132,6 +147,8 @@ function supplierInvoiceRowPayload(
     document_id: invoice.documentId ?? null,
     source_page: sourcePage,
     supplier_name: invoice.supplierName.trim() || 'Fournisseur à compléter',
+    supplier_ice: invoice.supplierIce?.replace(/\D/g, '') || null,
+    supplier_if: invoice.supplierIf?.replace(/\D/g, '') || null,
     invoice_number: invoice.invoiceNumber?.trim() || null,
     invoice_date: invoice.issueDate || todayYmd(),
     amount_ht: invoice.amountHT ?? null,
@@ -160,6 +177,8 @@ function mapDetectedInvoiceToSupplierWriteInput(
     documentId: String(document.id),
     sourcePage,
     supplierName: detected.supplier_name?.trim() || 'Fournisseur à compléter',
+    supplierIce: detected.supplier_ice?.replace(/\D/g, '') || undefined,
+    supplierIf: detected.supplier_if?.replace(/\D/g, '') || undefined,
     invoiceNumber: detected.invoice_number?.trim() || undefined,
     issueDate,
     status: supplierStatus,
@@ -365,7 +384,13 @@ export async function createSupplierInvoicesFromOcr(
   } as AtlasDocument;
 
   const detectedInvoices = creatableOcrInvoices(ocrInvoicesFromDocument(document));
-  let invoicesToCreate = detectedInvoices;
+  const structuredExtraction =
+    document.metadata?.extraction && typeof document.metadata.extraction === 'object'
+      ? (document.metadata.extraction as import('@/app/types/atlas-document').AtlasStructuredExtraction)
+      : null;
+  let invoicesToCreate = detectedInvoices.map((inv) =>
+    enrichDetectedInvoiceFromStructured(inv, structuredExtraction),
+  );
 
   if (!invoicesToCreate.length) {
     const legacy = ocrExtractionFromDocument(document);
@@ -487,6 +512,8 @@ export async function updateSupplierInvoice(
           ? ((invoice.metadata as Record<string, unknown>).source_page as number)
           : undefined,
       supplierName: invoice.supplierName,
+      supplierIce: invoice.supplierIce,
+      supplierIf: invoice.supplierIf,
       invoiceNumber: invoice.invoiceNumber,
       issueDate: invoice.issueDate,
       status: invoice.status,

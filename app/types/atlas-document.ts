@@ -139,6 +139,8 @@ export type AtlasOcrExtraction = {
   numero_facture?: string;
   date?: string;
   fournisseur?: string;
+  supplier_ice?: string;
+  supplier_if?: string;
   montant_ht?: number;
   taux_tva?: number;
   montant_tva?: number;
@@ -163,6 +165,8 @@ export type AtlasOcrDetectedInvoice = {
   source_pages?: number[];
   invoice_number?: string;
   supplier_name?: string;
+  supplier_ice?: string;
+  supplier_if?: string;
   invoice_date?: string;
   amount_ht?: number;
   vat_amount?: number;

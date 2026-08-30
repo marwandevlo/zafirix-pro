@@ -103,6 +103,8 @@ Analyse le document fourni et retourne un JSON valide avec cette structure EXACT
       "taux_tva": 20,
       "montant_tva": 0.00,
       "montant_ttc": 0.00,
+      "supplier_ice": "<15 chiffres ou null>",
+      "supplier_if": "<7-8 chiffres ou null>",
       "description": "..."
     }
   ]
@@ -187,6 +189,10 @@ type RawInvoice = {
   taux_tva?: number;
   montant_tva?: number;
   montant_ttc?: number;
+  supplier_ice?: string;
+  supplier_if?: string;
+  ice?: string;
+  if?: string;
   description?: string;
 };
 
@@ -376,8 +382,25 @@ function buildLineItems(raw?: RawLineItem[]): AtlasInvoiceLineItem[] {
   }));
 }
 
-function buildInvoices(raw: RawPdfResponse): AtlasOcrDetectedInvoice[] {
+function digitsOrUndefined(raw?: string | null): string | undefined {
+  if (!raw) return undefined;
+  const digits = String(raw).replace(/\D/g, '');
+  return digits || undefined;
+}
+
+function buildInvoices(
+  raw: RawPdfResponse,
+  extraction: AtlasStructuredExtraction,
+): AtlasOcrDetectedInvoice[] {
   if (!Array.isArray(raw.invoices) || !raw.invoices.length) return [];
+  const fallbackIce =
+    digitsOrUndefined(extraction.morocco_supplier_ids?.ice) ||
+    digitsOrUndefined(extraction.supplier_ice?.normalized_value) ||
+    digitsOrUndefined(extraction.supplier_ice?.value != null ? String(extraction.supplier_ice.value) : '');
+  const fallbackIf =
+    digitsOrUndefined(extraction.morocco_supplier_ids?.if) ||
+    digitsOrUndefined(extraction.supplier_if?.normalized_value) ||
+    digitsOrUndefined(extraction.supplier_if?.value != null ? String(extraction.supplier_if.value) : '');
   return raw.invoices.map((inv, idx): AtlasOcrDetectedInvoice => ({
     page_number: typeof inv.page_number === 'number' ? inv.page_number : idx + 1,
     source_pages: Array.isArray(inv.source_pages)
@@ -385,6 +408,8 @@ function buildInvoices(raw: RawPdfResponse): AtlasOcrDetectedInvoice[] {
       : [typeof inv.page_number === 'number' ? inv.page_number : idx + 1],
     invoice_number: inv.numero_facture ?? undefined,
     supplier_name: inv.fournisseur ?? undefined,
+    supplier_ice: digitsOrUndefined(inv.supplier_ice ?? inv.ice) || fallbackIce,
+    supplier_if: digitsOrUndefined(inv.supplier_if ?? inv.if) || fallbackIf,
     invoice_date: inv.date ?? undefined,
     amount_ht: toNumber(inv.montant_ht),
     vat_amount: toNumber(inv.montant_tva),
@@ -406,6 +431,14 @@ function buildMerged(invoices: AtlasOcrDetectedInvoice[], extraction: AtlasStruc
     return {
       numero_facture: val(extraction.invoice_number) as string | undefined,
       fournisseur: val(extraction.supplier_name) as string | undefined,
+      supplier_ice:
+        (val(extraction.supplier_ice) as string | undefined) ||
+        extraction.morocco_supplier_ids?.ice ||
+        undefined,
+      supplier_if:
+        (val(extraction.supplier_if) as string | undefined) ||
+        extraction.morocco_supplier_ids?.if ||
+        undefined,
       date: val(extraction.invoice_date) as string | undefined,
       montant_ht: num(extraction.subtotal_ht),
       taux_tva: num(extraction.tva_rate),
@@ -420,6 +453,8 @@ function buildMerged(invoices: AtlasOcrDetectedInvoice[], extraction: AtlasStruc
   return {
     numero_facture: best.invoice_number,
     fournisseur: best.supplier_name,
+    supplier_ice: best.supplier_ice,
+    supplier_if: best.supplier_if,
     date: best.invoice_date,
     montant_ht: best.amount_ht,
     taux_tva: best.vat_rate,
@@ -451,9 +486,9 @@ function processOcrAiRawText(rawText: string): DirectPdfOcrResult {
 
   const classification = buildClassification(parsed.classification);
   let extraction = buildExtraction(parsed.extraction);
-  extraction = applyMoroccoIdentifierNormalization(extraction, parsed.morocco_supplier_ids);
+  extraction = applyMoroccoIdentifierNormalization(extraction, parsed.morocco_supplier_ids, rawText);
   const lineItems = buildLineItems(parsed.line_items);
-  const invoices = buildInvoices(parsed);
+  const invoices = buildInvoices(parsed, extraction);
   const bankTransactions = buildBankTransactions(parsed);
   const merged = buildMerged(invoices, extraction);
   const totalPages = typeof parsed.total_pages === 'number' && parsed.total_pages > 0

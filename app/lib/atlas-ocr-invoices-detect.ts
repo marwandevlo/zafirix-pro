@@ -29,6 +29,8 @@ function extractionToDetectedInvoice(pageNum: number, extraction: AtlasOcrExtrac
     source_pages: [pageNum],
     invoice_number: extraction.numero_facture?.trim() || undefined,
     supplier_name: supplierName || undefined,
+    supplier_ice: extraction.supplier_ice?.replace(/\D/g, '') || undefined,
+    supplier_if: extraction.supplier_if?.replace(/\D/g, '') || undefined,
     invoice_date: extraction.date?.trim() || undefined,
     amount_ht: extraction.montant_ht,
     vat_amount: extraction.montant_tva,
@@ -48,11 +50,15 @@ function mergeInvoiceGroup(pages: AtlasOcrDetectedInvoice[]): AtlasOcrDetectedIn
   const supplierName = pages.find((p) => p.supplier_name)?.supplier_name;
   const invoiceDate = pages.find((p) => p.invoice_date)?.invoice_date;
   const invoiceNumber = pages.find((p) => p.invoice_number)?.invoice_number;
+  const supplierIce = pages.find((p) => p.supplier_ice)?.supplier_ice;
+  const supplierIf = pages.find((p) => p.supplier_if)?.supplier_if;
   return {
     page_number: firstPage,
     source_pages: sourcePages,
     invoice_number: invoiceNumber,
     supplier_name: supplierName,
+    supplier_ice: supplierIce,
+    supplier_if: supplierIf,
     invoice_date: invoiceDate,
     amount_ht: best.amount_ht,
     vat_amount: best.vat_amount,
@@ -120,6 +126,8 @@ export function summaryExtractionFromInvoices(invoices: AtlasOcrDetectedInvoice[
   return {
     numero_facture: first.invoice_number,
     fournisseur: first.supplier_name,
+    supplier_ice: first.supplier_ice,
+    supplier_if: first.supplier_if,
     date: first.invoice_date,
     montant_ht: first.amount_ht,
     montant_tva: first.vat_amount,
@@ -157,12 +165,46 @@ export function detectedInvoiceToStructuredExtraction(
 
   return {
     supplier_name: field(detected.supplier_name),
+    supplier_ice: field(detected.supplier_ice),
+    supplier_if: field(detected.supplier_if),
     invoice_number: field(detected.invoice_number),
     invoice_date: field(detected.invoice_date),
     subtotal_ht: field(detected.amount_ht),
     tva_amount: field(detected.vat_amount),
     total_ttc: field(detected.amount_ttc),
     tva_rate: field(detected.vat_rate),
+  };
+}
+
+function structuredFieldDigits(
+  field?: { value?: string | number | null; normalized_value?: string; user_corrected_value?: string } | null,
+): string {
+  if (!field) return '';
+  const raw = field.user_corrected_value ?? field.normalized_value ?? field.value;
+  return raw != null ? String(raw).replace(/\D/g, '') : '';
+}
+
+/** Copy document-level ICE/IF onto a detected invoice when the per-invoice row omitted them. */
+export function enrichDetectedInvoiceFromStructured(
+  detected: AtlasOcrDetectedInvoice,
+  structured?: import('@/app/types/atlas-document').AtlasStructuredExtraction | null,
+): AtlasOcrDetectedInvoice {
+  if (!structured) return detected;
+  const ice =
+    detected.supplier_ice ||
+    structuredFieldDigits(structured.supplier_ice) ||
+    structured.morocco_supplier_ids?.ice ||
+    '';
+  const ifFiscal =
+    detected.supplier_if ||
+    structuredFieldDigits(structured.supplier_if) ||
+    structured.morocco_supplier_ids?.if ||
+    '';
+  if (!ice && !ifFiscal) return detected;
+  return {
+    ...detected,
+    supplier_ice: ice || detected.supplier_ice,
+    supplier_if: ifFiscal || detected.supplier_if,
   };
 }
 

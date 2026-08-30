@@ -23,6 +23,7 @@ import { ocrInvoicesFromDocument } from '@/app/lib/atlas-documents-repository';
 import {
   creatableOcrInvoices,
   detectedInvoiceToStructuredExtraction,
+  enrichDetectedInvoiceFromStructured,
   sourcePageForDetectedInvoice,
   validateDetectedInvoiceFields,
 } from '@/app/lib/atlas-ocr-invoices-detect';
@@ -274,8 +275,8 @@ async function registerSinglePurchaseInvoice(
       source_document_id: documentId,
       source_page: sourcePage ?? null,
       supplier_name: extractStr(extraction.supplier_name) || extractStr(extraction.customer_name) || 'Fournisseur inconnu',
-      supplier_ice: extractStr(extraction.supplier_ice) || null,
-      supplier_if: extractStr(extraction.supplier_if) || null,
+      supplier_ice: extractStr(extraction.supplier_ice) || extraction.morocco_supplier_ids?.ice || null,
+      supplier_if: extractStr(extraction.supplier_if) || extraction.morocco_supplier_ids?.if || null,
       supplier_rc: extractStr(extraction.supplier_rc) || null,
       supplier_patente: extractStr(extraction.supplier_patente) || null,
       supplier_address: extractStr(extraction.supplier_address) || null,
@@ -635,7 +636,9 @@ export async function registerValidatedDocumentRecords(
         continue;
       }
 
-      const extraction = detectedInvoiceToStructuredExtraction(detected);
+      const extraction = detectedInvoiceToStructuredExtraction(
+        enrichDetectedInvoiceFromStructured(detected, structured),
+      );
       const isPurchase = isPurchaseDocument(resolvedDocType, extraction);
       try {
         const existing = isPurchase
