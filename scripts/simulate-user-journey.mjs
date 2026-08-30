@@ -3,7 +3,7 @@
  *
  * Run:
  *   node scripts/simulate-user-journey.mjs
- *   node scripts/simulate-user-journey.mjs --http https://your-app.vercel.app
+ *   node scripts/simulate-user-journey.mjs --http https://zafirixpro.com
  *   node scripts/simulate-user-journey.mjs --db
  *
  * Exit code 1 if any hard failures.

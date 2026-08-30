@@ -11,6 +11,7 @@ export function referralCookieOptions(): {
   sameSite: 'lax';
   httpOnly: boolean;
   secure: boolean;
+  domain?: string;
 } {
   return {
     path: '/',
@@ -18,6 +19,7 @@ export function referralCookieOptions(): {
     sameSite: 'lax',
     httpOnly: true,
     secure: process.env.NODE_ENV === 'production',
+    ...(process.env.NODE_ENV === 'production' ? { domain: '.zafirixpro.com' } : {}),
   };
 }
 

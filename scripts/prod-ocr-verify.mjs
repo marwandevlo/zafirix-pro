@@ -25,7 +25,7 @@ const documentId = process.argv[2];
 const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
 const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
-const prodBase = process.env.PROD_BASE_URL || 'https://www.zafirixpro.com';
+const prodBase = process.env.PROD_BASE_URL || 'https://zafirixpro.com';
 
 if (!url || !serviceKey) {
   console.error('Missing Supabase env');

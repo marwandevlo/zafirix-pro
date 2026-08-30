@@ -1,4 +1,5 @@
 import { ATLAS_REFERRAL_CONFIG } from '@/app/lib/atlas-referral-config';
+import { getPublicAppUrl, normalizePublicOrigin } from '@/app/lib/atlas-app-url';
 import { isAtlasSupabaseDataEnabled } from '@/app/lib/atlas-data-source';
 import { ATLAS_INCIDENT_HOTFIX_GROWTH } from '@/app/lib/atlas-hotfix';
 import { sendTelemetry } from '@/app/lib/atlas-telemetry-client';
@@ -39,8 +40,12 @@ export function clearPendingReferralCode(): void {
   }
 }
 
+function publicOrigin(origin?: string): string {
+  return normalizePublicOrigin(origin) || getPublicAppUrl();
+}
+
 export function buildSignupReferralLink(origin: string, code: string): string {
-  const base = (origin || '').replace(/\/$/, '') || '';
+  const base = publicOrigin(origin);
   const c = normalizeReferralCode(code);
   if (!base || !c) return '';
   return `${base}/register?ref=${encodeURIComponent(c)}`;
@@ -48,7 +53,7 @@ export function buildSignupReferralLink(origin: string, code: string): string {
 
 /** Landing + cookie capture: `https://zafirixpro.com/?ref=CODE`. */
 export function buildPublicReferralLink(origin: string, code: string): string {
-  const base = (origin || '').replace(/\/$/, '') || '';
+  const base = publicOrigin(origin);
   const c = normalizeReferralCode(code);
   if (!base || !c) return '';
   return `${base}/?ref=${encodeURIComponent(c)}`;

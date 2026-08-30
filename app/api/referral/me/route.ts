@@ -58,7 +58,7 @@ export async function GET(request: NextRequest) {
         metadata: { referral_code: code },
       });
     }
-    const origin = getPublicAppUrl() || request.nextUrl.origin;
+    const origin = getPublicAppUrl();
     const signupPath = `/register?ref=${encodeURIComponent(code)}`;
     const signupUrl = `${origin}${signupPath}`;
     const referralLink = `${origin}/?ref=${encodeURIComponent(code)}`;

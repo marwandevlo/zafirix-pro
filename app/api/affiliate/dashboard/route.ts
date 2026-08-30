@@ -63,7 +63,7 @@ export async function GET(request: NextRequest) {
       });
     }
 
-    const origin = getPublicAppUrl() || request.nextUrl.origin;
+    const origin = getPublicAppUrl();
     const [funnel, earnings, tiers, txRes] = await Promise.all([
       countReferralFunnelForReferrer(admin, user.id),
       readAffiliateBalance(admin, user.id),

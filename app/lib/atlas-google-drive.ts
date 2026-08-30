@@ -6,7 +6,7 @@
  * Required env vars:
  *   GOOGLE_CLIENT_ID
  *   GOOGLE_CLIENT_SECRET
- *   GOOGLE_REDIRECT_URI   (e.g. https://yourapp.vercel.app/api/integrations/google-drive/callback)
+ *   GOOGLE_REDIRECT_URI   (e.g. https://zafirixpro.com/api/integrations/google-drive/callback)
  */
 
 import { getSupabaseServiceRoleClient } from '@/app/lib/supabase-admin';
