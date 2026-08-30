@@ -602,7 +602,7 @@ export default function ComptabilitePage() {
   ], [ecritureBySelectionId]);
 
   return (
-    <div className="flex h-screen bg-gray-50">
+    <div className="flex h-screen bg-gray-50 overflow-hidden">
       <AppSidebar variant="module">
         {(['journal', 'grandlivre', 'bilan', 'historique'] as const).map((tab) => (
           <button
@@ -617,7 +617,7 @@ export default function ComptabilitePage() {
         ))}
       </AppSidebar>
 
-      <main className="flex-1 flex flex-col min-h-0">
+      <main className="flex-1 flex flex-col min-h-0 min-w-0 w-full max-w-full">
         <header className="relative z-20 overflow-visible bg-white border-b border-gray-200 px-8 py-4 flex items-center justify-between">
           <div>
             <h1 className="text-xl font-bold text-gray-800">Comptabilite</h1>

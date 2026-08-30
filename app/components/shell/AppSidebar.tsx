@@ -203,16 +203,18 @@ export function AppSidebar({
     );
   };
 
-  const asideClass = isHome
-    ? `fixed lg:relative inset-y-0 left-0 z-50 w-64 bg-[#0F1F3D] flex flex-col shrink-0 shadow-xl transform transition-transform duration-300 ${
-        menuOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'
-      }`
-    : `fixed lg:relative inset-y-0 left-0 z-50 w-60 bg-[#1B2A4A] flex flex-col shrink-0 shadow-xl transform transition-transform duration-300 ${
-        menuOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'
-      }`;
+  const sidebarWidthClass = isHome ? 'w-64' : 'w-60';
+  const asideClass = `fixed inset-y-0 start-0 z-50 ${sidebarWidthClass} ${
+    isHome ? 'bg-[#0F1F3D]' : 'bg-[#1B2A4A]'
+  } flex flex-col shadow-xl transition-transform duration-300 ${
+    menuOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0 rtl:translate-x-full lg:rtl:translate-x-0'
+  }`;
 
   return (
-    <aside className={asideClass}>
+    <>
+      {/* Keeps the flex row from sliding under the fixed sidebar on lg+. */}
+      <div className={`hidden lg:block shrink-0 ${sidebarWidthClass}`} aria-hidden="true" />
+      <aside className={asideClass}>
       <div className="px-6 py-5 border-b border-white/10 flex items-center justify-between gap-2">
         {isHome ? (
           <>
@@ -303,6 +305,7 @@ export function AppSidebar({
         </div>
       )}
     </aside>
+    </>
   );
 }
 
