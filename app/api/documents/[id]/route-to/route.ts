@@ -157,6 +157,7 @@ async function routePurchaseToComptabilite(
       supplier_ice: extractString(extraction.supplier_ice) ?? extraction.morocco_supplier_ids?.ice ?? null,
       supplier_if: extractString(extraction.supplier_if) ?? extraction.morocco_supplier_ids?.if ?? null,
       supplier_rc: extractString(extraction.supplier_rc),
+      supplier_patente: extractString(extraction.supplier_patente),
       supplier_address: extractString(extraction.supplier_address),
       customer_name: extractString(extraction.customer_name),
       invoice_number: extractString(extraction.invoice_number),
@@ -172,7 +173,12 @@ async function routePurchaseToComptabilite(
       line_items: Array.isArray(extraction.line_items) ? extraction.line_items : [],
       status: 'unpaid', validation_status: 'draft',
       generated_by: 'documents_ia', user_verified: false,
-      metadata: { source_document_id: documentId, generated_by: 'documents_ia', generated_at: new Date().toISOString() },
+      metadata: {
+        source_document_id: documentId,
+        generated_by: 'documents_ia',
+        generated_at: new Date().toISOString(),
+        morocco_supplier_ids: extraction.morocco_supplier_ids ?? null,
+      },
     })
     .select('id').single();
 

@@ -67,12 +67,16 @@ Extrais les informations en JSON avec ces champs exactement:
   "numero_facture": "...",
   "date": "...",
   "fournisseur": "...",
+  "supplier_ice": "<15 chiffres ICE ou null>",
+  "supplier_if": "<7-8 chiffres IF ou null>",
   "montant_ht": 0,
   "taux_tva": 20,
   "montant_tva": 0,
   "montant_ttc": 0,
   "description": "..."
 }
+ICE = Identifiant Commun de l'Entreprise (15 chiffres). IF = Identifiant Fiscal (7-8 chiffres).
+Remplis supplier_ice / supplier_if avec les chiffres uniquement, ou null s'ils sont absents.
 Réponds UNIQUEMENT avec le JSON valide, sans texte supplémentaire.`;
 
 const ASSISTANT_SYSTEM = `Tu es l'assistant ZAFIRIX PRO (SaaS comptabilité/fiscalité/RH/juridique Maroc).
