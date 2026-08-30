@@ -166,7 +166,7 @@ export default function ManualPaymentsAdminClient() {
 
       {error ? <div className="bg-red-50 border border-red-200 rounded-xl p-4 text-sm text-red-800">{error}</div> : null}
 
-      <div className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
+      <div className="bg-white rounded-2xl border border-gray-100 shadow-sm min-w-0 w-full max-w-full overflow-x-visible">
         <div className="atlas-table-scroll">
           <table className="min-w-[880px] w-full text-sm">
             <thead className="bg-gray-50 text-left text-gray-500">

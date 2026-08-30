@@ -8,7 +8,7 @@ type Props = {
 /** Constrained horizontal scroller for wide tables (UUIDs, timestamps, JSON). */
 export function TableScroll({ children, className }: Props) {
   return (
-    <div className={`atlas-table-scroll${className ? ` ${className}` : ''}`}>
+    <div className={`atlas-table-scroll w-full min-w-0 max-w-full${className ? ` ${className}` : ''}`}>
       {children}
     </div>
   );

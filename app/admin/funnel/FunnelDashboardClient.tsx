@@ -160,7 +160,7 @@ export default function FunnelDashboardClient() {
             </div>
           </div>
 
-          <div className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
+          <div className="bg-white rounded-2xl border border-gray-100 shadow-sm min-w-0 w-full max-w-full overflow-x-visible">
             <div className="px-5 py-4 border-b border-gray-100">
               <p className="text-sm font-semibold text-gray-900">Comptage par événement</p>
             </div>

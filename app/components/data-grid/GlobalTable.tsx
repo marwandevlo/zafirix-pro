@@ -147,7 +147,7 @@ export default function GlobalTable<T extends GlobalTableRow = GlobalTableRow>({
 
   const bulkToolbar =
     hasBulkToolbar ? (
-      <div className="sticky bottom-4 z-50 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 bg-slate-900 text-white px-6 py-3 rounded-xl shadow-2xl border border-slate-700 animate-in fade-in slide-in-from-bottom-4 duration-200">
+      <div className="fixed z-[60] inset-x-0 bottom-[max(1rem,env(safe-area-inset-bottom))] mx-auto w-[min(calc(100%-2rem),48rem)] flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 bg-slate-900 text-white px-6 py-3 rounded-xl shadow-2xl border border-slate-700">
         <div className="flex items-center gap-3">
           <span className="bg-blue-600 text-white px-3 py-1 rounded-lg text-sm font-bold">
             {selectedIds.length} élément{selectedIds.length > 1 ? 's' : ''} sélectionné{selectedIds.length > 1 ? 's' : ''}
@@ -207,12 +207,12 @@ export default function GlobalTable<T extends GlobalTableRow = GlobalTableRow>({
     ) : null;
 
   return (
-    <div className="space-y-4 relative w-full">
-      <div className="atlas-table-scroll border border-slate-200 rounded-xl bg-white shadow-sm">
+    <div className={`relative w-full min-w-0 max-w-full ${hasBulkToolbar ? 'pb-28' : 'space-y-4'}`}>
+      <div className="atlas-table-scroll border border-slate-200 rounded-xl bg-white shadow-sm min-w-0 max-w-full">
         {normalizedData.length === 0 ? (
           <div className="px-6 py-10 text-center text-sm text-slate-500">{emptyLabel}</div>
         ) : (
-          <table className="min-w-full text-right border-collapse">
+          <table className="min-w-[1100px] w-max text-right border-collapse">
             <thead>
               <tr className="bg-slate-50 border-b border-slate-200 text-slate-600 text-xs uppercase tracking-wider">
                 <th className="p-3.5 w-12 text-center">

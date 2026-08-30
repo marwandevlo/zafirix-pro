@@ -644,7 +644,7 @@ export default function ComptabilitePage() {
           </div>
         </header>
 
-        <div className="flex-1 overflow-y-auto px-8 py-6 space-y-6">
+        <div className="flex-1 min-w-0 overflow-y-auto overflow-x-hidden px-8 py-6 space-y-6">
           <div className="grid grid-cols-3 gap-4">
             <div className="bg-white rounded-xl p-5 shadow-sm border border-gray-100">
               <p className="text-xs text-gray-400">Balance client</p>
@@ -817,7 +817,7 @@ export default function ComptabilitePage() {
           {activeTab === 'historique' && (
             <EntityAuditTable entityType="accounting_entry" title="Historique — Écritures comptables" />
           )}
-          <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden" style={{ display: activeTab === 'historique' ? 'none' : undefined }}>
+          <div className="bg-white rounded-xl shadow-sm border border-gray-100 min-w-0 max-w-full overflow-x-visible" style={{ display: activeTab === 'historique' ? 'none' : undefined }}>
             <div className="flex border-b border-gray-100">
               {(['journal', 'grandlivre', 'bilan', 'historique'] as const).map(tab => (
                 <button key={tab} onClick={() => setActiveTab(tab)}

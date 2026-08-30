@@ -51,7 +51,7 @@ export function ModuleAppShell({ title, subtitle, headerActions, children }: Pro
           </div>
         </header>
 
-        <main className="flex-1 overflow-y-auto overscroll-contain px-3 sm:px-4 lg:px-6 py-4 lg:py-6 pb-[calc(5.5rem+env(safe-area-inset-bottom))] lg:pb-6">
+        <main className="flex-1 min-w-0 overflow-y-auto overflow-x-hidden overscroll-contain px-3 sm:px-4 lg:px-6 py-4 lg:py-6 pb-[calc(5.5rem+env(safe-area-inset-bottom))] lg:pb-6">
           <div className="hidden lg:flex items-start justify-between gap-3 mb-6">
             <div>
               <h1 className="text-xl font-bold text-gray-800">{title}</h1>

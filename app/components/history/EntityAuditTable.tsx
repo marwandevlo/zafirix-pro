@@ -132,7 +132,7 @@ export function EntityAuditTable({ entityType, entityId, limit = 50, title }: Pr
   useEffect(() => { void load(); }, [load]);
 
   return (
-    <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
+    <div className="bg-white rounded-xl shadow-sm border border-gray-100 min-w-0 w-full max-w-full overflow-x-visible">
       <div className="px-4 py-3 border-b border-gray-100 flex items-center justify-between">
         <div className="flex items-center gap-2">
           <Activity size={14} className="text-gray-500" />

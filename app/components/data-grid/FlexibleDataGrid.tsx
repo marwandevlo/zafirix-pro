@@ -98,7 +98,7 @@ export default function FlexibleDataGrid({
   };
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-4 min-w-0 w-full max-w-full">
       {selectedIds.length > 0 ? (
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 bg-blue-50 border border-blue-200 p-3 rounded-xl shadow-sm">
           <span className="text-sm font-medium text-blue-800">
@@ -151,7 +151,7 @@ export default function FlexibleDataGrid({
         <span className="text-xs text-gray-500">اختر يدوياً أو عبر الزر</span>
       </div>
 
-      <div className="atlas-table-scroll border border-gray-100 rounded-2xl bg-white shadow-sm">
+      <div className="atlas-table-scroll border border-gray-100 rounded-2xl bg-white shadow-sm min-w-0 max-w-full">
         {normalizedData.length === 0 ? (
           <div className="px-6 py-10 text-center text-sm text-gray-500">{emptyLabel}</div>
         ) : (

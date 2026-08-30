@@ -821,7 +821,7 @@ export default function FacturesPage() {
       />
       <AppSidebar variant="module" />
 
-      <main className="flex-1 flex flex-col overflow-hidden">
+      <main className="flex-1 flex flex-col min-w-0 overflow-hidden">
         <header className="bg-white border-b border-gray-200 px-8 py-4 flex items-center justify-between">
           <div>
             <h1 className="text-xl font-bold text-gray-800">Factures</h1>
@@ -927,7 +927,7 @@ export default function FacturesPage() {
           )}
         </div>
 
-        <div className="flex-1 overflow-y-auto px-8 pb-6 pt-6 space-y-6">
+        <div className="flex-1 min-w-0 overflow-y-auto overflow-x-hidden px-8 pb-6 pt-6 space-y-6">
 
           {totals.overdueCount > 0 && (
             <div className="bg-red-50 border border-red-200 rounded-xl p-4 text-sm text-red-800">
@@ -1059,7 +1059,7 @@ export default function FacturesPage() {
           {activeTab === 'historique' && (
             <EntityAuditTable entityType="invoice" title="Historique — Factures clients" />
           )}
-          <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden overflow-x-auto" style={{ display: activeTab === 'historique' ? 'none' : undefined }}>
+          <div className="bg-white rounded-xl shadow-sm border border-gray-100 min-w-0 max-w-full overflow-x-visible" style={{ display: activeTab === 'historique' ? 'none' : undefined }}>
             <div className="px-4 py-3 border-b border-gray-100 flex items-center justify-between gap-3">
               <div className="flex items-center gap-3">
                 <p className="text-sm font-semibold text-gray-700">Liste des factures</p>

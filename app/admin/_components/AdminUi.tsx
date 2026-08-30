@@ -14,7 +14,7 @@ export function AdminAlert(props: { variant: 'info' | 'warning' | 'error'; child
 
 export function AdminSection(props: { title: string; subtitle?: string; right?: React.ReactNode; children: React.ReactNode }) {
   return (
-    <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden min-w-0">
+    <div className="bg-white rounded-2xl shadow-sm border border-gray-100 min-w-0 w-full max-w-full overflow-x-visible">
       <div className="px-6 py-4 border-b border-gray-100 flex items-start justify-between gap-4">
         <div>
           <p className="text-sm font-semibold text-gray-900">{props.title}</p>

@@ -249,7 +249,7 @@ export default function ActivityAdminClient() {
         ) : null}
       </div>
 
-      <div className="mt-6 bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden min-w-0">
+      <div className="mt-6 bg-white rounded-2xl shadow-sm border border-gray-100 min-w-0 w-full max-w-full overflow-x-visible">
         <div className="px-6 py-4 border-b border-gray-100">
           <p className="text-sm font-semibold text-gray-900">Live user monitor</p>
           <div className="mt-4 relative max-w-md">

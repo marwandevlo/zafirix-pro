@@ -193,7 +193,7 @@ function GlassTable(props: {
   empty: string;
 }) {
   return (
-    <div className="rounded-2xl border border-white/10 bg-white/5 backdrop-blur-md overflow-hidden">
+    <div className="rounded-2xl border border-white/10 bg-white/5 backdrop-blur-md min-w-0 w-full max-w-full overflow-x-visible">
       <div className="px-4 py-3 border-b border-white/10">
         <p className="text-sm font-semibold text-white">{props.title}</p>
         <p className="text-[11px] text-white/50">{props.subtitle}</p>

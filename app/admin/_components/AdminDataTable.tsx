@@ -101,7 +101,7 @@ export function AdminDataTable<T>({
   };
 
   return (
-    <div className="rounded-2xl border border-slate-200/80 bg-white shadow-[0_1px_2px_rgba(15,31,61,0.04)] overflow-hidden min-w-0">
+    <div className="rounded-2xl border border-slate-200/80 bg-white shadow-[0_1px_2px_rgba(15,31,61,0.04)] min-w-0 w-full max-w-full overflow-x-visible">
       <div className="flex flex-col gap-3 border-b border-slate-100 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
         <div className="relative min-w-0 flex-1">
           <Search size={14} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
@@ -129,7 +129,7 @@ export function AdminDataTable<T>({
       ) : (
         <>
           <TableScroll>
-            <table className={`${minWidthClass} w-full text-left text-sm`}>
+            <table className={`${minWidthClass} w-max text-left text-sm`}>
               <thead>
                 <tr className="border-b border-slate-100 bg-slate-50/90">
                   {columns.map((col) => {
