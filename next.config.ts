@@ -119,14 +119,11 @@ const nextConfig: NextConfig = {
   },
   async redirects() {
     return [
-      { source: '/client', destination: '/portal', permanent: true },
+      { source: '/client', destination: '/portal', permanent: false },
       { source: '/register', destination: '/signup', permanent: false },
-      // Social / locale shortcuts — keep in sync with middleware `resolveMarketingAliasPath`.
-      { source: '/fr', destination: '/landing/fr', permanent: true },
-      { source: '/ar', destination: '/landing/ar', permanent: true },
-      { source: '/fr/:path*', destination: '/landing/fr', permanent: true },
-      { source: '/ar/:path*', destination: '/landing/ar', permanent: true },
-      { source: '/home', destination: '/landing/fr', permanent: true },
+      { source: '/fr', destination: '/landing/fr', permanent: false },
+      { source: '/ar', destination: '/landing/ar', permanent: false },
+      { source: '/home', destination: '/landing/fr', permanent: false },
     ];
   },
   async rewrites() {

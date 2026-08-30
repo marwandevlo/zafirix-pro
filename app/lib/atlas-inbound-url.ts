@@ -78,24 +78,17 @@ export function isProductionMarketingHost(host: string): boolean {
   return PRODUCTION_ALIAS_HOSTS.has(h);
 }
 
-export function shouldForceHttps(host: string): boolean {
-  if (process.env.NODE_ENV !== 'production') return false;
-  if (process.env.VERCEL_ENV === 'preview') return false;
-  const h = host.split(':')[0]?.toLowerCase() ?? '';
-  if (!h || h === 'localhost' || h.endsWith('.localhost')) return false;
-  if (h.endsWith('.vercel.app') && h !== 'zafirixpro.vercel.app') return false;
-  return true;
+export function shouldForceHttps(_host: string): boolean {
+  // Platform (Vercel) terminates TLS. Middleware must not 308 http↔https or www↔apex.
+  return false;
 }
 
 export function configuredCanonicalHost(): string {
   return ATLAS_CANONICAL_HOST;
 }
 
-export function resolveCanonicalHost(requestHost: string): string | null {
-  if (!shouldForceHttps(requestHost)) return null;
-  const h = requestHost.split(':')[0]?.toLowerCase() ?? '';
-  if (!isProductionMarketingHost(h)) return null;
-  return configuredCanonicalHost();
+export function resolveCanonicalHost(_requestHost: string): string | null {
+  return null;
 }
 
 /** Facebook / in-app browsers often emit `?ref=X?fbclid=` or a second `?`. */
@@ -198,9 +191,8 @@ export function buildCanonicalUrl(params: {
   const forwarded = (params.forwardedProto || '').split(',')[0]?.trim().toLowerCase();
   const protoNow = forwarded === 'https' || forwarded === 'http' ? forwarded : params.protocol.replace(':', '');
 
-  const canonicalHost = resolveCanonicalHost(requestHost);
-  const host = canonicalHost ?? requestHost;
-  const proto = shouldForceHttps(requestHost) ? 'https' : protoNow === 'http' ? 'http' : protoNow || 'https';
+  const host = requestHost;
+  const proto = protoNow === 'http' || protoNow === 'https' ? protoNow : 'https';
 
   const normalizedPath = normalizeInboundPathname(params.pathname);
   const alias = resolveMarketingAliasPath(normalizedPath);
@@ -214,11 +206,7 @@ export function buildCanonicalUrl(params: {
 
   const originalPath = normalizeInboundPathname(params.pathname);
   const originalSearch = normalizeRawSearch(params.search);
-  const changed =
-    proto !== protoNow ||
-    (canonicalHost != null && canonicalHost !== requestHost.toLowerCase()) ||
-    pathname !== originalPath ||
-    query.toString() !== new URLSearchParams(originalSearch).toString();
+  const changed = pathname !== originalPath;
 
   return { href, changed, referralCode };
 }

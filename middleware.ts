@@ -20,7 +20,6 @@ import {
 import { finalizeHtmlDocumentResponse } from '@/app/lib/html-cache-headers';
 import { applyReferralCookieFromRequest } from '@/app/lib/atlas-referral-cookie';
 import { requestHasSupabaseSessionCookie } from '@/app/lib/atlas-auth-cookie';
-import { buildCanonicalUrl } from '@/app/lib/atlas-inbound-url';
 import { normalizeReferralCode } from '@/app/lib/atlas-referral-utils';
 
 async function userHasAdminAccess(user: User, supabaseUrl: string): Promise<boolean> {
@@ -215,32 +214,20 @@ async function resolveProfileStatusForGate(
   return null;
 }
 
-function maybeCanonicalDocumentRedirect(request: NextRequest): NextResponse | null {
+/** Same-host rewrite only. Never change protocol or hostname (avoids www↔apex / http↔https loops). */
+function maybeLocaleAliasRewrite(request: NextRequest): NextResponse | null {
   if (request.method !== 'GET' && request.method !== 'HEAD') return null;
-  const { pathname } = request.nextUrl;
-  if (pathname.startsWith('/api/') || pathname.startsWith('/_next/')) return null;
-
-  const { href, changed } = buildCanonicalUrl({
-    protocol: request.nextUrl.protocol,
-    host: request.nextUrl.host || request.headers.get('host') || '',
-    pathname,
-    search: request.nextUrl.search,
-    forwardedProto: request.headers.get('x-forwarded-proto'),
-  });
-  if (!changed) return null;
-
-  try {
-    const dest = new URL(href);
-    const redirect = NextResponse.redirect(dest, 308);
-    return withReferralCookie(request, finalizeHtmlDocumentResponse(redirect, dest.pathname));
-  } catch {
-    return null;
-  }
+  const path = request.nextUrl.pathname;
+  const dest = path === '/fr' || path === '/home' ? '/landing/fr' : path === '/ar' ? '/landing/ar' : null;
+  if (!dest) return null;
+  const url = request.nextUrl.clone();
+  url.pathname = dest;
+  return withReferralCookie(request, NextResponse.rewrite(url));
 }
 
 export async function middleware(request: NextRequest) {
-  const canonical = maybeCanonicalDocumentRedirect(request);
-  if (canonical) return canonical;
+  const localeAlias = maybeLocaleAliasRewrite(request);
+  if (localeAlias) return localeAlias;
 
   const { pathname } = request.nextUrl;
 
