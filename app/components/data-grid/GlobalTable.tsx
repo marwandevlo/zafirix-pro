@@ -140,10 +140,22 @@ export default function GlobalTable<T extends GlobalTableRow = GlobalTableRow>({
   };
 
   const hasBulkToolbar =
-    selectedIds.length > 0 && Boolean(onModify || onShare || onDownload || onDelete);
+    selectedIds.length > 0 && Boolean(onModify || onShare || onDownload || onDelete || onRowAction);
 
   /** Share / Download / Delete appear as a fixed trio whenever any bulk export action is configured. */
   const showShareDownloadDeleteGroup = Boolean(onShare || onDownload || onDelete);
+  const canModify =
+    Boolean(onModify) || (selectedIds.length === 1 && Boolean(onRowAction));
+
+  const handleModifyClick = () => {
+    if (onModify) {
+      runBulk(onModify);
+      return;
+    }
+    if (selectedIds.length === 1 && onRowAction) {
+      onRowAction(selectedIds[0]!, 'edit');
+    }
+  };
 
   const bulkToolbar =
     hasBulkToolbar ? (
@@ -155,16 +167,22 @@ export default function GlobalTable<T extends GlobalTableRow = GlobalTableRow>({
         </div>
 
         <div className="flex flex-wrap items-center gap-3">
-          {onModify ? (
-            <button
-              type="button"
-              onClick={() => runBulk(onModify)}
-              className="flex items-center gap-2 bg-slate-800 hover:bg-slate-700 text-slate-100 px-4 py-2 rounded-lg text-sm font-medium transition-all"
-            >
-              <Edit3 size={16} className="text-amber-400" />
-              <span>Modifier</span>
-            </button>
-          ) : null}
+          <button
+            type="button"
+            onClick={handleModifyClick}
+            disabled={!canModify}
+            title={
+              !canModify
+                ? selectedIds.length > 1
+                  ? 'Sélectionnez une seule ligne pour modifier'
+                  : 'Modification non disponible'
+                : undefined
+            }
+            className="flex items-center gap-2 bg-slate-800 hover:bg-slate-700 disabled:opacity-40 disabled:cursor-not-allowed text-slate-100 px-4 py-2 rounded-lg text-sm font-medium transition-all"
+          >
+            <Edit3 size={16} className="text-amber-400" />
+            <span>Modifier</span>
+          </button>
 
           {showShareDownloadDeleteGroup ? (
             <>

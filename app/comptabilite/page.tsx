@@ -19,6 +19,7 @@ import { ExportMenu } from '@/app/components/ExportMenu';
 import type { ExportColumn } from '@/app/components/ExportMenu';
 import { EntityAuditTable } from '@/app/components/history/EntityAuditTable';
 import { RowActions } from '@/app/components/actions';
+import { EditRecordModal } from '@/app/components/actions/EditRecordModal';
 import { isValidPcgeAccount, isValidIce, isValidIf } from '@/app/lib/atlas-morocco-compliance';
 import GlobalTable from '@/app/components/data-grid/GlobalTable';
 import type { GlobalTableColumn, GlobalTableRow } from '@/app/components/data-grid/GlobalTable';
@@ -102,6 +103,8 @@ export default function ComptabilitePage() {
   const [activeCompanyId, setActiveCompanyId] = useState<string | null>(null);
   const [selectedSupplierIds, setSelectedSupplierIds] = useState<string[]>([]);
   const [selectedJournalIds, setSelectedJournalIds] = useState<string[]>([]);
+  const [journalEditId, setJournalEditId] = useState<string | null>(null);
+  const [supplierEditId, setSupplierEditId] = useState<string | null>(null);
 
   const [form, setForm] = useState({ date: '', libelle: '', compte: '', debit: '', credit: '' });
   const [showForm, setShowForm] = useState(false);
@@ -427,6 +430,9 @@ export default function ComptabilitePage() {
     return map;
   }, [ecritures]);
 
+  const journalEditEntry = journalEditId ? ecritureBySelectionId.get(journalEditId) ?? null : null;
+  const supplierEditInvoice = supplierEditId ? supplierById.get(supplierEditId) ?? null : null;
+
   const supplierTableColumns = useMemo((): GlobalTableColumn<SupplierTableRow>[] => [
     { header: 'N°', accessor: 'invoiceNumber', render: (row) => row.invoiceNumber || '—' },
     { header: 'Fournisseur', accessor: 'supplierName' },
@@ -696,6 +702,13 @@ export default function ComptabilitePage() {
                   data={supplierTableRows}
                   selectedIds={selectedSupplierIds}
                   onSelectionChange={setSelectedSupplierIds}
+                  onModify={(ids) => {
+                    if (ids.length === 1) {
+                      setSupplierEditId(ids[0]!);
+                      return;
+                    }
+                    window.alert(`${ids.length} factures — sélectionnez une seule ligne pour modifier.`);
+                  }}
                   onShare={(ids) => {
                     const selected = filterRowsBySelectedIds(supplierTableRows as unknown as Record<string, unknown>[], ids) as SupplierTableRow[];
                     const summary = selected.map((row) => `- ${row.invoiceNumber || row.supplierName}: ${row.totalTTC != null ? formatMadAmountLabel(row.totalTTC) : '—'}`).join('\n');
@@ -836,6 +849,13 @@ export default function ComptabilitePage() {
                     data={journalTableRows}
                     selectedIds={selectedJournalIds}
                     onSelectionChange={setSelectedJournalIds}
+                    onModify={(ids) => {
+                      if (ids.length === 1) {
+                        setJournalEditId(ids[0]!);
+                        return;
+                      }
+                      window.alert(`${ids.length} écritures — sélectionnez une seule ligne pour modifier.`);
+                    }}
                     onShare={(ids) => {
                       const selected = filterRowsBySelectedIds(journalTableRows as unknown as Record<string, unknown>[], ids) as JournalTableRow[];
                       const summary = selected.map((row) => `- ${row.date} · ${row.libelle}: D ${row.debit} / C ${row.credit}`).join('\n');
@@ -899,6 +919,65 @@ export default function ComptabilitePage() {
           </div>
         </div>
       </main>
+
+      {journalEditEntry ? (
+        <EditRecordModal
+          open
+          title={`Modifier — ${journalEditEntry.libelle}`}
+          fields={[
+            { key: 'date', label: 'Date', type: 'date', value: journalEditEntry.date },
+            { key: 'libelle', label: 'Libellé', value: journalEditEntry.libelle, required: true },
+            {
+              key: 'compte',
+              label: 'Compte PCGE',
+              value: journalEditEntry.compte,
+              required: true,
+              validate: (v) => (isValidPcgeAccount(v) ? null : 'Compte PCGE invalide (3–8 chiffres)'),
+            },
+            { key: 'debit', label: 'Débit (MAD)', type: 'number', value: String(journalEditEntry.debit || '') },
+            { key: 'credit', label: 'Crédit (MAD)', type: 'number', value: String(journalEditEntry.credit || '') },
+          ]}
+          onSave={async (values) => {
+            const ok = await updateEcriture(getAccountingEntrySelectionId(journalEditEntry), values);
+            if (ok) setJournalEditId(null);
+            return ok;
+          }}
+          onClose={() => setJournalEditId(null)}
+        />
+      ) : null}
+
+      {supplierEditInvoice ? (
+        <EditRecordModal
+          open
+          title={`Modifier — ${supplierEditInvoice.invoiceNumber || supplierEditInvoice.supplierName}`}
+          fields={[
+            { key: 'invoiceNumber', label: 'N° Facture', value: supplierEditInvoice.invoiceNumber ?? '' },
+            { key: 'supplierName', label: 'Fournisseur', value: supplierEditInvoice.supplierName ?? '', required: true },
+            {
+              key: 'supplierIce',
+              label: 'ICE fournisseur *',
+              value: supplierEditInvoice.supplierIce ?? '',
+              required: true,
+              validate: (v) => (isValidIce(v) ? null : 'ICE obligatoire (15 chiffres)'),
+            },
+            {
+              key: 'supplierIf',
+              label: 'IF fournisseur *',
+              value: supplierEditInvoice.supplierIf ?? '',
+              required: true,
+              validate: (v) => (isValidIf(v) ? null : 'IF obligatoire (7-8 chiffres)'),
+            },
+            { key: 'issueDate', label: 'Date', type: 'date', value: supplierEditInvoice.issueDate ?? '' },
+            { key: 'totalTTC', label: 'TTC (MAD)', type: 'number', value: String(supplierEditInvoice.totalTTC ?? '') },
+          ]}
+          onSave={async (values) => {
+            const ok = await updateSupplierInvoiceRow(String(supplierEditInvoice.id), values);
+            if (ok) setSupplierEditId(null);
+            return ok;
+          }}
+          onClose={() => setSupplierEditId(null)}
+        />
+      ) : null}
     </div>
   );
 }
