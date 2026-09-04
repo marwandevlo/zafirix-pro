@@ -1,15 +1,11 @@
+import { logAtlasServerEvent } from '@/app/lib/atlas-server-log';
+import { redactEmailAddress } from '@/app/lib/email-brand';
+import { resolveEmailEnv } from '@/app/lib/email-env';
+
 export type SendEmailResult =
   | { ok: true; id?: string }
   | { ok: false; skipped: true; reason: string }
   | { ok: false; error: string };
-
-function resolveResendApiKey(): string {
-  return (process.env.EMAIL_API_KEY ?? process.env.RESEND_API_KEY ?? '').trim();
-}
-
-function resolveFromAddress(): string {
-  return process.env.RESEND_FROM_EMAIL?.trim() || 'ZAFIRIX PRO <onboarding@resend.dev>';
-}
 
 function stripHtml(html: string): string {
   return html.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
@@ -22,6 +18,23 @@ function errorMessage(error: unknown): string {
   return 'resend_error';
 }
 
+function logResult(kind: string | undefined, to: string, result: SendEmailResult): void {
+  const recipient = redactEmailAddress(to);
+  if (result.ok) {
+    logAtlasServerEvent('email', 'info', 'resend_sent', { kind: kind ?? 'unspecified', recipient, id: result.id ?? null });
+    return;
+  }
+  if ('skipped' in result && result.skipped) {
+    logAtlasServerEvent('email', 'warn', 'resend_skipped', { kind: kind ?? 'unspecified', recipient, reason: result.reason });
+    return;
+  }
+  logAtlasServerEvent('email', 'error', 'resend_failed', {
+    kind: kind ?? 'unspecified',
+    recipient,
+    error: 'error' in result ? result.error : 'unknown',
+  });
+}
+
 /**
  * Sends via the official Resend SDK when `EMAIL_API_KEY` or `RESEND_API_KEY` is set.
  * Dynamic import keeps Edge middleware / client bundles free of the Node SDK.
@@ -32,16 +45,25 @@ export async function sendEmailViaResend(params: {
   subject: string;
   html: string;
   text?: string;
+  kind?: string;
 }): Promise<SendEmailResult> {
-  const apiKey = resolveResendApiKey();
-  const from = resolveFromAddress();
+  const env = resolveEmailEnv();
+  const apiKey = env.resendApiKey;
+  const from = env.fromAddress;
+  const to = params.to.trim();
+  const kind = params.kind;
 
   if (!apiKey) {
-    return { ok: false, skipped: true, reason: 'EMAIL_API_KEY or RESEND_API_KEY not configured' };
+    const result: SendEmailResult = { ok: false, skipped: true, reason: 'RESEND_API_KEY or EMAIL_API_KEY not configured' };
+    logResult(kind, to, result);
+    return result;
   }
 
-  const to = params.to.trim();
-  if (!to) return { ok: false, error: 'missing_recipient' };
+  if (!to) {
+    const result: SendEmailResult = { ok: false, error: 'missing_recipient' };
+    logResult(kind, to, result);
+    return result;
+  }
 
   try {
     const { Resend } = await import('resend');
@@ -54,10 +76,16 @@ export async function sendEmailViaResend(params: {
     });
 
     if (error) {
-      return { ok: false, error: errorMessage(error) };
+      const result: SendEmailResult = { ok: false, error: errorMessage(error) };
+      logResult(kind, to, result);
+      return result;
     }
-    return { ok: true, id: data?.id };
+    const result: SendEmailResult = { ok: true, id: data?.id };
+    logResult(kind, to, result);
+    return result;
   } catch (e) {
-    return { ok: false, error: e instanceof Error ? e.message : 'network_error' };
+    const result: SendEmailResult = { ok: false, error: e instanceof Error ? e.message : 'network_error' };
+    logResult(kind, to, result);
+    return result;
   }
 }

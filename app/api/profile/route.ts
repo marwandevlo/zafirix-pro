@@ -3,6 +3,7 @@ import { createClient, type SupabaseClient, type User } from '@supabase/supabase
 import { atlasDataBackend } from '@/app/lib/atlas-data-source';
 import { requireAtlasSupabaseSession } from '@/app/lib/atlas-api-session';
 import { notifyAfterEnsureUserProfile } from '@/app/lib/email';
+import { queueSecurityAlertEmail } from '@/lib/email';
 import { ensureUserProfile } from '@/app/lib/ensure-user-profile';
 import {
   normalizeProfilePlan,
@@ -234,6 +235,13 @@ export async function PATCH(request: NextRequest) {
       ...(patch.onboarding_completed !== undefined ? { onboarding_completed: patch.onboarding_completed } : {}),
     };
 
+    const { data: previousRow } = await admin
+      .from('profiles')
+      .select('full_name, phone')
+      .eq('id', session.userId)
+      .maybeSingle();
+    const prev = (previousRow ?? {}) as { full_name?: string | null; phone?: string | null };
+
     const { data, error } = await admin
       .from('profiles')
       .upsert(upsertPayload, { onConflict: 'id' })
@@ -245,6 +253,23 @@ export async function PATCH(request: NextRequest) {
     }
     if (!data) {
       return NextResponse.json({ profile: fallbackProfile(authUser.user) }, { headers: NO_STORE_HEADERS });
+    }
+
+    const changedFields: string[] = [];
+    if (patch.full_name !== undefined && String(prev.full_name ?? '').trim() !== String(patch.full_name)) {
+      changedFields.push('nom');
+    }
+    if (patch.phone !== undefined && String(prev.phone ?? '').trim() !== String(patch.phone ?? '').trim()) {
+      changedFields.push('téléphone');
+    }
+    if (changedFields.length > 0 && email) {
+      const metaName =
+        typeof meta?.full_name === 'string' ? meta.full_name : typeof meta?.name === 'string' ? meta.name : email;
+      queueSecurityAlertEmail(
+        email,
+        String(patch.full_name ?? metaName),
+        `Mise à jour du profil (${changedFields.join(', ')})`,
+      );
     }
 
     return NextResponse.json({ profile: rowToProfile(data as ProfileRow, email) }, { headers: NO_STORE_HEADERS });

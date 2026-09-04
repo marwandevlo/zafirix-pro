@@ -12,6 +12,9 @@ import {
   creditAffiliateCommissionOnPayment,
   resolvePaidSubscriptionAmount,
 } from '@/app/lib/atlas-affiliate-commission';
+import { getAtlasPlanById } from '@/app/lib/atlas-pricing-plans';
+import { queueSubscriptionEmail } from '@/lib/email';
+import { resolveAuthUserContact } from '@/app/lib/email-transactional';
 
 export const dynamic = 'force-dynamic';
 
@@ -66,12 +69,33 @@ export async function POST(request: NextRequest) {
   const planId = typeof customData.plan_id === 'string' ? customData.plan_id : '';
 
   if (eventType === 'subscription.canceled' && subscriptionId) {
+    const { data: existingSub } = await admin
+      .from('subscriptions')
+      .select('user_id, user_email, plan')
+      .eq('paddle_subscription_id', subscriptionId)
+      .maybeSingle();
+
     await admin
       .from('subscriptions')
       .update({ status: 'canceled', updated_at: new Date().toISOString() })
       .eq('paddle_subscription_id', subscriptionId);
     const c = await cancelPaddleAtlasSubscription({ admin, paddleSubscriptionId: subscriptionId });
     if (!c.ok) console.warn('[paddle:webhook] atlas_cancel', c.error);
+
+    const cancelUserId = String((existingSub as { user_id?: string | null } | null)?.user_id ?? userId);
+    const cancelPlanId = String((existingSub as { plan?: string | null } | null)?.plan ?? planId);
+    const cancelEmail = String((existingSub as { user_email?: string | null } | null)?.user_email ?? '').trim();
+    if (cancelUserId) {
+      const contact = (await resolveAuthUserContact(admin, cancelUserId)) ?? (cancelEmail ? { email: cancelEmail, displayName: cancelEmail } : null);
+      if (contact) {
+        queueSubscriptionEmail(
+          contact.email,
+          contact.displayName,
+          getAtlasPlanById(cancelPlanId)?.name ?? cancelPlanId ?? 'votre forfait',
+          'cancel',
+        );
+      }
+    }
   }
 
   if (
@@ -107,6 +131,20 @@ export async function POST(request: NextRequest) {
       endYmd,
     });
     if (!atlas.ok) console.warn('[paddle:webhook] atlas_entitlement', atlas.error);
+
+    const contact =
+      (await resolveAuthUserContact(admin, userId)) ??
+      (typeof email === 'string' && email.trim() ? { email: email.trim(), displayName: email.trim() } : null);
+    if (contact) {
+      queueSubscriptionEmail({
+        kind: eventType === 'subscription.updated' ? 'subscription_renewed' : 'subscription_activated',
+        to: contact.email,
+        displayName: contact.displayName,
+        userId,
+        planName: getAtlasPlanById(planId)?.name ?? planId,
+        periodEndYmd: endYmd,
+      });
+    }
 
     try {
       const paid = resolvePaidSubscriptionAmount({ paddleData: data, planId });

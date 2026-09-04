@@ -168,6 +168,17 @@ export default function ResetPasswordClient() {
         return;
       }
 
+      const token = data.session.access_token;
+      void fetch('/api/auth/notify-security', {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ kind: 'password_changed' }),
+        cache: 'no-store',
+      }).catch(() => {});
+
       await supabase.auth.signOut();
       setDone(true);
       setTimeout(() => router.push('/login'), 900);

@@ -1,5 +1,6 @@
 const TONE: Record<string, string> = {
   active: 'bg-emerald-50 text-emerald-800 ring-emerald-200',
+  approved: 'bg-emerald-50 text-emerald-800 ring-emerald-200',
   paid: 'bg-emerald-50 text-emerald-800 ring-emerald-200',
   credited: 'bg-emerald-50 text-emerald-800 ring-emerald-200',
   signed_up: 'bg-cyan-50 text-cyan-800 ring-cyan-200',

@@ -3,20 +3,25 @@
  * Single source of truth for middleware, API routes, and client routing.
  */
 
-/** Matches `profiles_status_check` (migration 20260611000000). */
+/** Matches `profiles_status_check` (migration 20260904120000). */
 export const PROFILE_STATUSES = ['pending', 'active', 'suspended', 'banned'] as const;
 
 export type ProfileStatus = (typeof PROFILE_STATUSES)[number];
 
+/** Admin / API aliases accepted in addition to the canonical stored set. */
+export const PROFILE_STATUS_ALIASES = ['approved', 'accepted', 'rejected'] as const;
+
 /**
- * Normalize any raw DB / legacy value into a canonical ProfileStatus.
- * - `approved` (legacy) → `active`
+ * Normalize any raw DB / alias value into a canonical ProfileStatus.
+ * - `approved` / `accepted` → `active`
+ * - `rejected` → `banned`
  * - unknown / empty → `pending` (safe default for authorization checks only;
  *   client routing must NOT treat null as pending — see resolvePostAuthRoute)
  */
 export function normalizeStatus(raw: string | null | undefined): ProfileStatus {
   const value = String(raw ?? '').trim().toLowerCase();
-  if (value === 'approved') return 'active';
+  if (value === 'approved' || value === 'accepted') return 'active';
+  if (value === 'rejected') return 'banned';
   if ((PROFILE_STATUSES as readonly string[]).includes(value)) {
     return value as ProfileStatus;
   }

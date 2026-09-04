@@ -6,7 +6,7 @@ export type AtlasProfilePlan = (typeof ATLAS_PROFILE_PLANS)[number];
 export const ATLAS_PROFILE_ROLES = ['user', 'moderator', 'admin', 'owner'] as const;
 export type AtlasProfileRole = (typeof ATLAS_PROFILE_ROLES)[number];
 
-/** Canonical set — matches profiles_status_check (migration 20260611000000). */
+/** Canonical stored set — aliases `approved`/`rejected` map via normalizeStatus. */
 export const ATLAS_PROFILE_STATUSES = ['pending', 'active', 'suspended', 'banned'] as const;
 export type AtlasProfileStatus = (typeof ATLAS_PROFILE_STATUSES)[number];
 

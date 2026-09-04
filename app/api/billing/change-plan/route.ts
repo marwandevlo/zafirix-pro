@@ -8,6 +8,8 @@ import type { PlanCode } from '@/app/types/atlas-billing';
 import { PLAN_CODES } from '@/app/types/atlas-billing';
 import { getSupabaseServiceRoleClient } from '@/app/lib/supabase-admin';
 import { requireWorkspaceRole, permissionJsonResponse } from '@/app/lib/atlas-permissions';
+import { queueSubscriptionEmail } from '@/lib/email';
+import { resolveAuthUserContact } from '@/app/lib/email-transactional';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -29,6 +31,11 @@ export async function POST(request: NextRequest) {
   if (!perm.ok) return permissionJsonResponse(perm);
 
   const subscription = await changeWorkspacePlan(db, userId, workspaceId, planCode);
+
+  const contact = await resolveAuthUserContact(db, userId);
+  if (contact) {
+    queueSubscriptionEmail(contact.email, contact.displayName, subscription.planName || planCode, 'change');
+  }
 
   return NextResponse.json({
     ok: true,

@@ -5,6 +5,8 @@ import { getAtlasPlanById } from '@/app/lib/atlas-pricing-plans';
 import { requireAdmin, requireBearer } from '@/app/lib/admin/require-admin';
 import { logAtlasAdminAction } from '@/app/lib/admin/atlas-admin-audit';
 import { syncProfileEntitlementFromAtlas } from '@/app/lib/atlas-subscription-sync';
+import { queueSubscriptionEmail } from '@/lib/email';
+import { resolveAuthUserContact } from '@/app/lib/email-transactional';
 
 function isUuidLike(value: string): boolean {
   // Accept standard UUIDs (case-insensitive).
@@ -93,6 +95,17 @@ export async function POST(request: NextRequest) {
       });
       const sync = await syncProfileEntitlementFromAtlas(admin, String(reqRow.user_id));
       if (!sync.ok) console.warn('[admin/subscriptions/activate] profile_sync', sync.error);
+      const contact = await resolveAuthUserContact(admin, String(reqRow.user_id));
+      if (contact) {
+        queueSubscriptionEmail({
+          kind: 'subscription_activated',
+          to: contact.email,
+          displayName: contact.displayName,
+          userId: String(reqRow.user_id),
+          planName: plan.name,
+          periodEndYmd: end,
+        });
+      }
     }
 
     return NextResponse.json({ ok: true, startDate: start, endDate: end });

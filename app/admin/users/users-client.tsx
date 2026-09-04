@@ -11,6 +11,7 @@ import { AdminAlert } from '@/app/admin/_components/AdminUi';
 import { AdminDataTable, AdminFilterChip, type AdminColumn } from '@/app/admin/_components/AdminDataTable';
 import { AdminStatusBadge } from '@/app/admin/_components/AdminStatusBadge';
 import { useDebouncedValue } from '@/app/lib/use-debounced-value';
+import { UserApprovalRow } from '@/app/admin/users/_components/UserApprovalRow';
 
 type AdminUserRow = {
   id: string;
@@ -30,6 +31,7 @@ export default function UsersAdminClient() {
   const [loading, setLoading] = useState(false);
   const [busyUserId, setBusyUserId] = useState<string | null>(null);
   const [error, setError] = useState('');
+  const [success, setSuccess] = useState('');
   const [rows, setRows] = useState<AdminUserRow[]>([]);
   const [warning, setWarning] = useState<string>('');
   const [q, setQ] = useState('');
@@ -205,7 +207,12 @@ export default function UsersAdminClient() {
       key: 'status',
       header: 'Status',
       sortValue: (u) => u.status || '',
-      render: (u) => <AdminStatusBadge value={u.status} />,
+      render: (u) => (
+        <AdminStatusBadge
+          value={u.status}
+          label={String(u.status ?? '').toLowerCase() === 'active' ? 'approved' : undefined}
+        />
+      ),
     },
     {
       key: 'presence',
@@ -244,14 +251,21 @@ export default function UsersAdminClient() {
             <span className="text-[11px] text-slate-400">Protected {getOwnerEmail()}</span>
           ) : null}
           {String(u.status ?? '').toLowerCase() === 'pending' ? (
-            <button
-              type="button"
-              onClick={() => void mutateUser(u.id, { status: 'active' }, 'Approuver cet utilisateur ?')}
-              disabled={isOwnerEmail(u.email) || busyUserId === u.id}
-              className="h-8 rounded-lg bg-emerald-50 px-2.5 text-[11px] font-semibold text-emerald-800 ring-1 ring-emerald-200 disabled:opacity-40"
-            >
-              Approve
-            </button>
+            <UserApprovalRow
+              user={u}
+              showStatus={false}
+              busy={busyUserId === u.id}
+              onBusyChange={(busy) => setBusyUserId(busy ? u.id : null)}
+              onApproved={(approved) => {
+                setRows((prev) =>
+                  prev.map((r) => (r.id === u.id ? { ...r, status: approved.status, email: approved.email || r.email } : r)),
+                );
+                setSuccess('Compte approuvé. L’e-mail de notification a été mis en file.');
+                window.setTimeout(() => setSuccess(''), 4000);
+                router.refresh();
+              }}
+              onError={(message) => setError(message)}
+            />
           ) : null}
           <button
             type="button"
@@ -271,7 +285,15 @@ export default function UsersAdminClient() {
           </button>
           <button
             type="button"
-            onClick={() => void mutateUser(u.id, { status: 'banned' }, 'Bannir cet utilisateur ?')}
+            onClick={() =>
+              void mutateUser(
+                u.id,
+                { status: 'rejected' },
+                String(u.status ?? '').toLowerCase() === 'pending'
+                  ? 'Rejeter cette demande ?'
+                  : 'Bannir cet utilisateur ?',
+              )
+            }
             disabled={isOwnerEmail(u.email) || busyUserId === u.id}
             className="h-8 rounded-lg bg-rose-50 px-2.5 text-[11px] font-semibold text-rose-800 ring-1 ring-rose-200 disabled:opacity-40"
           >
@@ -292,7 +314,8 @@ export default function UsersAdminClient() {
 
   return (
     <AdminShell title="Users">
-      {error ? <AdminAlert variant="error">Unable to load users. {error}</AdminAlert> : null}
+      {error ? <AdminAlert variant="error">{error}</AdminAlert> : null}
+      {success ? <AdminAlert variant="info">{success}</AdminAlert> : null}
       {warning ? <AdminAlert variant="warning">{warning}</AdminAlert> : null}
       <div className="flex flex-wrap items-end justify-between gap-3">
         <p className="text-sm text-slate-500">Modération des comptes. Présence mise à jour toutes les 2 minutes.</p>

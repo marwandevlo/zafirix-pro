@@ -1,4 +1,5 @@
 import { getPublicAppUrl } from '@/app/lib/atlas-app-url';
+import { buildSubscriptionEmail } from '@/app/lib/email-transactional';
 
 function ctaRow(label: string, path: string): string {
   const base = getPublicAppUrl();
@@ -118,14 +119,11 @@ export function buildManualRequestAcknowledgedEmailHtml(planLabel: string): { su
 }
 
 export function buildPaidSubscriptionActivatedEmailHtml(planLabel: string, endYmd: string): { subject: string; html: string } {
-  const subject = 'ZAFIRIX PRO — votre abonnement est activé 🚀';
-  const html = shellTransactional(
-    'Abonnement activé',
-    `Votre abonnement <strong>${planLabel}</strong> est désormais <strong>actif</strong>. Fin de période facturée : <strong>${endYmd}</strong>. Merci de votre confiance.`,
-    `<table cellpadding="0" cellspacing="0" style="margin-top:8px">
-      ${ctaRow('Ouvrir ZAFIRIX PRO', '/')}
-      ${ctaRow('Voir les tarifs', '/pricing')}
-    </table>`,
-  );
-  return { subject, html };
+  const built = buildSubscriptionEmail({
+    kind: 'subscription_activated',
+    to: '',
+    planName: planLabel,
+    periodEndYmd: endYmd,
+  });
+  return { subject: built.subject, html: built.html };
 }

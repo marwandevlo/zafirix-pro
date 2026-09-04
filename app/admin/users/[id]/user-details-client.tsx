@@ -9,6 +9,7 @@ import { isOwnerEmail, getOwnerEmail } from '@/app/lib/owner';
 import { supabase } from '@/app/lib/supabase';
 import { AdminAlert, AdminTableSkeleton } from '@/app/admin/_components/AdminUi';
 import { atlasPlanIdToProfilePlan } from '@/app/lib/atlas-subscription-sync';
+import { UserApprovalRow } from '@/app/admin/users/_components/UserApprovalRow';
 
 const PROFILE_PLAN_OPTIONS = ['free', 'pro', 'vip', 'enterprise'] as const;
 type ProfilePlanOption = (typeof PROFILE_PLAN_OPTIONS)[number];
@@ -105,6 +106,7 @@ export default function UserDetailsAdminClient() {
 
   const [initialLoading, setInitialLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [approving, setApproving] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [saveSuccess, setSaveSuccess] = useState(false);
   const [actorEmail, setActorEmail] = useState('');
@@ -304,7 +306,8 @@ export default function UserDetailsAdminClient() {
   }, [id, protectedOwner, router]);
 
   const displayPlan = useMemo(() => normalizePlanToken(plan), [plan]);
-  const actionBusy = saving || deleting;
+  const actionBusy = saving || deleting || approving;
+  const isPendingAccount = String(user?.status ?? status).trim().toLowerCase() === 'pending';
 
   const createdLabel = useMemo(() => {
     if (!user?.created_at) return '—';
@@ -342,6 +345,25 @@ export default function UserDetailsAdminClient() {
                   ) : null}
                 </div>
                 <div className="flex items-center gap-2">
+                  {isPendingAccount ? (
+                    <UserApprovalRow
+                      user={{ id: user.id, email: user.email, full_name: user.full_name, status: user.status }}
+                      showStatus={false}
+                      busy={actionBusy}
+                      onBusyChange={(busy) => {
+                        actionBusyRef.current = busy;
+                        setApproving(busy);
+                      }}
+                      onApproved={(approved) => {
+                        setStatus(approved.status);
+                        setUser((prev) => (prev ? { ...prev, status: approved.status, email: approved.email || prev.email } : prev));
+                        setSaveSuccess(true);
+                        window.setTimeout(() => setSaveSuccess(false), 3000);
+                        router.refresh();
+                      }}
+                      onError={(message) => setError(message)}
+                    />
+                  ) : null}
                   <button
                     type="button"
                     onClick={() => router.push('/admin/users')}
@@ -424,7 +446,7 @@ export default function UserDetailsAdminClient() {
                   </select>
                   {status === 'pending' ? (
                     <p className="mt-1 text-[11px] text-amber-700">
-                      Sélectionnez « active » puis « Save changes » pour valider ce compte.
+                      Cliquez sur <strong>Approve</strong> pour valider le compte et envoyer l’e-mail.
                     </p>
                   ) : null}
                 </div>

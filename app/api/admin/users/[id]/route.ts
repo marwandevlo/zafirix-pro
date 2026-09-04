@@ -6,7 +6,7 @@ import { revalidateAdminSurfaces } from '@/app/lib/admin/revalidate-admin-paths'
 import { isOwnerEmail } from '@/app/lib/owner';
 import { roleGrantsAdminAccess } from '@/app/lib/admin/can-access-admin';
 import { applyAdminProfilePlanToEntitlements } from '@/app/lib/atlas-subscription-sync';
-import { sendAccountNotificationEmail } from '@/app/lib/email';
+import { queueApprovalEmail } from '@/app/lib/send-approval-email';
 import { isAccountAcceptedStatus } from '@/app/lib/email-account-status';
 
 export const dynamic = 'force-dynamic';
@@ -44,6 +44,7 @@ function isStatus(v: string): v is Status {
 function normalizeIncomingStatus(raw: string): string {
   const value = raw.trim().toLowerCase();
   if (value === 'accepted' || value === 'approved') return 'active';
+  if (value === 'rejected') return 'banned';
   return value;
 }
 
@@ -256,20 +257,12 @@ export async function PATCH(request: NextRequest, ctx: { params: Promise<{ id: s
 
   if (isApproval) {
     const recipientEmail = String(fp.email ?? targetAuthEmail ?? '').trim();
-    try {
-      await sendAccountNotificationEmail({
-        kind: 'user_accepted',
-        to: recipientEmail,
-        displayName: fp.full_name ?? recipientEmail,
-        userId,
-        admin,
-      });
-    } catch (error) {
-      console.error('[admin/users PATCH] accepted email failed', {
-        userId,
-        message: error instanceof Error ? error.message : error,
-      });
-    }
+    queueApprovalEmail({
+      to: recipientEmail,
+      displayName: fp.full_name ?? recipientEmail,
+      userId,
+      admin,
+    });
   }
 
   return NextResponse.json({

@@ -4,8 +4,7 @@ import { useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { Mail, ArrowLeft, CheckCircle } from 'lucide-react';
 import Image from 'next/image';
-import { supabase } from '@/app/lib/supabase';
-import { getAuthSiteUrl } from '@/app/lib/site-url';
+import { requestPasswordResetEmail } from '@/app/actions/transactional-email';
 import { PublicFooter } from '@/app/components/public/PublicFooter';
 
 function isValidEmail(email: string): boolean {
@@ -23,11 +22,8 @@ export default function ForgotPasswordPage() {
   const submit = async () => {
     setLoading(true);
     try {
-      // Do not reveal whether the email exists.
-      const siteUrl = getAuthSiteUrl();
-      await supabase.auth.resetPasswordForEmail(email.trim(), {
-        redirectTo: `${siteUrl}/reset-password`,
-      });
+      // Branded Resend mail. The action never reveals whether the account exists.
+      await requestPasswordResetEmail(email.trim());
       setDone(true);
     } finally {
       setLoading(false);

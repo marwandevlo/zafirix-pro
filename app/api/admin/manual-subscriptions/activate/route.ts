@@ -1,8 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { atlasDataBackend } from '@/app/lib/atlas-data-source';
 import { getAtlasPlanById } from '@/app/lib/atlas-pricing-plans';
-import { sendEmailViaResend } from '@/app/lib/atlas-email-resend';
-import { buildPaidSubscriptionActivatedEmailHtml } from '@/app/lib/atlas-email-templates';
+import { queueSubscriptionEmail } from '@/lib/email';
+import { resolveAuthUserContact } from '@/app/lib/email-transactional';
 import { getWhatsAppOpsPhoneDigits, sendWhatsAppMessage } from '@/app/lib/whatsapp-service';
 import { requireAdmin } from '@/app/lib/admin/require-admin';
 import { syncProfileEntitlementFromAtlas } from '@/app/lib/atlas-subscription-sync';
@@ -144,11 +144,17 @@ export async function POST(request: NextRequest) {
     .eq('plan_id', 'free-trial')
     .eq('status', 'trial');
 
-  const { data: userWrap } = await admin.auth.admin.getUserById(userId);
-  const uemail = userWrap.user?.email?.trim();
-  if (uemail) {
-    const mail = buildPaidSubscriptionActivatedEmailHtml(plan.name, end);
-    void sendEmailViaResend({ to: uemail, subject: mail.subject, html: mail.html });
+  const contact = await resolveAuthUserContact(admin, userId);
+  const uemail = contact?.email;
+  if (contact) {
+    queueSubscriptionEmail({
+      kind: 'subscription_activated',
+      to: contact.email,
+      displayName: contact.displayName,
+      userId,
+      planName: plan.name,
+      periodEndYmd: end,
+    });
   }
 
   const waText = `ZAFIRIX PRO — votre abonnement est activé 🚀\nForfait: ${plan.name}\nValable jusqu’au ${end}.`;
