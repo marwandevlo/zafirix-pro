@@ -25,7 +25,7 @@ export async function canUseFeatureClient(featureCode: FeatureCode): Promise<{
   try {
     const json = await fetchBillingUsage();
     if (!json.ok) return { allowed: true };
-    if (json.trialExpired) {
+    if (json.trialExpired && !json.adminOverride) {
       return {
         allowed: false,
         messageFr: 'Essai expiré — Pro couvre ~80 % des outils quotidiens dès 1 000 MAD/mois.',

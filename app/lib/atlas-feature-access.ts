@@ -17,6 +17,7 @@ import { shouldBypassBillingEnforcement } from '@/app/lib/atlas-billing-bypass';
 import {
   hasAdminGrantedEntitlement,
   isAdminOverrideActive,
+  shouldSkipExpiredTrial,
 } from '@/app/lib/admin/admin-entitlement-guard';
 
 export type FeatureAccessResult = {
@@ -77,16 +78,20 @@ export async function canUseFeature(
   const quota = await getRemainingQuota(db, userId, workspaceId, featureCode);
   const summary = await buildBillingUsageSummary(db, userId, workspaceId);
 
-  if (summary.trialExpired && summary.subscription?.status === 'trial' && !summary.adminOverride) {
-    return {
-      allowed: false,
-      featureCode,
-      limit: quota.limit,
-      used: quota.used,
-      remaining: 0,
-      unlimited: false,
-      messageFr: 'Votre essai a expiré. Passez à une offre supérieure pour continuer.',
-    };
+  if (summary.trialExpired && summary.subscription?.status === 'trial') {
+    const skip =
+      Boolean(summary.adminOverride) || (userId ? await shouldSkipExpiredTrial(db, userId) : false);
+    if (!skip) {
+      return {
+        allowed: false,
+        featureCode,
+        limit: quota.limit,
+        used: quota.used,
+        remaining: 0,
+        unlimited: false,
+        messageFr: 'Votre essai a expiré. Passez à une offre supérieure pour continuer.',
+      };
+    }
   }
 
   if (quota.unlimited || quota.limit === null) {
@@ -143,6 +148,7 @@ export async function buildBillingUsageSummary(
     isAdminOverrideActive({
       adminOverride: sub?.adminOverride,
       adminOverrideUntil: sub?.adminOverrideUntil,
+      status: sub?.status,
     }) || (userId ? await hasAdminGrantedEntitlement(db, userId) : false);
 
   const quotas: FeatureQuota[] = [];

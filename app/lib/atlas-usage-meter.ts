@@ -9,6 +9,7 @@ import { ensureWorkspaceSubscription, recordUsageEvent } from '@/app/lib/atlas-b
 import { USAGE_EVENT_TO_FEATURE } from '@/app/types/atlas-billing';
 import { checkZafirixUsage, consumeZafirixUsage } from '@/app/lib/zafirix-usage-server';
 import type { ZafirixMeterCode } from '@/app/types/zafirix-usage';
+import { isExpiredTrialMessage, shouldSkipExpiredTrial } from '@/app/lib/admin/admin-entitlement-guard';
 
 export type UsageEventType = keyof typeof USAGE_EVENT_TO_FEATURE;
 
@@ -47,7 +48,11 @@ export async function meterFeatureUsage(
   // Invoices/shipments are consumed by DB triggers on insert.
   if (enforce && companyId && zMeter && zMeter !== 'invoices' && zMeter !== 'shipments') {
     const zCheck = await checkZafirixUsage(db, userId, companyId, zMeter, quantity);
-    if (!zCheck.allowed) {
+    const skipTrial =
+      !zCheck.allowed &&
+      isExpiredTrialMessage(zCheck.code, zCheck.messageFr) &&
+      (await shouldSkipExpiredTrial(db, userId));
+    if (!zCheck.allowed && !skipTrial) {
       return {
         ok: false,
         status: 429,

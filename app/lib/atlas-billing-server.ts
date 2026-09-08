@@ -92,14 +92,16 @@ export async function ensureWorkspaceSubscription(
     ? { id: workspaceId }
     : await getOrCreateDefaultWorkspace(db, userId);
 
-  const { data: existing } = await db
+  const { data: existingList } = await db
     .from('atlas_workspace_subscriptions')
     .select('*')
     .eq('workspace_id', ws.id)
     .in('status', ['trial', 'active'])
     .order('created_at', { ascending: false })
-    .limit(1)
-    .maybeSingle();
+    .limit(10);
+
+  const rows = (existingList ?? []) as SubRow[];
+  const existing = rows.find((r) => r.status === 'active') ?? rows[0] ?? null;
 
   if (existing) {
     const sub = await mapSubscription(db, existing as SubRow);

@@ -13,10 +13,11 @@ import {
   ATLAS_PROFILE_PLANS,
   type AtlasProfilePlan,
 } from '@/app/lib/admin/atlas-admin-profile-fields';
-import { applyAdminProfilePlanToEntitlements } from '@/app/lib/atlas-subscription-sync';
+import { applyAdminProfilePlanToEntitlements, adminProfilePlanToCommercialAtlasPlanId } from '@/app/lib/atlas-subscription-sync';
 import { getOrCreateDefaultWorkspace } from '@/app/lib/atlas-workspace-server';
 import { getPlanByCode } from '@/app/lib/atlas-billing-server';
 import { computeTrialStatus } from '@/app/lib/atlas-trial-manager';
+import { addDaysYmd, todayYmd } from '@/app/lib/atlas-dates';
 import type { ZafirixPlanCode } from '@/app/types/zafirix-usage';
 import { ZAFIRIX_METER_CODES } from '@/app/types/zafirix-usage';
 import type { AdminEntitlementSnapshot, AdminUserBillingFields } from '@/app/lib/admin/admin-entitlement-types';
@@ -307,9 +308,59 @@ async function upsertWorkspaceOverride(
   if (error && /admin_override|metadata/i.test(error.message)) {
     ({ error } = await write(baseRow));
   }
+  if (error && /metadata/i.test(error.message ?? '')) {
+    const { metadata: _ignored, ...coreRow } = baseRow;
+    ({ error } = await write(coreRow));
+  }
   if (error) throw new Error(error.message);
 
   return ws.id;
+}
+
+async function upsertAdminAtlasGrant(
+  db: SupabaseClient,
+  userId: string,
+  profilePlan: AtlasProfilePlan,
+  params: {
+    status: SubscriptionStatus;
+    override: boolean;
+    note: string;
+    trialEndsAt: string | null;
+  },
+): Promise<void> {
+  if (!params.override && params.status !== 'active') return;
+
+  const start = todayYmd();
+  const end =
+    params.status === 'trial' && params.trialEndsAt
+      ? todayYmd(new Date(params.trialEndsAt))
+      : addDaysYmd(start, 3650);
+  const atlasStatus = params.status === 'trial' ? 'trial' : 'active';
+  const planId =
+    adminProfilePlanToCommercialAtlasPlanId(profilePlan) ?? (atlasStatus === 'active' ? 'pro' : 'free-trial');
+
+  await db
+    .from('atlas_subscriptions')
+    .update({ status: 'cancelled', updated_at: new Date().toISOString() })
+    .eq('user_id', userId)
+    .in('status', ['trial', 'active']);
+
+  const { error } = await db.from('atlas_subscriptions').insert({
+    user_id: userId,
+    plan_id: planId,
+    status: atlasStatus,
+    start_date: start,
+    end_date: end,
+    payment_request_id: null,
+    metadata: {
+      source: 'admin_plan_override',
+      admin_override: true,
+      permanent: atlasStatus === 'active',
+      permanent_access: atlasStatus === 'active',
+      note: params.note || null,
+    },
+  });
+  if (error) throw new Error(error.message);
 }
 
 async function upsertZafirixOverrides(
@@ -367,6 +418,10 @@ async function upsertZafirixOverrides(
       if (error && /admin_override/i.test(error.message)) {
         ({ error } = await db.from('zafirix_subscriptions').update(patch).eq('id', existingId));
       }
+      if (error && /metadata/i.test(error.message ?? '')) {
+        const { metadata: _m, ...core } = patch;
+        ({ error } = await db.from('zafirix_subscriptions').update(core).eq('id', existingId));
+      }
       if (error) throw new Error(error.message);
     } else {
       let { error } = await db.from('zafirix_subscriptions').insert({
@@ -376,6 +431,13 @@ async function upsertZafirixOverrides(
       if (error && /admin_override/i.test(error.message)) {
         ({ error } = await db.from('zafirix_subscriptions').insert({
           ...patch,
+          company_id: companyId,
+        }));
+      }
+      if (error && /metadata/i.test(error.message ?? '')) {
+        const { metadata: _m, ...core } = patch;
+        ({ error } = await db.from('zafirix_subscriptions').insert({
+          ...core,
           company_id: companyId,
         }));
       }
@@ -479,6 +541,13 @@ export async function applyAdminEntitlementOverride(
   try {
     const atlasEnt = await applyAdminProfilePlanToEntitlements(db, userId, profilePlan);
     if (!atlasEnt.ok) return atlasEnt;
+
+    await upsertAdminAtlasGrant(db, userId, profilePlan, {
+      status: dates.status,
+      override: dates.override,
+      note,
+      trialEndsAt: dates.trialEndsAt,
+    });
 
     const workspaceId = await upsertWorkspaceOverride(db, userId, {
       planCode: workspacePlanCode,

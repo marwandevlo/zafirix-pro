@@ -19,7 +19,7 @@ import {
   ZAFIRIX_PLAN_UPGRADE,
 } from '@/app/types/zafirix-usage';
 import { shouldBypassBillingEnforcement } from '@/app/lib/atlas-billing-bypass';
-import { hasAdminGrantedEntitlement } from '@/app/lib/admin/admin-entitlement-guard';
+import { hasAdminGrantedEntitlement, isExpiredTrialMessage } from '@/app/lib/admin/admin-entitlement-guard';
 
 type RpcCheck = {
   allowed?: boolean;
@@ -154,7 +154,7 @@ export async function checkZafirixUsage(
 
   const honorAdminGrant = async (check: ZafirixUsageCheck): Promise<ZafirixUsageCheck> => {
     if (check.allowed) return check;
-    if (check.code !== 'trial_expired') return check;
+    if (!isExpiredTrialMessage(check.code, check.messageFr)) return check;
     if (await hasAdminGrantedEntitlement(db, userId)) {
       return { ...check, allowed: true, code: 'admin_override', messageFr: undefined };
     }
@@ -261,7 +261,7 @@ export async function consumeZafirixUsage(
     upgradeTo: ZAFIRIX_PLAN_UPGRADE[planCode] ?? null,
     suggestedAddons: raw.allowed === false ? await listZafirixAddonPacks(db, meter) : undefined,
   };
-  if (!result.allowed && result.code === 'trial_expired' && (await hasAdminGrantedEntitlement(db, userId))) {
+  if (!result.allowed && isExpiredTrialMessage(result.code, result.messageFr) && (await hasAdminGrantedEntitlement(db, userId))) {
     return { ...result, allowed: true, code: 'admin_override', messageFr: undefined, suggestedAddons: undefined };
   }
   return result;
