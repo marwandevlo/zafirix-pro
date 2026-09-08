@@ -45,6 +45,7 @@ export function PublicFooter() {
               <li><a className="hover:text-gray-900" href="mailto:support@zafirixpro.com">Contact</a></li>
               <li><Link className="hover:text-gray-900" href="/terms">Terms of Service</Link></li>
               <li><Link className="hover:text-gray-900" href="/privacy">Privacy Policy</Link></li>
+              <li><Link className="hover:text-gray-900" href="/affiliates">Espace Affiliés</Link></li>
             </ul>
           </div>
 
