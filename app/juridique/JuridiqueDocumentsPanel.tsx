@@ -1,10 +1,13 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import type { LucideIcon } from 'lucide-react';
-import { ArrowLeft, Bot, Download, FileText, Gavel, Mail, ScrollText, Send, User } from 'lucide-react';
+import { ArrowLeft, Bot, Download, FileText, Gavel, Hash, Landmark, Loader2, Mail, Receipt, ScrollText, Send, User } from 'lucide-react';
 import { fetchAi } from '@/app/lib/fetch-ai';
 import { persistLegalDocument } from '@/app/juridique/juridique-persist';
+import type { JuridiqueCategory, JuridiqueUiLocale } from '@/app/types/atlas-juridique-categories';
+import { juridiqueLabel } from '@/app/types/atlas-juridique-categories';
+import { DEFAULT_MOROCCAN_JURIDIQUE_CATALOG } from '@/app/lib/atlas-juridique-categories-server';
 
 type Company = {
   id: number;
@@ -23,32 +26,72 @@ type Company = {
 
 type Doc = {
   id: string;
-  category: string;
+  categorySlug: string;
+  categoryLabelFr: string;
+  categoryLabelAr: string;
   name: string;
+  nameAr: string;
   description: string;
+  descriptionAr: string;
   fields: string[];
+  isRequired?: boolean;
+  uploadPromptFr?: string | null;
+  uploadPromptAr?: string | null;
 };
 
 type Message = { role: 'user' | 'assistant'; content: string };
 
-const docs: Doc[] = [
-  { id: 'attestation_capital', category: 'Attestations', name: 'Attestation de capital', description: 'Attestation de libération du capital social', fields: ['montant_capital', 'date_liberation', 'banque', 'gerant'] },
-  { id: 'attestation_domicile', category: 'Attestations', name: 'Attestation de domiciliation', description: 'Attestation de siège social domicilié', fields: ['domiciliataire', 'adresse_domicile', 'date_debut', 'gerant'] },
-  { id: 'attestation_non_litige', category: 'Attestations', name: 'Attestation de non-litige', description: 'Attestation sur l’absence de litiges en cours', fields: ['destinataire', 'objet', 'date', 'gerant'] },
-  { id: 'contrat_prestation', category: 'Contrats', name: 'Contrat de prestation', description: 'Contrat de prestation de services B2B', fields: ['prestataire', 'client', 'objet', 'duree', 'honoraires', 'modalites_paiement'] },
-  { id: 'contrat_bail', category: 'Contrats', name: 'Contrat de bail commercial', description: 'Location de local commercial', fields: ['bailleur', 'locataire', 'adresse_local', 'loyer_mensuel', 'duree_bail', 'depot_garantie'] },
-  { id: 'nda', category: 'Contrats', name: 'Accord de confidentialité (NDA)', description: 'Non-disclosure agreement', fields: ['partie_1', 'partie_2', 'objet_confidentialite', 'duree', 'date'] },
-  { id: 'courrier_officiel', category: 'Courriers', name: 'Courrier officiel', description: 'Courrier formel à une administration ou institution', fields: ['destinataire', 'objet', 'reference', 'corps_demande', 'pieces_jointes'] },
-  { id: 'courrier_client', category: 'Courriers', name: 'Courrier client / partenaire', description: 'Courrier commercial ou relationnel', fields: ['destinataire', 'objet', 'message', 'delai_reponse'] },
-  { id: 'relance_paiement', category: 'Courriers', name: 'Lettre de relance', description: 'Relance amiable de facture impayée', fields: ['debiteur', 'montant_du', 'numero_facture', 'date_echeance', 'delai_reglement'] },
-  { id: 'pv_ago', category: 'Procès-verbaux', name: 'PV Assemblée Générale Ordinaire', description: 'PV AGO annuelle (approbation comptes, affectation)', fields: ['date_age', 'gerant', 'exercice', 'resultat_net', 'affectation'] },
-  { id: 'pv_age', category: 'Procès-verbaux', name: 'PV Assemblée Extraordinaire', description: 'PV AGE (modification statuts, capital, etc.)', fields: ['date_age', 'gerant', 'ordre_du_jour', 'resolutions'] },
-  { id: 'mise_demeure_paiement', category: 'Mises en demeure', name: 'Mise en demeure de paiement', description: 'Mise en demeure formelle avant action judiciaire', fields: ['debiteur', 'adresse_debiteur', 'montant_du', 'motif', 'delai_jours'] },
-  { id: 'mise_demeure_contractuelle', category: 'Mises en demeure', name: 'Mise en demeure contractuelle', description: 'Mise en demeure pour manquement contractuel', fields: ['destinataire', 'contrat_reference', 'manquement', 'delai_regularisation'] },
-  { id: 'avenant_statuts', category: 'Statuts', name: 'Avenant aux statuts', description: 'Modification partielle des statuts', fields: ['article_modifie', 'ancien_texte', 'nouveau_texte', 'date_age', 'gerant'] },
+/** Legacy AI templates merged when absent from admin catalog. */
+const LEGACY_DOCS: Doc[] = [
+  { id: 'attestation_capital', categorySlug: 'registre_commerce', categoryLabelFr: 'Registre de Commerce (RC)', categoryLabelAr: 'السجل التجاري', name: 'Attestation de capital', nameAr: 'شهادة رأس المال', description: 'Attestation de libération du capital social', descriptionAr: 'شهادة تحرير رأس المال', fields: ['montant_capital', 'date_liberation', 'banque', 'gerant'] },
+  { id: 'attestation_domicile', categorySlug: 'registre_commerce', categoryLabelFr: 'Registre de Commerce (RC)', categoryLabelAr: 'السجل التجاري', name: 'Attestation de domiciliation', nameAr: 'شهادة الت domiciliation', description: 'Attestation de siège social domicilié', descriptionAr: 'شهادة مقر الشركة', fields: ['domiciliataire', 'adresse_domicile', 'date_debut', 'gerant'] },
+  { id: 'courrier_officiel', categorySlug: 'conventions', categoryLabelFr: 'Conventions', categoryLabelAr: 'الاتفاقيات', name: 'Courrier officiel', nameAr: 'مراسلة رسمية', description: 'Courrier formel à une administration', descriptionAr: 'مراسلة رسمية مع الإدارة', fields: ['destinataire', 'objet', 'reference', 'corps_demande', 'pieces_jointes'] },
+  { id: 'relance_paiement', categorySlug: 'contrats', categoryLabelFr: 'Contrats', categoryLabelAr: 'العقود', name: 'Lettre de relance', nameAr: 'رسالة تذكير', description: 'Relance amiable de facture impayée', descriptionAr: 'تذكير ودي بفاتورة غير مدفوعة', fields: ['debiteur', 'montant_du', 'numero_facture', 'date_echeance', 'delai_reglement'] },
+  { id: 'mise_demeure_paiement', categorySlug: 'contrats', categoryLabelFr: 'Contrats', categoryLabelAr: 'العقود', name: 'Mise en demeure de paiement', nameAr: 'إنذار بالأداء', description: 'Mise en demeure formelle avant action judiciaire', descriptionAr: 'إنذار رسمي قبل التقاضي', fields: ['debiteur', 'adresse_debiteur', 'montant_du', 'motif', 'delai_jours'] },
 ];
 
-const categories = ['Attestations', 'Contrats', 'Courriers', 'Procès-verbaux', 'Mises en demeure', 'Statuts'];
+function catalogToDocs(catalog: JuridiqueCategory[]): Doc[] {
+  const fromDb: Doc[] = [];
+  for (const cat of catalog) {
+    for (const dt of cat.documentTypes) {
+      if (!dt.isActive) continue;
+      fromDb.push({
+        id: dt.slug,
+        categorySlug: cat.slug,
+        categoryLabelFr: cat.labelFr,
+        categoryLabelAr: cat.labelAr,
+        name: dt.labelFr,
+        nameAr: dt.labelAr,
+        description: dt.descriptionFr ?? cat.descriptionFr ?? '',
+        descriptionAr: dt.descriptionAr ?? cat.descriptionAr ?? '',
+        fields: dt.fields.map((f) => f.key),
+        isRequired: dt.isRequired,
+        uploadPromptFr: dt.uploadPromptFr ?? cat.uploadPromptFr,
+        uploadPromptAr: dt.uploadPromptAr ?? cat.uploadPromptAr,
+      });
+    }
+  }
+  const ids = new Set(fromDb.map((d) => d.id));
+  for (const legacy of LEGACY_DOCS) {
+    if (!ids.has(legacy.id)) fromDb.push(legacy);
+  }
+  return fromDb;
+}
+
+function catalogCategories(catalog: JuridiqueCategory[]) {
+  return catalog
+    .filter((c) => c.isActive)
+    .sort((a, b) => a.sortOrder - b.sortOrder)
+    .map((c) => ({
+      slug: c.slug,
+      labelFr: c.labelFr,
+      labelAr: c.labelAr,
+      descriptionFr: c.descriptionFr,
+      descriptionAr: c.descriptionAr,
+      uploadPromptFr: c.uploadPromptFr,
+      uploadPromptAr: c.uploadPromptAr,
+    }));
+}
 
 const fieldLabels: Record<string, string> = {
   montant_capital: 'Montant du capital (MAD)',
@@ -103,6 +146,16 @@ const fieldLabels: Record<string, string> = {
 };
 
 const categoryIcons: Record<string, LucideIcon> = {
+  registre_commerce: Landmark,
+  patente: Receipt,
+  identifiant_fiscal: FileText,
+  ice: Hash,
+  statuts_societe: ScrollText,
+  proces_verbaux: Gavel,
+  contrats: FileText,
+  conventions: Mail,
+  fichiers_fiscaux: Receipt,
+  registres_legaux: ScrollText,
   Attestations: ScrollText,
   Contrats: FileText,
   Courriers: Mail,
@@ -129,8 +182,21 @@ async function downloadWord(content: string, filename: string) {
   URL.revokeObjectURL(url);
 }
 
-export function JuridiqueDocumentsPanel({ companies }: { companies: Company[] }) {
-  const [selectedCategory, setSelectedCategory] = useState(categories[0]);
+export function JuridiqueDocumentsPanel({
+  companies,
+  lang = 'fr',
+}: {
+  companies: Company[];
+  lang?: JuridiqueUiLocale;
+}) {
+  const t = (fr: string, ar: string) => juridiqueLabel(lang, fr, ar);
+  const [catalog, setCatalog] = useState<JuridiqueCategory[]>(DEFAULT_MOROCCAN_JURIDIQUE_CATALOG);
+  const [catalogLoading, setCatalogLoading] = useState(true);
+
+  const categories = useMemo(() => catalogCategories(catalog), [catalog]);
+  const docs = useMemo(() => catalogToDocs(catalog), [catalog]);
+
+  const [selectedCategorySlug, setSelectedCategorySlug] = useState('');
   const [selectedDoc, setSelectedDoc] = useState<Doc | null>(null);
   const [selectedCompany, setSelectedCompany] = useState<Company | null>(null);
   const [phase, setPhase] = useState<'list' | 'company' | 'wizard' | 'done'>('list');
@@ -142,7 +208,34 @@ export function JuridiqueDocumentsPanel({ companies }: { companies: Company[] })
   const [generatedContent, setGeneratedContent] = useState('');
   const [persistStatus, setPersistStatus] = useState('');
 
-  const filteredDocs = docs.filter((d) => d.category === selectedCategory);
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      try {
+        const res = await fetch('/api/juridique/categories', { credentials: 'include' });
+        const json = (await res.json()) as { catalog?: JuridiqueCategory[] };
+        if (!cancelled && Array.isArray(json.catalog) && json.catalog.length) {
+          setCatalog(json.catalog);
+        }
+      } catch {
+        /* keep defaults */
+      } finally {
+        if (!cancelled) setCatalogLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!selectedCategorySlug && categories[0]) {
+      setSelectedCategorySlug(categories[0].slug);
+    }
+  }, [categories, selectedCategorySlug]);
+
+  const selectedCategory = categories.find((c) => c.slug === selectedCategorySlug) ?? categories[0];
+  const filteredDocs = docs.filter((d) => d.categorySlug === selectedCategory?.slug);
 
   const startDoc = (doc: Doc) => {
     setSelectedDoc(doc);
@@ -239,7 +332,7 @@ Genere UNIQUEMENT le document.`,
       <div className="flex-1 flex flex-col overflow-hidden">
         <div className="px-6 py-4 border-b bg-white flex items-center justify-between">
           <div>
-            <h2 className="font-bold text-gray-800">{selectedDoc?.name}</h2>
+            <h2 className="font-bold text-gray-800">{t(selectedDoc?.name ?? '', selectedDoc?.nameAr ?? '')}</h2>
             <p className="text-xs text-gray-400">{selectedCompany?.raisonSociale ?? 'Sans société'} · {persistStatus || 'Généré'}</p>
           </div>
           <div className="flex gap-2">
@@ -273,7 +366,7 @@ Genere UNIQUEMENT le document.`,
         <div className="px-6 py-3 border-b bg-white flex items-center gap-2">
           <button type="button" onClick={() => setPhase('company')} className="text-gray-400 hover:text-gray-600"><ArrowLeft size={16} /></button>
           <div>
-            <h2 className="font-bold text-gray-800 text-sm">{selectedDoc?.name}</h2>
+            <h2 className="font-bold text-gray-800 text-sm">{t(selectedDoc?.name ?? '', selectedDoc?.nameAr ?? '')}</h2>
             <p className="text-xs text-gray-400">{selectedCompany?.raisonSociale ?? 'Société non liée'}</p>
           </div>
         </div>
@@ -315,30 +408,58 @@ Genere UNIQUEMENT le document.`,
   }
 
   return (
-    <div className="flex-1 flex overflow-hidden">
+    <div className="flex-1 flex overflow-hidden" dir={lang === 'ar' ? 'rtl' : 'ltr'}>
       <div className="w-56 border-r bg-gray-50 p-3 space-y-1 shrink-0">
-        {categories.map((cat) => {
-          const Icon = categoryIcons[cat] ?? FileText;
-          return (
-            <button
-              key={cat}
-              type="button"
-              onClick={() => setSelectedCategory(cat)}
-              className={`w-full flex items-center gap-2 px-3 py-2 rounded-lg text-xs ${selectedCategory === cat ? 'bg-white shadow text-amber-700 font-medium' : 'text-gray-500 hover:bg-white/60'}`}
-            >
-              <Icon size={12} /> {cat}
-            </button>
-          );
-        })}
+        {catalogLoading ? (
+          <div className="flex justify-center py-6 text-gray-400">
+            <Loader2 className="animate-spin" size={16} />
+          </div>
+        ) : (
+          categories.map((cat) => {
+            const Icon = categoryIcons[cat.slug] ?? FileText;
+            const active = selectedCategory?.slug === cat.slug;
+            return (
+              <button
+                key={cat.slug}
+                type="button"
+                onClick={() => setSelectedCategorySlug(cat.slug)}
+                className={`w-full flex items-center gap-2 px-3 py-2 rounded-lg text-xs ${active ? 'bg-white shadow text-amber-700 font-medium' : 'text-gray-500 hover:bg-white/60'}`}
+              >
+                <Icon size={12} /> {t(cat.labelFr, cat.labelAr)}
+              </button>
+            );
+          })
+        )}
       </div>
       <div className="flex-1 overflow-y-auto p-6">
-        <h2 className="font-bold text-gray-800 mb-1">Documents juridiques</h2>
-        <p className="text-xs text-gray-400 mb-4">Contrats, attestations, courriers, PV, mises en demeure — persistés dans Supabase.</p>
+        <h2 className="font-bold text-gray-800 mb-1">{t('Documents juridiques', 'الوثائق القانونية')}</h2>
+        <p className="text-xs text-gray-400 mb-1">
+          {t(
+            'Conformité marocaine : RC, Patente, IF, ICE, Statuts, PV, Contrats, Conventions',
+            'امتثال مغربي: السجل التجاري، الضريبة المهنية، IF، ICE، النظام الأساسي، المحاضر، العقود',
+          )}
+        </p>
+        {selectedCategory?.uploadPromptFr ? (
+          <p className="text-xs text-amber-800 bg-amber-50 border border-amber-100 rounded-lg px-3 py-2 mb-4">
+            {t(selectedCategory.uploadPromptFr ?? '', selectedCategory.uploadPromptAr ?? '')}
+          </p>
+        ) : null}
         <div className="grid sm:grid-cols-2 gap-3">
           {filteredDocs.map((d) => (
             <button key={d.id} type="button" onClick={() => startDoc(d)} className="text-left p-4 bg-white border rounded-xl hover:border-amber-400 hover:shadow-sm transition-all">
-              <p className="font-semibold text-sm text-gray-800">{d.name}</p>
-              <p className="text-xs text-gray-400 mt-1">{d.description}</p>
+              <div className="flex items-start justify-between gap-2">
+                <p className="font-semibold text-sm text-gray-800">{t(d.name, d.nameAr)}</p>
+                {d.isRequired ? (
+                  <span className="text-[10px] px-1.5 py-0.5 rounded bg-red-50 text-red-700 border border-red-100 shrink-0">
+                    {t('Requis', 'إلزامي')}
+                  </span>
+                ) : (
+                  <span className="text-[10px] px-1.5 py-0.5 rounded bg-gray-50 text-gray-500 border shrink-0">
+                    {t('Optionnel', 'اختياري')}
+                  </span>
+                )}
+              </div>
+              <p className="text-xs text-gray-400 mt-1">{t(d.description, d.descriptionAr)}</p>
             </button>
           ))}
         </div>

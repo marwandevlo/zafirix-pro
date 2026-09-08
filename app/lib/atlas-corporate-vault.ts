@@ -6,78 +6,71 @@ import type {
   VaultSearchResult,
 } from '@/app/types/atlas-corporate-vault';
 import { asRecord } from '@/app/lib/atlas-json';
+import {
+  categoriesToVaultFolders,
+  DEFAULT_MOROCCAN_JURIDIQUE_CATALOG,
+  loadJuridiqueCatalog,
+} from '@/app/lib/atlas-juridique-categories-server';
 
-export const CORPORATE_VAULT_FOLDERS: CorporateVaultFolder[] = [
-  {
-    id: 'statuts_kbis',
-    labelFr: 'Statuts & Kbis',
-    labelAr: 'النظام الأساسي & Kbis',
-    descriptionFr: 'Statuts, extrait RC, Kbis, certificat négatif',
-    icon: 'scroll',
-    documentTypes: ['company_statutes', 'legal_contract', 'juridique'],
-    tags: ['statuts', 'kbis', 'rc', 'extrait'],
-  },
-  {
-    id: 'proces_verbaux',
-    labelFr: 'Procès-verbaux (AGO/AGE)',
-    labelAr: 'محاضر الجمعيات',
-    descriptionFr: 'PV assemblées ordinaires et extraordinaires',
-    icon: 'gavel',
-    documentTypes: ['juridique', 'legal_contract'],
-    tags: ['pv', 'ago', 'age', 'assemblee'],
-  },
-  {
-    id: 'contrats_bail',
-    labelFr: 'Contrats de bail',
-    labelAr: 'عقود الكراء',
-    descriptionFr: 'Baux commerciaux, domiciliation, locations',
-    icon: 'building',
-    documentTypes: ['legal_contract', 'juridique'],
-    tags: ['bail', 'domiciliation', 'location'],
-  },
-  {
-    id: 'fichiers_fiscaux',
-    labelFr: 'Fichiers fiscaux',
-    labelAr: 'الملفات الضريبية',
-    descriptionFr: 'TVA, IS, IR, liasse, attestations DGI',
-    icon: 'receipt',
-    documentTypes: ['tax_declaration', 'vat_declaration', 'accounting_document'],
-    tags: ['tva', 'is', 'ir', '9421', 'dgi', 'liasse'],
-  },
-  {
-    id: 'registres_legaux',
-    labelFr: 'Registres légaux',
-    labelAr: 'السجلات القانونية',
-    descriptionFr: 'Registre associés, mouvements titres, décisions',
-    icon: 'book',
-    documentTypes: ['legal_contract', 'accounting_document', 'juridique'],
-    tags: ['registre', 'associes', 'mouvements', 'decisions'],
-  },
-];
+/** @deprecated Use dynamic catalog from loadVaultFolders() */
+export const CORPORATE_VAULT_FOLDERS: CorporateVaultFolder[] = categoriesToVaultFolders(
+  DEFAULT_MOROCCAN_JURIDIQUE_CATALOG,
+);
+
+export async function loadVaultFolders(admin: SupabaseClient): Promise<CorporateVaultFolder[]> {
+  try {
+    const catalog = await loadJuridiqueCatalog(admin);
+    return categoriesToVaultFolders(catalog.categories);
+  } catch {
+    return CORPORATE_VAULT_FOLDERS;
+  }
+}
 
 function inferFolder(
   docType: string,
   title: string,
   metadata: Record<string, unknown>,
   tags: string[],
+  folders: CorporateVaultFolder[],
 ): CorporateVaultFolderId {
   const vaultFolder = metadata.vaultFolder;
-  if (typeof vaultFolder === 'string' && CORPORATE_VAULT_FOLDERS.some((f) => f.id === vaultFolder)) {
-    return vaultFolder as CorporateVaultFolderId;
+  if (typeof vaultFolder === 'string' && folders.some((f) => f.id === vaultFolder)) {
+    return vaultFolder;
   }
 
   const hay = `${docType} ${title} ${tags.join(' ')}`.toLowerCase();
 
-  for (const folder of CORPORATE_VAULT_FOLDERS) {
+  for (const folder of folders) {
     if (folder.documentTypes.includes(docType)) {
       if (folder.tags.some((tag) => hay.includes(tag))) return folder.id;
     }
   }
-  if (hay.includes('pv') || hay.includes('ago') || hay.includes('age')) return 'proces_verbaux';
-  if (hay.includes('bail') || hay.includes('domicil')) return 'contrats_bail';
-  if (hay.includes('tva') || hay.includes('is') || hay.includes('9421') || hay.includes('fiscal')) return 'fichiers_fiscaux';
-  if (hay.includes('statut') || hay.includes('kbis')) return 'statuts_kbis';
-  return 'registres_legaux';
+  if (hay.includes('pv') || hay.includes('ago') || hay.includes('age')) {
+    const pv = folders.find((f) => f.id === 'proces_verbaux');
+    if (pv) return pv.id;
+  }
+  if (hay.includes('bail') || hay.includes('domicil')) {
+    const c = folders.find((f) => f.id === 'contrats' || f.id === 'contrats_bail');
+    if (c) return c.id;
+  }
+  if (hay.includes('tva') || hay.includes('is') || hay.includes('9421') || hay.includes('fiscal')) {
+    const f = folders.find((f) => f.id === 'fichiers_fiscaux');
+    if (f) return f.id;
+  }
+  if (hay.includes('statut') || hay.includes('kbis') || hay.includes('rc')) {
+    const s = folders.find((f) => f.id === 'statuts_societe' || f.id === 'registre_commerce' || f.id === 'statuts_kbis');
+    if (s) return s.id;
+  }
+  if (hay.includes('patente')) {
+    const p = folders.find((f) => f.id === 'patente');
+    if (p) return p.id;
+  }
+  if (hay.includes(' ice') || hay.startsWith('ice')) {
+    const ice = folders.find((f) => f.id === 'ice');
+    if (ice) return ice.id;
+  }
+  const fallback = folders.find((f) => f.id === 'registres_legaux') ?? folders[folders.length - 1];
+  return fallback?.id ?? 'registres_legaux';
 }
 
 function extractTags(metadata: Record<string, unknown>, title: string): string[] {
@@ -97,7 +90,9 @@ export async function searchCorporateVault(
   companyId: string,
   query: string,
   folderFilter?: CorporateVaultFolderId,
+  foldersOverride?: CorporateVaultFolder[],
 ): Promise<VaultSearchResult> {
+  const folders = foldersOverride ?? (await loadVaultFolders(db));
   let q = db
     .from('atlas_documents')
     .select('id, title, filename, type, mime_type, metadata, created_at, company_id, processing_status, extracted_text')
@@ -118,7 +113,7 @@ export async function searchCorporateVault(
     const title = String(r.title ?? r.filename ?? 'Document');
     const docType = String(r.type ?? 'generic');
     const tags = extractTags(metadata, title);
-    const folderId = inferFolder(docType, title, metadata, tags);
+    const folderId = inferFolder(docType, title, metadata, tags, folders);
     if (folderFilter && folderId !== folderFilter) continue;
 
     const searchText = [
@@ -149,7 +144,7 @@ export async function searchCorporateVault(
 
   return {
     companyId,
-    folders: CORPORATE_VAULT_FOLDERS,
+    folders,
     documents: items,
     total: items.length,
     query,

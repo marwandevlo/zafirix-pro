@@ -1227,6 +1227,7 @@ EN-TETE: ${header}
 export default function JuridiquePage() {
   const [activeTab, setActiveTab] = useState<JuridiqueTabId>('creation');
   const [companies, setCompanies] = useState<Company[]>([]);
+  const [lang, setLang] = useState<'fr' | 'ar'>('fr');
 
   useEffect(() => {
     void (async () => {
@@ -1253,14 +1254,30 @@ export default function JuridiquePage() {
           </div>
         }
       >
-        <JuridiqueModuleTabs activeTab={activeTab} onChange={setActiveTab} variant="sidebar" />
+        <JuridiqueModuleTabs activeTab={activeTab} onChange={setActiveTab} variant="sidebar" lang={lang} />
       </AppSidebar>
       <main className="flex-1 flex flex-col overflow-hidden min-w-0">
         <div className="shrink-0 border-b border-gray-200 bg-white">
-          <div className="px-6 pt-4 pb-2 space-y-2">
+          <div className="px-6 pt-4 pb-2 flex flex-wrap items-center justify-between gap-3">
             <BetaSurfaceBadge label="Bêta · Juridique & IA · Documents à valider par juriste/expert" />
+            <div className="inline-flex rounded-lg border border-gray-200 overflow-hidden text-xs font-semibold">
+              <button
+                type="button"
+                onClick={() => setLang('fr')}
+                className={`px-3 py-1.5 ${lang === 'fr' ? 'bg-[#1B2A4A] text-white' : 'bg-white text-gray-600'}`}
+              >
+                FR
+              </button>
+              <button
+                type="button"
+                onClick={() => setLang('ar')}
+                className={`px-3 py-1.5 ${lang === 'ar' ? 'bg-[#1B2A4A] text-white' : 'bg-white text-gray-600'}`}
+              >
+                AR
+              </button>
+            </div>
           </div>
-          <JuridiqueModuleTabs activeTab={activeTab} onChange={setActiveTab} variant="main" />
+          <JuridiqueModuleTabs activeTab={activeTab} onChange={setActiveTab} variant="main" lang={lang} />
         </div>
         <div className="flex-1 flex overflow-hidden min-h-0">
         {activeTab === 'creation' ? (
@@ -1276,9 +1293,9 @@ export default function JuridiquePage() {
         ) : activeTab === 'pv' ? (
           <JuridiquePvGeneratorPanel companies={companies} />
         ) : activeTab === 'vault' ? (
-          <CorporateVaultPanel />
+          <CorporateVaultPanel lang={lang} />
         ) : (
-          <JuridiqueDocumentsPanel companies={companies} />
+          <JuridiqueDocumentsPanel companies={companies} lang={lang} />
         )}
         </div>
       </main>

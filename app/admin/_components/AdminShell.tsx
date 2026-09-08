@@ -18,6 +18,7 @@ import {
   ShieldCheck,
   TrendingUp,
   Users,
+  Scale,
 } from 'lucide-react';
 import { atlasDataBackend, isAtlasSupabaseDataEnabled } from '@/app/lib/atlas-data-source';
 import { supabase } from '@/app/lib/supabase';
@@ -36,6 +37,7 @@ const NAV = [
   { href: '/admin/manual-payments', icon: Banknote, label: 'Manual (MA)' },
   { href: '/admin/affiliate', icon: Gift, label: 'Affiliate' },
   { href: '/admin/companies', icon: Building2, label: 'Companies' },
+  { href: '/admin/juridique', icon: Scale, label: 'Juridique' },
   { href: '/admin/plans', icon: Boxes, label: 'Plans' },
   { href: '/admin/billing', icon: CreditCard, label: 'Billing' },
   { href: '/admin/analytics', icon: BarChart3, label: 'Analytics' },

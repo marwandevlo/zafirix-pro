@@ -2,26 +2,31 @@
 
 import type { LucideIcon } from 'lucide-react';
 import { Building2, Gavel, History, Landmark, Lock, RefreshCw, Scale } from 'lucide-react';
+import type { JuridiqueUiLocale } from '@/app/types/atlas-juridique-categories';
+import { juridiqueLabel } from '@/app/types/atlas-juridique-categories';
 
 export type JuridiqueTabId = 'creation' | 'modifications' | 'formalites' | 'documents' | 'pv' | 'vault' | 'historique';
 
-const TABS: { id: JuridiqueTabId; label: string; icon: LucideIcon }[] = [
-  { id: 'creation', label: 'Création', icon: Building2 },
-  { id: 'modifications', label: 'Modifications', icon: RefreshCw },
-  { id: 'formalites', label: 'Formalités juridiques', icon: Landmark },
-  { id: 'documents', label: 'Documents juridiques', icon: Scale },
-  { id: 'pv', label: 'PV Tribunal', icon: Gavel },
-  { id: 'vault', label: 'Coffre-fort', icon: Lock },
-  { id: 'historique', label: 'Historique', icon: History },
+const TABS: { id: JuridiqueTabId; labelFr: string; labelAr: string; icon: LucideIcon }[] = [
+  { id: 'creation', labelFr: 'Création', labelAr: 'التأسيس', icon: Building2 },
+  { id: 'modifications', labelFr: 'Modifications', labelAr: 'التعديلات', icon: RefreshCw },
+  { id: 'formalites', labelFr: 'Formalités juridiques', labelAr: 'الإجراءات القانونية', icon: Landmark },
+  { id: 'documents', labelFr: 'Documents juridiques', labelAr: 'الوثائق القانونية', icon: Scale },
+  { id: 'pv', labelFr: 'PV Tribunal', labelAr: 'محاضر الجمعيات', icon: Gavel },
+  { id: 'vault', labelFr: 'Coffre-fort', labelAr: 'الخزنة', icon: Lock },
+  { id: 'historique', labelFr: 'Historique', labelAr: 'السجل', icon: History },
 ];
 
 type Props = {
   activeTab: JuridiqueTabId;
   onChange: (tab: JuridiqueTabId) => void;
   variant?: 'main' | 'sidebar';
+  lang?: JuridiqueUiLocale;
 };
 
-export function JuridiqueModuleTabs({ activeTab, onChange, variant = 'main' }: Props) {
+export function JuridiqueModuleTabs({ activeTab, onChange, variant = 'main', lang = 'fr' }: Props) {
+  const t = (fr: string, ar: string) => juridiqueLabel(lang, fr, ar);
+
   if (variant === 'sidebar') {
     return (
       <div className="mt-4 space-y-1" data-testid="juridique-module-tabs-sidebar">
@@ -37,7 +42,7 @@ export function JuridiqueModuleTabs({ activeTab, onChange, variant = 'main' }: P
                 active ? 'bg-amber-500/20 text-amber-400' : 'text-white/40 hover:text-white/70'
               }`}
             >
-              <Icon size={14} /> {tab.label}
+              <Icon size={14} /> {t(tab.labelFr, tab.labelAr)}
             </button>
           );
         })}
@@ -50,6 +55,7 @@ export function JuridiqueModuleTabs({ activeTab, onChange, variant = 'main' }: P
       className="px-4 sm:px-6 pb-3 flex flex-wrap gap-2 border-b border-gray-100 bg-white shrink-0"
       aria-label="Sections du module Juridique"
       data-testid="juridique-module-tabs-main"
+      dir={lang === 'ar' ? 'rtl' : 'ltr'}
     >
       {TABS.map((tab) => {
         const Icon = tab.icon;
@@ -66,7 +72,7 @@ export function JuridiqueModuleTabs({ activeTab, onChange, variant = 'main' }: P
             }`}
           >
             <Icon size={15} className={active ? 'text-amber-300' : 'text-gray-400'} />
-            <span className="whitespace-nowrap">{tab.label}</span>
+            <span className="whitespace-nowrap">{t(tab.labelFr, tab.labelAr)}</span>
           </button>
         );
       })}

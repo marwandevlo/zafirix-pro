@@ -1,11 +1,6 @@
-/** Coffre-fort numérique — dossiers légaux & fiscaux standardisés. */
+/** Coffre-fort numérique — dossiers légaux & fiscaux (dynamic slug IDs). */
 
-export type CorporateVaultFolderId =
-  | 'statuts_kbis'
-  | 'proces_verbaux'
-  | 'contrats_bail'
-  | 'fichiers_fiscaux'
-  | 'registres_legaux';
+export type CorporateVaultFolderId = string;
 
 export type CorporateVaultFolder = {
   id: CorporateVaultFolderId;
