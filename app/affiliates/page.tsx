@@ -1,5 +1,6 @@
 'use client';
 
+import Link from 'next/link';
 import { useCallback, useEffect, useState } from 'react';
 import {
   Check,
@@ -14,8 +15,10 @@ import {
   MousePointerClick,
   Sparkles,
   Trophy,
+  User,
   Users,
   Wallet,
+  UserPlus,
 } from 'lucide-react';
 import { supabase } from '@/app/lib/supabase';
 import type { AtlasUiLocale } from '@/app/lib/atlas-format';
@@ -108,7 +111,11 @@ export default function AffiliatePortalPage() {
   const [userId, setUserId] = useState<string | null>(null);
   const [userEmail, setUserEmail] = useState<string | null>(null);
 
-  /* login form */
+  /* login / signup */
+  const [authTab, setAuthTab] = useState<'login' | 'signup'>('login');
+  const [fullName, setFullName] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [signupSuccess, setSignupSuccess] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [loginLoading, setLoginLoading] = useState(false);
@@ -166,6 +173,81 @@ export default function AffiliatePortalPage() {
       } else {
         setMagicSent(true);
       }
+    } catch {
+      setLoginError(t('Erreur réseau. Réessayez.', 'خطأ في الشبكة. حاول مجددًا.'));
+    } finally {
+      setLoginLoading(false);
+    }
+  };
+
+  const handleAffiliateSignup = async () => {
+    setLoginLoading(true);
+    setLoginError('');
+    setSignupSuccess('');
+    if (!fullName.trim()) {
+      setLoginError(t('Nom complet requis.', 'الاسم الكامل مطلوب.'));
+      setLoginLoading(false);
+      return;
+    }
+    if (!email.trim()) {
+      setLoginError(t('Adresse email requise.', 'البريد الإلكتروني مطلوب.'));
+      setLoginLoading(false);
+      return;
+    }
+    if (password.length < 8) {
+      setLoginError(t('Mot de passe trop court (8 caractères minimum).', 'كلمة المرور قصيرة (8 أحرف على الأقل).'));
+      setLoginLoading(false);
+      return;
+    }
+    if (password !== confirmPassword) {
+      setLoginError(t('Les mots de passe ne correspondent pas.', 'كلمتا المرور غير متطابقتين.'));
+      setLoginLoading(false);
+      return;
+    }
+
+    try {
+      const res = await fetch('/api/affiliate/register', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ fullName: fullName.trim(), email: email.trim(), password }),
+      });
+      const body = (await res.json().catch(() => ({}))) as {
+        ok?: boolean;
+        message?: string;
+        code?: string;
+        referralCode?: string;
+      };
+
+      if (!res.ok || !body.ok) {
+        setLoginError(
+          body.message ??
+            (body.code === 'email_exists'
+              ? t('Cet e-mail est déjà utilisé. Connectez-vous.', 'هذا البريد مستخدم بالفعل. سجّل الدخول.')
+              : t('Inscription échouée. Réessayez.', 'فشل التسجيل. حاول مجددًا.')),
+        );
+        return;
+      }
+
+      const { error: signInErr } = await supabase.auth.signInWithPassword({
+        email: email.trim(),
+        password,
+      });
+      if (signInErr) {
+        setSignupSuccess(
+          t(
+            'Compte créé ! Connectez-vous avec votre email et mot de passe.',
+            'تم إنشاء الحساب! سجّل الدخول ببريدك وكلمة المرور.',
+          ),
+        );
+        setAuthTab('login');
+        return;
+      }
+
+      setSignupSuccess(
+        body.referralCode
+          ? t(`Compte affilié créé ! Votre code : ${body.referralCode}`, `تم إنشاء حساب الإحالة! رمزك: ${body.referralCode}`)
+          : t('Compte affilié créé avec succès.', 'تم إنشاء حساب الإحالة بنجاح.'),
+      );
     } catch {
       setLoginError(t('Erreur réseau. Réessayez.', 'خطأ في الشبكة. حاول مجددًا.'));
     } finally {
@@ -270,15 +352,131 @@ export default function AffiliatePortalPage() {
               {t('Portail Affilié', 'بوابة الإحالة')}
             </h1>
             <p className="mt-2 text-sm text-white/60 max-w-sm mx-auto">
-              {t(
-                'Connectez-vous pour accéder à votre tableau de bord affilié, suivre vos commissions et gérer vos liens de parrainage.',
-                'سجّل الدخول للوصول إلى لوحة تحكم الإحالة، تتبّع عمولاتك وإدارة روابط الإحالة.',
-              )}
+              {authTab === 'login'
+                ? t(
+                    'Connectez-vous pour accéder à votre tableau de bord affilié, suivre vos commissions et gérer vos liens de parrainage.',
+                    'سجّل الدخول للوصول إلى لوحة تحكم الإحالة، تتبّع عمولاتك وإدارة روابط الإحالة.',
+                  )
+                : t(
+                    'Créez un compte affilié gratuit — sans abonnement SaaS ni essai. Votre lien de parrainage est généré automatiquement.',
+                    'أنشئ حساب إحالة مجاني — بدون اشتراك SaaS أو تجربة. يُنشأ رابط الإحالة تلقائيًا.',
+                  )}
             </p>
+            <Link
+              href="/affiliates/program"
+              className="mt-3 inline-flex text-xs font-semibold text-cyan-300/90 hover:text-cyan-200 underline underline-offset-2"
+            >
+              {t('Découvrir le programme affilié', 'اكتشف برنامج الإحالة')}
+            </Link>
           </div>
 
-          {/* login card */}
+          {/* auth card */}
           <div className="rounded-3xl border border-white/10 bg-white/[0.06] backdrop-blur-xl p-6 sm:p-8 space-y-5">
+            {/* login vs signup */}
+            <div className="flex rounded-2xl border border-white/10 bg-white/5 p-0.5">
+              <button
+                type="button"
+                onClick={() => {
+                  setAuthTab('login');
+                  setLoginError('');
+                  setSignupSuccess('');
+                }}
+                className={`flex-1 py-2 text-xs font-bold rounded-xl transition ${authTab === 'login' ? 'bg-[#06b6d4] text-[#0F1F3D]' : 'text-white/50 hover:text-white/80'}`}
+              >
+                {t('Connexion', 'تسجيل الدخول')}
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setAuthTab('signup');
+                  setLoginError('');
+                  setSignupSuccess('');
+                  setMagicSent(false);
+                }}
+                className={`flex-1 py-2 text-xs font-bold rounded-xl transition ${authTab === 'signup' ? 'bg-[#06b6d4] text-[#0F1F3D]' : 'text-white/50 hover:text-white/80'}`}
+              >
+                {t("S'inscrire", 'التسجيل')}
+              </button>
+            </div>
+
+            {authTab === 'signup' ? (
+              <>
+                <div>
+                  <label className="block text-[11px] font-semibold text-white/60 uppercase tracking-wide mb-1.5">
+                    {t('Nom complet', 'الاسم الكامل')}
+                  </label>
+                  <div className="relative">
+                    <User size={16} className="absolute top-1/2 -translate-y-1/2 left-3 text-white/30 pointer-events-none" />
+                    <input
+                      type="text"
+                      value={fullName}
+                      onChange={(e) => setFullName(e.target.value)}
+                      placeholder={t('Votre nom', 'اسمك')}
+                      className="w-full rounded-2xl border border-white/15 bg-white/5 pl-9 pr-4 py-3 text-sm text-white placeholder:text-white/25 outline-none focus:border-[#06b6d4] focus:ring-1 focus:ring-[#06b6d4]"
+                    />
+                  </div>
+                </div>
+                <div>
+                  <label className="block text-[11px] font-semibold text-white/60 uppercase tracking-wide mb-1.5">
+                    {t('Adresse email', 'البريد الإلكتروني')}
+                  </label>
+                  <div className="relative">
+                    <Mail size={16} className="absolute top-1/2 -translate-y-1/2 left-3 text-white/30 pointer-events-none" />
+                    <input
+                      type="email"
+                      value={email}
+                      onChange={(e) => setEmail(e.target.value)}
+                      placeholder="affiliate@example.com"
+                      className="w-full rounded-2xl border border-white/15 bg-white/5 pl-9 pr-4 py-3 text-sm text-white placeholder:text-white/25 outline-none focus:border-[#06b6d4] focus:ring-1 focus:ring-[#06b6d4]"
+                    />
+                  </div>
+                </div>
+                <div>
+                  <label className="block text-[11px] font-semibold text-white/60 uppercase tracking-wide mb-1.5">
+                    {t('Mot de passe', 'كلمة المرور')}
+                  </label>
+                  <input
+                    type="password"
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                    placeholder="••••••••"
+                    className="w-full rounded-2xl border border-white/15 bg-white/5 px-4 py-3 text-sm text-white placeholder:text-white/25 outline-none focus:border-[#06b6d4] focus:ring-1 focus:ring-[#06b6d4]"
+                  />
+                </div>
+                <div>
+                  <label className="block text-[11px] font-semibold text-white/60 uppercase tracking-wide mb-1.5">
+                    {t('Confirmer le mot de passe', 'تأكيد كلمة المرور')}
+                  </label>
+                  <input
+                    type="password"
+                    value={confirmPassword}
+                    onChange={(e) => setConfirmPassword(e.target.value)}
+                    placeholder="••••••••"
+                    className="w-full rounded-2xl border border-white/15 bg-white/5 px-4 py-3 text-sm text-white placeholder:text-white/25 outline-none focus:border-[#06b6d4] focus:ring-1 focus:ring-[#06b6d4]"
+                    onKeyDown={(e) => { if (e.key === 'Enter') void handleAffiliateSignup(); }}
+                  />
+                </div>
+                {loginError && (
+                  <p className="text-xs text-red-400 bg-red-400/10 border border-red-400/20 rounded-xl px-3 py-2">{loginError}</p>
+                )}
+                {signupSuccess && (
+                  <p className="text-xs text-emerald-300 bg-emerald-400/10 border border-emerald-400/20 rounded-xl px-3 py-2">{signupSuccess}</p>
+                )}
+                <button
+                  type="button"
+                  disabled={loginLoading || !fullName.trim() || !email.trim() || !password || !confirmPassword}
+                  onClick={() => void handleAffiliateSignup()}
+                  className="w-full inline-flex items-center justify-center gap-2 min-h-12 rounded-2xl bg-[#06b6d4] text-[#0F1F3D] font-bold text-sm hover:bg-cyan-300 disabled:opacity-50 transition"
+                >
+                  {loginLoading ? <Loader2 size={16} className="animate-spin" /> : <UserPlus size={16} />}
+                  {t('Créer mon compte affilié', 'إنشاء حساب الإحالة')}
+                </button>
+                <p className="text-[11px] text-center text-white/40">
+                  {t('Aucun abonnement requis — accès direct au portail affilié.', 'لا يلزم اشتراك — وصول مباشر لبوابة الإحالة.')}
+                </p>
+              </>
+            ) : (
+              <>
             {/* mode tabs */}
             <div className="flex rounded-2xl border border-white/10 bg-white/5 p-0.5">
               <button
@@ -361,16 +559,38 @@ export default function AffiliatePortalPage() {
                 ? t('Se connecter', 'تسجيل الدخول')
                 : t('Envoyer le lien', 'إرسال الرابط')}
             </button>
+              </>
+            )}
           </div>
 
           {/* info */}
           <div className="text-center space-y-2">
-            <p className="text-[11px] text-white/40">
-              {t(
-                'Utilisez le même compte email que celui avec lequel vous vous êtes inscrit sur ZafirixPro.',
-                'استخدم نفس البريد الإلكتروني الذي سجّلت به في ZafirixPro.',
-              )}
-            </p>
+            {authTab === 'login' ? (
+              <p className="text-[11px] text-white/40">
+                {t(
+                  'Pas encore de compte affilié ?',
+                  'ليس لديك حساب إحالة بعد؟',
+                )}{' '}
+                <button
+                  type="button"
+                  onClick={() => { setAuthTab('signup'); setLoginError(''); setSignupSuccess(''); }}
+                  className="text-cyan-300 hover:text-cyan-200 font-semibold underline underline-offset-2"
+                >
+                  {t("S'inscrire", 'التسجيل')}
+                </button>
+              </p>
+            ) : (
+              <p className="text-[11px] text-white/40">
+                {t('Déjà inscrit ?', 'مسجّل بالفعل؟')}{' '}
+                <button
+                  type="button"
+                  onClick={() => { setAuthTab('login'); setLoginError(''); setSignupSuccess(''); }}
+                  className="text-cyan-300 hover:text-cyan-200 font-semibold underline underline-offset-2"
+                >
+                  {t('Se connecter', 'تسجيل الدخول')}
+                </button>
+              </p>
+            )}
             <p className="text-xs text-white/25">
               {t("Commission jusqu'à", 'عمولة تصل إلى')} <strong className="text-[#06b6d4]">40%</strong> {t('par paiement', 'لكل دفعة')}
             </p>

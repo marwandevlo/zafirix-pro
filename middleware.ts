@@ -80,8 +80,19 @@ function isAnonymousTelemetryPath(pathname: string): boolean {
     pathname === '/api/analytics/track' ||
     pathname === '/api/analytics/pageview' ||
     pathname === '/api/funnel/track' ||
-    pathname === '/api/referral/click'
+    pathname === '/api/referral/click' ||
+    pathname === '/api/affiliate/register'
   );
+}
+
+function isAffiliatePortalPath(pathname: string): boolean {
+  return pathname === '/affiliates' || pathname.startsWith('/affiliates/');
+}
+
+function isAffiliateOnlyAccount(user: User): boolean {
+  const appMeta = user.app_metadata as Record<string, unknown> | undefined;
+  const userMeta = user.user_metadata as Record<string, unknown> | undefined;
+  return appMeta?.account_type === 'affiliate' || appMeta?.role === 'affiliate' || userMeta?.account_type === 'affiliate';
 }
 
 function withReferralCookie(request: NextRequest, response: NextResponse): NextResponse {
@@ -400,6 +411,20 @@ export async function middleware(request: NextRequest) {
       url.pathname = '/access-denied';
       return withReferralCookie(request, copySessionCookies(sessionResponse, NextResponse.redirect(url)));
     }
+  }
+
+  if (
+    user &&
+    isAffiliateOnlyAccount(user) &&
+    !isAffiliatePortalPath(pathname) &&
+    !isPublicPath(pathname) &&
+    !pathname.startsWith('/api/affiliate/') &&
+    !pathname.startsWith('/auth/')
+  ) {
+    const url = request.nextUrl.clone();
+    url.pathname = '/affiliates';
+    url.searchParams.delete('next');
+    return withReferralCookie(request, copySessionCookies(sessionResponse, NextResponse.redirect(url)));
   }
 
   return withReferralCookie(request, finalizeHtmlDocumentResponse(sessionResponse, pathname));
