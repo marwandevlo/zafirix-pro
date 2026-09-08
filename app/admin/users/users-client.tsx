@@ -12,6 +12,8 @@ import { AdminDataTable, AdminFilterChip, type AdminColumn } from '@/app/admin/_
 import { AdminStatusBadge } from '@/app/admin/_components/AdminStatusBadge';
 import { useDebouncedValue } from '@/app/lib/use-debounced-value';
 import { UserApprovalRow } from '@/app/admin/users/_components/UserApprovalRow';
+import { UserPlanOverrideModal } from '@/app/admin/users/_components/UserPlanOverrideModal';
+import type { AdminEntitlementSnapshot } from '@/app/lib/admin/admin-entitlement-types';
 
 type AdminUserRow = {
   id: string;
@@ -24,6 +26,14 @@ type AdminUserRow = {
   last_seen_at?: string | null;
   is_active_now?: boolean;
   operations_today?: number;
+  subscription_status?: string | null;
+  subscription_plan?: string | null;
+  trial_ends_at?: string | null;
+  trial_expired?: boolean;
+  trial_label?: string;
+  admin_override?: boolean;
+  documents_used?: number;
+  documents_limit?: number | null;
 };
 
 export default function UsersAdminClient() {
@@ -39,6 +49,7 @@ export default function UsersAdminClient() {
   const [roleFilter, setRoleFilter] = useState<string>('all');
   const [planFilter, setPlanFilter] = useState<string>('all');
   const [statusFilter, setStatusFilter] = useState<string>('all');
+  const [planModalUser, setPlanModalUser] = useState<AdminUserRow | null>(null);
 
   const loadUsers = useCallback(async (cancelledRef?: { current: boolean }, opts?: { silent?: boolean }) => {
     const silent = opts?.silent === true;
@@ -201,7 +212,47 @@ export default function UsersAdminClient() {
       key: 'plan',
       header: 'Plan',
       sortValue: (u) => u.plan || '',
-      render: (u) => u.plan || '—',
+      render: (u) => (
+        <div className="flex flex-col gap-0.5">
+          <span className="font-semibold text-[#0F1F3D]">{u.plan || '—'}</span>
+          <span className="text-[11px] text-slate-500">{u.subscription_plan || u.subscription_status || '—'}</span>
+        </div>
+      ),
+    },
+    {
+      key: 'subscription',
+      header: 'Subscription',
+      sortValue: (u) => u.subscription_status || '',
+      render: (u) => (
+        <div className="flex flex-col gap-0.5">
+          <AdminStatusBadge value={u.subscription_status} />
+          {u.admin_override ? <AdminStatusBadge value="override" label="admin grant" /> : null}
+        </div>
+      ),
+    },
+    {
+      key: 'trial',
+      header: 'Trial',
+      sortValue: (u) => (u.trial_expired ? 0 : u.trial_ends_at ? Date.parse(u.trial_ends_at) : 1),
+      render: (u) => (
+        <span className={`text-[12px] ${u.trial_expired ? 'font-semibold text-rose-700' : 'text-slate-600'}`}>
+          {u.trial_label || (u.trial_expired ? 'Essai expiré' : '—')}
+        </span>
+      ),
+    },
+    {
+      key: 'docs',
+      header: 'Docs quota',
+      sortValue: (u) => u.documents_used ?? 0,
+      render: (u) => {
+        const used = u.documents_used ?? 0;
+        const limit = u.documents_limit;
+        return (
+          <span className="tabular-nums text-[12px] font-semibold text-slate-700">
+            {limit === null || limit === undefined ? `${used} / ∞` : `${used} / ${limit}`}
+          </span>
+        );
+      },
     },
     {
       key: 'status',
@@ -250,6 +301,14 @@ export default function UsersAdminClient() {
           {isOwnerEmail(u.email) ? (
             <span className="text-[11px] text-slate-400">Protected {getOwnerEmail()}</span>
           ) : null}
+          <button
+            type="button"
+            onClick={() => setPlanModalUser(u)}
+            disabled={busyUserId === u.id}
+            className="h-8 rounded-lg bg-indigo-50 px-2.5 text-[11px] font-semibold text-indigo-800 ring-1 ring-indigo-200 disabled:opacity-40"
+          >
+            Plan / quotas
+          </button>
           {String(u.status ?? '').toLowerCase() === 'pending' ? (
             <UserApprovalRow
               user={u}
@@ -318,7 +377,9 @@ export default function UsersAdminClient() {
       {success ? <AdminAlert variant="info">{success}</AdminAlert> : null}
       {warning ? <AdminAlert variant="warning">{warning}</AdminAlert> : null}
       <div className="flex flex-wrap items-end justify-between gap-3">
-        <p className="text-sm text-slate-500">Modération des comptes. Présence mise à jour toutes les 2 minutes.</p>
+        <p className="text-sm text-slate-500">
+          Comptes, abonnements, essais et quotas documents. Accordez un plan gratuit, prolongez un essai ou réinitialisez les quotas.
+        </p>
         <Link href="/admin/activity" className="text-xs font-semibold text-cyan-700 hover:underline">
           Activity monitor →
         </Link>
@@ -356,7 +417,7 @@ export default function UsersAdminClient() {
         searchPlaceholder="Email or name…"
         emptyTitle="No users found"
         emptyDescription="When users sign up, they’ll appear here."
-        minWidthClass="min-w-[1100px]"
+        minWidthClass="min-w-[1400px]"
         toolbar={
           <>
             {(['all', 'pending', 'active', 'suspended', 'banned'] as const).map((s) => (
@@ -367,6 +428,37 @@ export default function UsersAdminClient() {
           </>
         }
       />
+      {planModalUser ? (
+        <UserPlanOverrideModal
+          userId={planModalUser.id}
+          email={planModalUser.email}
+          onClose={() => setPlanModalUser(null)}
+          onSaved={(snapshot: AdminEntitlementSnapshot) => {
+            setRows((prev) =>
+              prev.map((r) =>
+                r.id === planModalUser.id
+                  ? {
+                      ...r,
+                      plan: snapshot.profilePlan,
+                      admin_override: snapshot.adminOverride,
+                      subscription_status: snapshot.workspace.status,
+                      subscription_plan: snapshot.workspace.planCode,
+                      trial_ends_at: snapshot.workspace.trialEndsAt,
+                      trial_expired: snapshot.trialExpired,
+                      trial_label: snapshot.trialLabelFr,
+                      documents_used: snapshot.documents.used,
+                      documents_limit: snapshot.documents.limit,
+                    }
+                  : r,
+              ),
+            );
+            setSuccess('Plan / quotas mis à jour. L’accès documentaire respecte désormais cet override.');
+            window.setTimeout(() => setSuccess(''), 4000);
+            setPlanModalUser(null);
+            router.refresh();
+          }}
+        />
+      ) : null}
     </AdminShell>
   );
 }

@@ -19,6 +19,7 @@ import {
   ZAFIRIX_PLAN_UPGRADE,
 } from '@/app/types/zafirix-usage';
 import { shouldBypassBillingEnforcement } from '@/app/lib/atlas-billing-bypass';
+import { hasAdminGrantedEntitlement } from '@/app/lib/admin/admin-entitlement-guard';
 
 type RpcCheck = {
   allowed?: boolean;
@@ -151,6 +152,15 @@ export async function checkZafirixUsage(
     p_qty: quantity,
   });
 
+  const honorAdminGrant = async (check: ZafirixUsageCheck): Promise<ZafirixUsageCheck> => {
+    if (check.allowed) return check;
+    if (check.code !== 'trial_expired') return check;
+    if (await hasAdminGrantedEntitlement(db, userId)) {
+      return { ...check, allowed: true, code: 'admin_override', messageFr: undefined };
+    }
+    return check;
+  };
+
   if (error) {
     // Soft-fail open if migration not applied yet (avoid blocking production mid-deploy).
     if (/zafirix_check_usage|schema cache|does not exist/i.test(error.message)) {
@@ -179,6 +189,8 @@ export async function checkZafirixUsage(
   };
 
   if (!check.allowed) {
+    const granted = await honorAdminGrant(check);
+    if (granted.allowed) return granted;
     check.suggestedAddons = await listZafirixAddonPacks(db, meter);
   }
 
@@ -237,7 +249,7 @@ export async function consumeZafirixUsage(
   if (!raw) return { allowed: true, code: 'empty' };
 
   const planCode = asPlanCode(raw.plan_code);
-  return {
+  const result: ZafirixUsageCheck = {
     allowed: !!raw.allowed || !!raw.ok,
     used: raw.used,
     limit: raw.limit ?? null,
@@ -249,6 +261,10 @@ export async function consumeZafirixUsage(
     upgradeTo: ZAFIRIX_PLAN_UPGRADE[planCode] ?? null,
     suggestedAddons: raw.allowed === false ? await listZafirixAddonPacks(db, meter) : undefined,
   };
+  if (!result.allowed && result.code === 'trial_expired' && (await hasAdminGrantedEntitlement(db, userId))) {
+    return { ...result, allowed: true, code: 'admin_override', messageFr: undefined, suggestedAddons: undefined };
+  }
+  return result;
 }
 
 export async function changeZafirixPlan(

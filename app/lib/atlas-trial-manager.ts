@@ -46,12 +46,22 @@ export async function expireTrialsIfNeeded(db: SupabaseClient, userId: string): 
   const now = new Date().toISOString();
   const { data: expired } = await db
     .from('atlas_workspace_subscriptions')
-    .select('id, workspace_id, trial_ends_at')
+    .select('id, workspace_id, trial_ends_at, admin_override, admin_override_until, metadata')
     .eq('status', 'trial')
     .lt('trial_ends_at', now);
 
   let count = 0;
   for (const row of expired ?? []) {
+    const override = Boolean((row as { admin_override?: boolean }).admin_override);
+    const until = (row as { admin_override_until?: string | null }).admin_override_until ?? null;
+    const meta = (row as { metadata?: { admin_override?: boolean; admin_override_until?: string } }).metadata;
+    const metaOverride = meta?.admin_override === true;
+    const metaUntil = meta?.admin_override_until ?? null;
+    const activeOverride =
+      (override || metaOverride) &&
+      (!(until ?? metaUntil) || Date.parse(String(until ?? metaUntil)) > Date.now());
+    if (activeOverride) continue;
+
     await db
       .from('atlas_workspace_subscriptions')
       .update({ status: 'expired' })

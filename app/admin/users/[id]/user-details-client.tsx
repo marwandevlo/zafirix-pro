@@ -10,6 +10,8 @@ import { supabase } from '@/app/lib/supabase';
 import { AdminAlert, AdminTableSkeleton } from '@/app/admin/_components/AdminUi';
 import { atlasPlanIdToProfilePlan } from '@/app/lib/atlas-subscription-sync';
 import { UserApprovalRow } from '@/app/admin/users/_components/UserApprovalRow';
+import { UserPlanOverrideModal } from '@/app/admin/users/_components/UserPlanOverrideModal';
+import type { AdminEntitlementSnapshot } from '@/app/lib/admin/admin-entitlement-types';
 
 const PROFILE_PLAN_OPTIONS = ['free', 'pro', 'vip', 'enterprise'] as const;
 type ProfilePlanOption = (typeof PROFILE_PLAN_OPTIONS)[number];
@@ -114,6 +116,8 @@ export default function UserDetailsAdminClient() {
   const [user, setUser] = useState<UserDetail | null>(null);
   const [subs, setSubs] = useState<AtlasSubscriptionRow[]>([]);
   const [logs, setLogs] = useState<AdminLogRow[]>([]);
+  const [entitlement, setEntitlement] = useState<AdminEntitlementSnapshot | null>(null);
+  const [planModalOpen, setPlanModalOpen] = useState(false);
 
   const [role, setRole] = useState('user');
   const [plan, setPlan] = useState('free');
@@ -186,6 +190,12 @@ export default function UserDetailsAdminClient() {
           ? ((json as { adminLogs: unknown[] }).adminLogs as AdminLogRow[])
           : [];
       setLogs(adminLogs);
+
+      const entitlementSnap =
+        typeof json === 'object' && json && 'entitlement' in json && (json as { entitlement?: unknown }).entitlement
+          ? ((json as { entitlement: AdminEntitlementSnapshot }).entitlement)
+          : null;
+      setEntitlement(entitlementSnap);
 
       if (syncForm && u) {
         const canonicalPlan = resolveCanonicalPlan(u.plan, subscriptions);
@@ -345,6 +355,14 @@ export default function UserDetailsAdminClient() {
                   ) : null}
                 </div>
                 <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setPlanModalOpen(true)}
+                    disabled={protectedOwner || actionBusy}
+                    className="px-3 py-2 rounded-xl border border-indigo-200 bg-indigo-50 text-indigo-900 text-xs font-semibold hover:bg-indigo-100 disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    Plan / quotas
+                  </button>
                   {isPendingAccount ? (
                     <UserApprovalRow
                       user={{ id: user.id, email: user.email, full_name: user.full_name, status: user.status }}
@@ -462,6 +480,48 @@ export default function UserDetailsAdminClient() {
               </form>
             </div>
 
+            {entitlement ? (
+              <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6">
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <p className="text-sm font-semibold text-gray-900">Workspace subscription & quotas</p>
+                    <p className="text-xs text-gray-500 mt-0.5">
+                      Document AI / OCR enforce these values. Admin grants skip the expired-trial block.
+                    </p>
+                  </div>
+                  {entitlement.adminOverride ? (
+                    <span className="inline-flex items-center rounded-full bg-indigo-50 px-2 py-0.5 text-[11px] font-semibold text-indigo-800 ring-1 ring-indigo-200">
+                      admin grant
+                    </span>
+                  ) : null}
+                </div>
+                <div className="mt-4 grid grid-cols-2 md:grid-cols-4 gap-3 text-sm">
+                  <div className="rounded-xl border border-gray-100 bg-gray-50 px-3 py-2">
+                    <p className="text-[11px] text-gray-500">Plan</p>
+                    <p className="font-semibold text-gray-900 mt-0.5">{entitlement.workspace.planCode ?? entitlement.profilePlan}</p>
+                  </div>
+                  <div className="rounded-xl border border-gray-100 bg-gray-50 px-3 py-2">
+                    <p className="text-[11px] text-gray-500">Status</p>
+                    <p className="font-semibold text-gray-900 mt-0.5">{entitlement.workspace.status ?? '—'}</p>
+                  </div>
+                  <div className="rounded-xl border border-gray-100 bg-gray-50 px-3 py-2">
+                    <p className="text-[11px] text-gray-500">Trial</p>
+                    <p className={`font-semibold mt-0.5 ${entitlement.trialExpired ? 'text-rose-700' : 'text-gray-900'}`}>
+                      {entitlement.trialLabelFr}
+                    </p>
+                  </div>
+                  <div className="rounded-xl border border-gray-100 bg-gray-50 px-3 py-2">
+                    <p className="text-[11px] text-gray-500">Documents / OCR</p>
+                    <p className="font-semibold text-gray-900 mt-0.5 tabular-nums">
+                      {entitlement.documents.unlimited ? `${entitlement.documents.used} / ∞` : `${entitlement.documents.used} / ${entitlement.documents.limit ?? '—'}`}
+                      {' · '}
+                      {entitlement.ocr.unlimited ? `${entitlement.ocr.used} / ∞` : `${entitlement.ocr.used} / ${entitlement.ocr.limit ?? '—'}`}
+                    </p>
+                  </div>
+                </div>
+              </div>
+            ) : null}
+
             <div className="bg-white rounded-2xl shadow-sm border border-gray-100 min-w-0 w-full max-w-full overflow-x-visible">
               <div className="px-6 py-4 border-b border-gray-100">
                 <p className="text-sm font-semibold text-gray-900">Subscriptions</p>
@@ -525,6 +585,22 @@ export default function UserDetailsAdminClient() {
           </div>
         </div>
       )}
+      {planModalOpen && user ? (
+        <UserPlanOverrideModal
+          userId={user.id}
+          email={user.email}
+          onClose={() => setPlanModalOpen(false)}
+          onSaved={(snapshot) => {
+            setEntitlement(snapshot);
+            setPlan(snapshot.profilePlan);
+            setPlanModalOpen(false);
+            setSaveSuccess(true);
+            window.setTimeout(() => setSaveSuccess(false), 3000);
+            void reload({ syncForm: false });
+            router.refresh();
+          }}
+        />
+      ) : null}
     </AdminShell>
   );
 }

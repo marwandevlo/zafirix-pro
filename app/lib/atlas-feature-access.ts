@@ -9,12 +9,15 @@ import {
   countCompaniesInWorkspace,
   countUsageThisMonth,
   ensureWorkspaceSubscription,
-  getPlanByCode,
   listSubscriptionPlans,
 } from '@/app/lib/atlas-billing-server';
 import { computeTrialStatus } from '@/app/lib/atlas-trial-manager';
 import { logAuditEvent } from '@/app/lib/atlas-audit-log';
 import { shouldBypassBillingEnforcement } from '@/app/lib/atlas-billing-bypass';
+import {
+  hasAdminGrantedEntitlement,
+  isAdminOverrideActive,
+} from '@/app/lib/admin/admin-entitlement-guard';
 
 export type FeatureAccessResult = {
   allowed: boolean;
@@ -74,7 +77,7 @@ export async function canUseFeature(
   const quota = await getRemainingQuota(db, userId, workspaceId, featureCode);
   const summary = await buildBillingUsageSummary(db, userId, workspaceId);
 
-  if (summary.trialExpired && summary.subscription?.status === 'trial') {
+  if (summary.trialExpired && summary.subscription?.status === 'trial' && !summary.adminOverride) {
     return {
       allowed: false,
       featureCode,
@@ -136,6 +139,11 @@ export async function buildBillingUsageSummary(
   const plan = sub ? plans.find((p) => p.id === sub!.planId) : plans.find((p) => p.code === 'FREE');
   const trial = computeTrialStatus(sub?.trialEndsAt ?? null, sub?.status ?? null);
   const bypassBilling = userId ? await shouldBypassBillingEnforcement(db, userId) : false;
+  const adminOverride =
+    isAdminOverrideActive({
+      adminOverride: sub?.adminOverride,
+      adminOverrideUntil: sub?.adminOverrideUntil,
+    }) || (userId ? await hasAdminGrantedEntitlement(db, userId) : false);
 
   const quotas: FeatureQuota[] = [];
   for (const code of ATLAS_FEATURE_CODES) {
@@ -173,8 +181,9 @@ export async function buildBillingUsageSummary(
     workspaceId,
     subscription: sub,
     quotas,
-    trialDaysRemaining: bypassBilling ? null : trial.daysRemaining,
-    trialExpired: bypassBilling ? false : trial.expired,
+    trialDaysRemaining: bypassBilling || adminOverride ? null : trial.daysRemaining,
+    trialExpired: bypassBilling || adminOverride ? false : trial.expired,
+    adminOverride,
   };
 }
 

@@ -6,6 +6,10 @@ import { revalidateAdminSurfaces } from '@/app/lib/admin/revalidate-admin-paths'
 import { isOwnerEmail } from '@/app/lib/owner';
 import { roleGrantsAdminAccess } from '@/app/lib/admin/can-access-admin';
 import { applyAdminProfilePlanToEntitlements } from '@/app/lib/atlas-subscription-sync';
+import {
+  applyAdminEntitlementOverride,
+  loadAdminEntitlementSnapshot,
+} from '@/app/lib/admin/admin-entitlement-override';
 import { queueApprovalEmail } from '@/app/lib/send-approval-email';
 import { isAccountAcceptedStatus } from '@/app/lib/email-account-status';
 
@@ -97,6 +101,8 @@ export async function GET(request: NextRequest, ctx: { params: Promise<{ id: str
   const authUser = userWrap?.user ?? null;
   const appMeta = (authUser?.app_metadata ?? {}) as Record<string, unknown>;
 
+  const entitlement = await loadAdminEntitlementSnapshot(admin, userId).catch(() => null);
+
   return NextResponse.json({
     user: {
       id: userId,
@@ -112,6 +118,7 @@ export async function GET(request: NextRequest, ctx: { params: Promise<{ id: str
     },
     subscriptions: (subs ?? []) as SubscriptionRow[],
     adminLogs: (logs ?? []) as AdminLogRow[],
+    entitlement,
   });
 }
 
@@ -196,11 +203,18 @@ export async function PATCH(request: NextRequest, ctx: { params: Promise<{ id: s
     );
   }
 
-  // Rewrite atlas_subscriptions when plan changes, then re-assert profiles.plan
-  // (syncProfileEntitlementFromAtlas can otherwise derive 'free' from trial rows).
+  // Rewrite atlas_subscriptions + workspace/Zafirix rows so document AI quota
+  // checks honor the admin-assigned plan (skips expired-trial blocks).
   if (plan) {
-    const ent = await applyAdminProfilePlanToEntitlements(admin, userId, plan);
-    if (!ent.ok) return NextResponse.json({ error: ent.error }, { status: 400 });
+    const ent = await applyAdminEntitlementOverride(admin, userId, {
+      plan: plan as 'free' | 'pro' | 'vip' | 'enterprise',
+      permanent: true,
+      note: 'admin_users_patch',
+    });
+    if (!ent.ok) {
+      const fallback = await applyAdminProfilePlanToEntitlements(admin, userId, plan);
+      if (!fallback.ok) return NextResponse.json({ error: fallback.error }, { status: 400 });
+    }
   }
 
   // Read back and verify persistence after ALL writes (profile + entitlements).

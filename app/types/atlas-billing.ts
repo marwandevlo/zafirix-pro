@@ -46,6 +46,9 @@ export type WorkspaceSubscription = {
   expiresAt: string | null;
   cancelledAt: string | null;
   trialEndsAt: string | null;
+  adminOverride?: boolean;
+  adminOverrideUntil?: string | null;
+  adminOverrideNote?: string | null;
 };
 
 export type FeatureQuota = {
@@ -63,6 +66,7 @@ export type BillingUsageSummary = {
   quotas: FeatureQuota[];
   trialDaysRemaining: number | null;
   trialExpired: boolean;
+  adminOverride?: boolean;
 };
 
 export type PlanChangeRequest = {

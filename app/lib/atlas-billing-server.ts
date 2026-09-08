@@ -38,6 +38,10 @@ type SubRow = {
   cancelled_at: string | null;
   trial_ends_at: string | null;
   created_at: string;
+  admin_override?: boolean | null;
+  admin_override_until?: string | null;
+  admin_override_note?: string | null;
+  metadata?: unknown;
 };
 
 export async function listSubscriptionPlans(db: SupabaseClient): Promise<AtlasSubscriptionPlan[]> {
@@ -151,6 +155,9 @@ async function mapSubscription(db: SupabaseClient, row: SubRow): Promise<Workspa
     expiresAt: row.expires_at,
     cancelledAt: row.cancelled_at,
     trialEndsAt: row.trial_ends_at,
+    adminOverride: Boolean(row.admin_override) || (row.metadata as { admin_override?: boolean } | null)?.admin_override === true,
+    adminOverrideUntil: row.admin_override_until ?? null,
+    adminOverrideNote: row.admin_override_note ?? null,
   };
 }
 

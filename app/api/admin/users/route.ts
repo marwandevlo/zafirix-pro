@@ -4,6 +4,7 @@ import { atlasDataBackend } from '@/app/lib/atlas-data-source';
 import { getSupabaseServiceRoleClient } from '@/app/lib/supabase-admin';
 import { requireAdmin } from '@/app/lib/admin/require-admin';
 import { enrichUsersWithActivity } from '@/app/lib/atlas-user-activity';
+import { enrichAdminUsersWithBilling } from '@/app/lib/admin/admin-entitlement-override';
 
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
@@ -91,8 +92,14 @@ export async function GET(request: NextRequest) {
       });
 
     const enriched = await enrichUsersWithActivity(users);
+    let billed = enriched;
+    try {
+      billed = await enrichAdminUsersWithBilling(admin, enriched);
+    } catch (e) {
+      console.warn('[api/admin/users] billing_enrich_failed', e instanceof Error ? e.message : e);
+    }
 
-    return NextResponse.json({ users: enriched });
+    return NextResponse.json({ users: billed });
   } catch (e) {
     const message = e instanceof Error ? e.message : 'Erreur';
     return NextResponse.json({ error: 'server_error', message }, { status: 500 });
