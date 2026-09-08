@@ -75,6 +75,23 @@ function parseSpreadsheet(buffer: Buffer): string {
   return parts.join('\n\n');
 }
 
+async function parseDocxText(buffer: Buffer): Promise<string> {
+  const JSZip = (await import('jszip')).default;
+  const zip = await JSZip.loadAsync(buffer);
+  const xml = await zip.file('word/document.xml')?.async('string');
+  if (!xml) return '';
+  return xml
+    .replace(/<w:tab[^/]*\/>/g, '\t')
+    .replace(/<w:br[^/]*\/>/g, '\n')
+    .replace(/<\/w:p>/g, '\n')
+    .replace(/<[^>]+>/g, '')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&amp;/g, '&')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+}
+
 export async function parseAssistantUploadedFile(
   buffer: Buffer,
   filename: string,
@@ -98,6 +115,21 @@ export async function parseAssistantUploadedFile(
     lower.endsWith('.xls')
   ) {
     rawText = parseSpreadsheet(buffer);
+  } else if (
+    mimeType.includes('wordprocessingml') ||
+    mimeType.includes('msword') ||
+    lower.endsWith('.docx') ||
+    lower.endsWith('.doc')
+  ) {
+    try {
+      if (lower.endsWith('.docx') || mimeType.includes('wordprocessingml')) {
+        rawText = await parseDocxText(buffer);
+      } else {
+        rawText = `[Document Word legacy (.doc) — convertissez en .docx ou PDF pour une meilleure extraction. Fichier: ${filename}]`;
+      }
+    } catch {
+      rawText = `[Document Word — extraction impossible. Fichier: ${filename}]`;
+    }
   } else if (mimeType.includes('pdf') || lower.endsWith('.pdf')) {
     try {
       const png = await renderPdfFirstPageToPng(buffer);

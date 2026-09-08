@@ -5,12 +5,15 @@ import {
   Bot,
   Copy,
   Download,
+  FileText,
   Loader2,
   MessageSquare,
+  Paperclip,
   Save,
   Send,
   Sparkles,
   User,
+  X,
 } from 'lucide-react';
 import { persistLegalDocument } from '@/app/juridique/juridique-persist';
 import { splitJuridiqueStreamBuffer } from '@/app/lib/atlas-juridique-chat-server';
@@ -35,7 +38,52 @@ type Company = {
 type ChatMessage = {
   role: 'user' | 'assistant';
   content: string;
+  attachmentName?: string;
 };
+
+type PendingAttachment = {
+  file: File;
+  previewUrl: string | null;
+};
+
+const MAX_ATTACHMENT_BYTES = 10 * 1024 * 1024;
+const ACCEPT_ATTACHMENTS = '.pdf,.doc,.docx,.txt,.png,.jpg,.jpeg,application/pdf,text/plain,image/png,image/jpeg';
+
+function isAllowedChatFile(file: File): boolean {
+  const lower = file.name.toLowerCase();
+  if (/\.(pdf|docx?|txt|png|jpe?g)$/i.test(lower)) return true;
+  return [
+    'application/pdf',
+    'text/plain',
+    'application/msword',
+    'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    'image/png',
+    'image/jpeg',
+  ].includes(file.type);
+}
+
+function fileToBase64(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const result = reader.result;
+      if (typeof result !== 'string') {
+        reject(new Error('read_failed'));
+        return;
+      }
+      const base64 = result.includes(',') ? result.split(',')[1]! : result;
+      resolve(base64);
+    };
+    reader.onerror = () => reject(new Error('read_failed'));
+    reader.readAsDataURL(file);
+  });
+}
+
+function formatFileSize(bytes: number): string {
+  if (bytes < 1024) return `${bytes} o`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} Ko`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} Mo`;
+}
 
 const STARTERS_FR = [
   'Rédige un contrat de bail commercial pour un local à Casablanca',
@@ -131,25 +179,101 @@ export function JuridiqueLegalChatPanel({ companies, lang = 'fr' }: Props) {
   const [saveStatus, setSaveStatus] = useState('');
   const [copyStatus, setCopyStatus] = useState('');
   const [streamingReply, setStreamingReply] = useState('');
+  const [pendingAttachment, setPendingAttachment] = useState<PendingAttachment | null>(null);
+  const [attachError, setAttachError] = useState('');
 
   const endRef = useRef<HTMLDivElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const selectedCompany = companies.find((c) => c.id === selectedCompanyId) ?? null;
+
+  useEffect(() => {
+    return () => {
+      if (pendingAttachment?.previewUrl) URL.revokeObjectURL(pendingAttachment.previewUrl);
+    };
+  }, [pendingAttachment?.previewUrl]);
+
+  const clearAttachment = useCallback(() => {
+    setPendingAttachment((prev) => {
+      if (prev?.previewUrl) URL.revokeObjectURL(prev.previewUrl);
+      return null;
+    });
+    setAttachError('');
+    if (fileInputRef.current) fileInputRef.current.value = '';
+  }, []);
+
+  const handleFileSelect = useCallback(
+    (fileList: FileList | null) => {
+      const file = fileList?.[0];
+      if (!file) return;
+      setAttachError('');
+
+      if (!isAllowedChatFile(file)) {
+        setAttachError(t('Formats: PDF, Word, TXT, PNG, JPG.', 'الصيغ: PDF، Word، TXT، PNG، JPG.'));
+        return;
+      }
+      if (file.size > MAX_ATTACHMENT_BYTES) {
+        setAttachError(t('Fichier max 10 Mo.', 'الحد الأقصى 10 ميغابايت.'));
+        return;
+      }
+
+      clearAttachment();
+      const previewUrl = file.type.startsWith('image/') ? URL.createObjectURL(file) : null;
+      setPendingAttachment({ file, previewUrl });
+    },
+    [clearAttachment, t],
+  );
 
   useEffect(() => {
     endRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages, loading, streamingReply]);
 
   const sendMessage = useCallback(
-    async (text: string) => {
+    async (text: string, attachmentOverride?: PendingAttachment | null) => {
       const trimmed = text.trim();
-      if (!trimmed || loading) return;
+      const attachment = attachmentOverride ?? pendingAttachment;
+      if ((!trimmed && !attachment) || loading) return;
 
-      const userMsg: ChatMessage = { role: 'user', content: trimmed };
+      const displayText =
+        trimmed ||
+        t(`📎 ${attachment?.file.name ?? 'Pièce jointe'}`, `📎 ${attachment?.file.name ?? 'مرفق'}`);
+
+      const userMsg: ChatMessage = {
+        role: 'user',
+        content: displayText,
+        attachmentName: attachment?.file.name,
+      };
       setMessages((m) => [...m, userMsg]);
       setInput('');
       setLoading(true);
       setStreamingReply('');
       setSaveStatus('');
+      setAttachError('');
+
+      let attachmentPayload: { filename: string; mimeType: string; base64: string } | undefined;
+      if (attachment) {
+        try {
+          attachmentPayload = {
+            filename: attachment.file.name,
+            mimeType: attachment.file.type || 'application/octet-stream',
+            base64: await fileToBase64(attachment.file),
+          };
+        } catch {
+          setMessages((m) => [
+            ...m,
+            { role: 'assistant', content: t('Impossible de lire le fichier.', 'تعذّر قراءة الملف.') },
+          ]);
+          setLoading(false);
+          return;
+        }
+        clearAttachment();
+      }
+
+      const apiMessage =
+        trimmed ||
+        t(
+          'Analyse la pièce jointe et intègre son contenu au document juridique.',
+          'حلّل المرفق ودمج محتواه في الوثيقة القانونية.',
+        );
 
       try {
         const res = await fetch('/api/juridique/chat?stream=1', {
@@ -157,12 +281,13 @@ export function JuridiqueLegalChatPanel({ companies, lang = 'fr' }: Props) {
           credentials: 'include',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            message: trimmed,
+            message: apiMessage,
             history: messages.filter((m) => m.role === 'user' || m.role === 'assistant'),
             documentDraft,
             documentTitle,
             company: selectedCompany,
             stream: true,
+            attachment: attachmentPayload ?? null,
           }),
         });
 
@@ -200,7 +325,7 @@ export function JuridiqueLegalChatPanel({ companies, lang = 'fr' }: Props) {
         setLoading(false);
       }
     },
-    [documentDraft, documentTitle, loading, messages, selectedCompany, t],
+    [clearAttachment, documentDraft, documentTitle, loading, messages, pendingAttachment, selectedCompany, t],
   );
 
   const copyDocument = async () => {
@@ -296,6 +421,11 @@ export function JuridiqueLegalChatPanel({ companies, lang = 'fr' }: Props) {
                 }`}
               >
                 {m.content}
+                {m.attachmentName ? (
+                  <p className="mt-2 text-[11px] opacity-80 flex items-center gap-1">
+                    <Paperclip size={11} /> {m.attachmentName}
+                  </p>
+                ) : null}
               </div>
               {m.role === 'user' && (
                 <div className="w-8 h-8 rounded-full bg-gray-200 flex items-center justify-center shrink-0">
@@ -339,23 +469,76 @@ export function JuridiqueLegalChatPanel({ companies, lang = 'fr' }: Props) {
           </div>
         ) : null}
 
-        <div className="border-t border-gray-100 p-4 flex gap-2 shrink-0">
-          <input
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            onKeyDown={(e) => e.key === 'Enter' && !e.shiftKey && (e.preventDefault(), void sendMessage(input))}
-            placeholder={t('Votre instruction juridique…', 'تعليماتك القانونية…')}
-            disabled={loading}
-            className="flex-1 px-4 py-2.5 text-sm border border-gray-200 rounded-xl focus:outline-none focus:border-amber-400 disabled:opacity-60"
-          />
-          <button
-            type="button"
-            onClick={() => void sendMessage(input)}
-            disabled={loading || !input.trim()}
-            className="px-4 py-2.5 rounded-xl bg-amber-500 text-white disabled:opacity-50 hover:bg-amber-600 transition-colors"
-          >
-            {loading ? <Loader2 size={18} className="animate-spin" /> : <Send size={18} />}
-          </button>
+        <div className="border-t border-gray-100 p-4 shrink-0 space-y-2">
+          {pendingAttachment ? (
+            <div className="flex items-center gap-2 px-3 py-2 rounded-xl border border-amber-200 bg-amber-50/80">
+              {pendingAttachment.previewUrl ? (
+                <img
+                  src={pendingAttachment.previewUrl}
+                  alt=""
+                  className="w-10 h-10 rounded-lg object-cover border border-amber-200 shrink-0"
+                />
+              ) : (
+                <div className="w-10 h-10 rounded-lg bg-white border border-amber-200 flex items-center justify-center shrink-0">
+                  <FileText size={18} className="text-amber-700" />
+                </div>
+              )}
+              <div className="flex-1 min-w-0">
+                <p className="text-xs font-semibold text-gray-800 truncate">{pendingAttachment.file.name}</p>
+                <p className="text-[10px] text-gray-500">{formatFileSize(pendingAttachment.file.size)}</p>
+              </div>
+              <button
+                type="button"
+                onClick={clearAttachment}
+                className="p-1.5 rounded-lg text-gray-500 hover:bg-white hover:text-gray-800"
+                aria-label={t('Retirer la pièce jointe', 'إزالة المرفق')}
+              >
+                <X size={14} />
+              </button>
+            </div>
+          ) : null}
+          {attachError ? (
+            <p className="text-xs text-red-600 px-1">{attachError}</p>
+          ) : null}
+          <div className="flex gap-2 items-end">
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept={ACCEPT_ATTACHMENTS}
+              className="hidden"
+              onChange={(e) => handleFileSelect(e.target.files)}
+            />
+            <button
+              type="button"
+              onClick={() => fileInputRef.current?.click()}
+              disabled={loading}
+              className="p-2.5 rounded-xl border border-gray-200 text-gray-600 hover:bg-gray-50 hover:text-amber-700 disabled:opacity-50 shrink-0"
+              title={t('Joindre PDF, Word, TXT ou image', 'إرفاق PDF أو Word أو TXT أو صورة')}
+              aria-label={t('Joindre un fichier', 'إرفاق ملف')}
+            >
+              <Paperclip size={18} />
+            </button>
+            <input
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              onKeyDown={(e) =>
+                e.key === 'Enter' &&
+                !e.shiftKey &&
+                (e.preventDefault(), void sendMessage(input))
+              }
+              placeholder={t('Votre instruction juridique…', 'تعليماتك القانونية…')}
+              disabled={loading}
+              className="flex-1 px-4 py-2.5 text-sm border border-gray-200 rounded-xl focus:outline-none focus:border-amber-400 disabled:opacity-60"
+            />
+            <button
+              type="button"
+              onClick={() => void sendMessage(input)}
+              disabled={loading || (!input.trim() && !pendingAttachment)}
+              className="px-4 py-2.5 rounded-xl bg-amber-500 text-white disabled:opacity-50 hover:bg-amber-600 transition-colors shrink-0"
+            >
+              {loading ? <Loader2 size={18} className="animate-spin" /> : <Send size={18} />}
+            </button>
+          </div>
         </div>
       </div>
 

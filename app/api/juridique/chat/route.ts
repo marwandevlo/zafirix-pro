@@ -2,6 +2,7 @@ import Anthropic from '@anthropic-ai/sdk';
 import { NextRequest, NextResponse } from 'next/server';
 import { authenticateAiRequest } from '@/app/lib/ai-auth-server';
 import { checkAiRateLimit } from '@/app/lib/ai-rate-limit';
+import { parseAssistantUploadedFile } from '@/app/lib/atlas-assistant-file-parser';
 import { ATLAS_AI_SAFETY_NOTICE } from '@/app/lib/atlas-ai-safety';
 import { captureAtlasServerException } from '@/app/lib/atlas-server-log';
 import { getAnthropicApiKey } from '@/app/lib/anthropic-env';
@@ -10,12 +11,25 @@ import {
   buildJuridiqueChatMessages,
   buildJuridiqueChatSystemPrompt,
   parseJuridiqueChatResponse,
+  type JuridiqueChatAttachment,
   type JuridiqueChatMessage,
 } from '@/app/lib/atlas-juridique-chat-server';
 import type { JuridiqueCompany } from '@/app/juridique/juridique-types';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
+
+const MAX_ATTACHMENT_BYTES = 10 * 1024 * 1024;
+
+const ALLOWED_ATTACHMENT_TYPES = [
+  'application/pdf',
+  'text/plain',
+  'application/msword',
+  'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  'image/png',
+  'image/jpeg',
+  'image/jpg',
+];
 
 type ChatBody = {
   message?: string;
@@ -24,7 +38,48 @@ type ChatBody = {
   documentTitle?: string;
   company?: JuridiqueCompany | null;
   stream?: boolean;
+  attachment?: {
+    filename?: string;
+    mimeType?: string;
+    base64?: string;
+  } | null;
 };
+
+function isAllowedAttachment(filename: string, mimeType: string): boolean {
+  const lower = filename.toLowerCase();
+  if (ALLOWED_ATTACHMENT_TYPES.includes(mimeType)) return true;
+  return /\.(pdf|docx?|txt|png|jpe?g)$/i.test(lower);
+}
+
+async function resolveAttachment(
+  raw: ChatBody['attachment'],
+  userHint: string,
+): Promise<JuridiqueChatAttachment | null> {
+  if (!raw?.base64?.trim()) return null;
+
+  const filename = String(raw.filename ?? 'piece_jointe').trim() || 'piece_jointe';
+  const mimeType = String(raw.mimeType ?? 'application/octet-stream').trim();
+
+  if (!isAllowedAttachment(filename, mimeType)) {
+    throw new Error('unsupported_file_type');
+  }
+
+  const buffer = Buffer.from(raw.base64, 'base64');
+  if (buffer.length > MAX_ATTACHMENT_BYTES) {
+    throw new Error('file_too_large');
+  }
+  if (buffer.length === 0) {
+    throw new Error('empty_file');
+  }
+
+  const parsed = await parseAssistantUploadedFile(buffer, filename, mimeType, userHint);
+  return {
+    filename: parsed.filename,
+    mimeType: parsed.mimeType,
+    textContent: parsed.textContent,
+    truncated: parsed.truncated,
+  };
+}
 
 async function* streamAnthropicJuridiqueChat(params: {
   system: string;
@@ -69,10 +124,16 @@ export async function POST(request: NextRequest) {
   }
 
   const body = (await request.json().catch(() => ({}))) as ChatBody;
-  const message = String(body.message ?? '').trim();
-  if (!message) {
+  const messageRaw = String(body.message ?? '').trim();
+  const hasAttachmentPayload = Boolean(body.attachment?.base64?.trim());
+
+  if (!messageRaw && !hasAttachmentPayload) {
     return NextResponse.json({ error: 'message_required' }, { status: 400 });
   }
+
+  const message =
+    messageRaw ||
+    'Analyse la pièce jointe, extrais les éléments juridiques pertinents et propose une mise à jour du brouillon.';
 
   const history = Array.isArray(body.history) ? body.history : [];
   const documentDraft = String(body.documentDraft ?? '');
@@ -80,13 +141,28 @@ export async function POST(request: NextRequest) {
   const company = body.company ?? null;
   const stream = body.stream === true || request.nextUrl.searchParams.get('stream') === '1';
 
-  const system = buildJuridiqueChatSystemPrompt({ documentDraft, documentTitle, company });
+  let attachment: JuridiqueChatAttachment | null = null;
+  try {
+    attachment = await resolveAttachment(body.attachment, message);
+  } catch (err) {
+    const code = err instanceof Error ? err.message : 'attachment_failed';
+    const status = code === 'file_too_large' ? 413 : code === 'unsupported_file_type' ? 415 : 400;
+    const messages: Record<string, string> = {
+      file_too_large: 'Fichier trop volumineux (max 10 Mo).',
+      unsupported_file_type: 'Format non supporté. Utilisez PDF, Word, TXT, PNG ou JPG.',
+      empty_file: 'Fichier vide.',
+    };
+    return NextResponse.json({ error: code, message: messages[code] ?? 'Pièce jointe invalide.' }, { status });
+  }
+
+  const system = buildJuridiqueChatSystemPrompt({ documentDraft, documentTitle, company, attachment });
   const messages = buildJuridiqueChatMessages({
     message,
     history,
     documentDraft,
     documentTitle,
     company,
+    attachment,
   });
 
   try {
@@ -118,6 +194,7 @@ export async function POST(request: NextRequest) {
       reply: parsed.reply,
       document: parsed.document || documentDraft,
       documentTitle: parsed.documentTitle,
+      attachment: attachment ? { filename: attachment.filename, truncated: attachment.truncated } : null,
       safetyNotice: ATLAS_AI_SAFETY_NOTICE,
     });
   } catch (error) {

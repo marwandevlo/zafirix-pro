@@ -7,12 +7,20 @@ export type JuridiqueChatMessage = {
   content: string;
 };
 
+export type JuridiqueChatAttachment = {
+  filename: string;
+  mimeType: string;
+  textContent: string;
+  truncated?: boolean;
+};
+
 export type JuridiqueChatRequest = {
   message: string;
   history: JuridiqueChatMessage[];
   documentDraft: string;
   documentTitle: string;
   company?: JuridiqueCompany | null;
+  attachment?: JuridiqueChatAttachment | null;
 };
 
 export type JuridiqueChatParsed = {
@@ -28,6 +36,7 @@ export function buildJuridiqueChatSystemPrompt(params: {
   documentDraft: string;
   documentTitle: string;
   company?: JuridiqueCompany | null;
+  attachment?: JuridiqueChatAttachment | null;
 }): string {
   const companyBlock = params.company
     ? `
@@ -44,11 +53,16 @@ SOCIÉTÉ ACTIVE:
     ? `\nBROUILLON ACTUEL (${params.documentTitle || 'Document juridique'}):\n---\n${params.documentDraft.trim()}\n---\n`
     : '\nAucun brouillon pour le moment — l\'utilisateur peut demander la rédaction d\'un nouveau document.\n';
 
+  const attachmentBlock = params.attachment?.textContent?.trim()
+    ? `\nPIÈCE JOINTE ANALYSÉE (${params.attachment.filename}):\n---\n${params.attachment.textContent.trim()}\n---\nUtilise ce contenu comme référence pour rédiger, corriger ou fusionner avec le brouillon.\n`
+    : '';
+
   return `Tu es un assistant juridique marocain expert (droit des sociétés, RC, contrats, PV, statuts SARL/SA).
 Tu travailles en mode conversationnel : l'utilisateur peut demander des révisions itératives ("change le prix à 200k", "ajoute une clause de confidentialité", "réécris l'article 3", "supprime le paragraphe 2").
 
 ${companyBlock}
 ${draftBlock}
+${attachmentBlock}
 
 FORMAT DE RÉPONSE OBLIGATOIRE (deux sections, dans cet ordre exact):
 ${JURIDIQUE_CHAT_REPLY_MARKER}
@@ -76,7 +90,11 @@ export function buildJuridiqueChatMessages(params: JuridiqueChatRequest): Anthro
     messages.push({ role: msg.role, content: msg.content.trim() });
   }
 
-  messages.push({ role: 'user', content: params.message.trim() });
+  let userContent = params.message.trim();
+  if (params.attachment?.filename) {
+    userContent = `${userContent}\n\n[J'ai joint le fichier « ${params.attachment.filename} » pour analyse et intégration au document.]`.trim();
+  }
+  messages.push({ role: 'user', content: userContent });
   return messages;
 }
 
