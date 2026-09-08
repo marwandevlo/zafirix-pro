@@ -8,7 +8,7 @@ export type PersistLegalDocumentInput = {
   procedureLabel: string;
   content: string;
   formData?: Record<string, string>;
-  linkSource: 'juridique_formalite' | 'juridique_documents' | 'juridique_modification' | 'juridique_creation';
+  linkSource: 'juridique_formalite' | 'juridique_documents' | 'juridique_modification' | 'juridique_creation' | 'juridique_chat';
 };
 
 export async function persistLegalDocument(

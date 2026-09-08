@@ -1,17 +1,18 @@
 'use client';
 
 import type { LucideIcon } from 'lucide-react';
-import { Building2, Gavel, History, Landmark, Lock, RefreshCw, Scale } from 'lucide-react';
+import { Building2, Gavel, History, Landmark, Lock, MessageSquare, RefreshCw, Scale } from 'lucide-react';
 import type { JuridiqueUiLocale } from '@/app/types/atlas-juridique-categories';
 import { juridiqueLabel } from '@/app/types/atlas-juridique-categories';
 
-export type JuridiqueTabId = 'creation' | 'modifications' | 'formalites' | 'documents' | 'pv' | 'vault' | 'historique';
+export type JuridiqueTabId = 'creation' | 'modifications' | 'formalites' | 'documents' | 'assistant' | 'pv' | 'vault' | 'historique';
 
 const TABS: { id: JuridiqueTabId; labelFr: string; labelAr: string; icon: LucideIcon }[] = [
   { id: 'creation', labelFr: 'Création', labelAr: 'التأسيس', icon: Building2 },
   { id: 'modifications', labelFr: 'Modifications', labelAr: 'التعديلات', icon: RefreshCw },
   { id: 'formalites', labelFr: 'Formalités juridiques', labelAr: 'الإجراءات القانونية', icon: Landmark },
   { id: 'documents', labelFr: 'Documents juridiques', labelAr: 'الوثائق القانونية', icon: Scale },
+  { id: 'assistant', labelFr: 'Assistant IA', labelAr: 'المساعد الذكي', icon: MessageSquare },
   { id: 'pv', labelFr: 'PV Tribunal', labelAr: 'محاضر الجمعيات', icon: Gavel },
   { id: 'vault', labelFr: 'Coffre-fort', labelAr: 'الخزنة', icon: Lock },
   { id: 'historique', labelFr: 'Historique', labelAr: 'السجل', icon: History },

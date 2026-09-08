@@ -13,6 +13,7 @@ import { JuridiqueDocumentsPanel } from '@/app/juridique/JuridiqueDocumentsPanel
 import { JuridiquePvGeneratorPanel } from '@/app/juridique/JuridiquePvGeneratorPanel';
 import { CorporateVaultPanel } from '@/app/juridique/CorporateVaultPanel';
 import { JuridiqueFormalitesPanel } from '@/app/juridique/JuridiqueFormalitesPanel';
+import { JuridiqueLegalChatPanel } from '@/app/juridique/JuridiqueLegalChatPanel';
 import { JuridiqueModuleTabs, type JuridiqueTabId } from '@/app/juridique/JuridiqueModuleTabs';
 import { EntityAuditTable } from '@/app/components/history/EntityAuditTable';
 import { persistLegalDocument } from '@/app/juridique/juridique-persist';
@@ -1292,6 +1293,8 @@ export default function JuridiquePage() {
           </div>
         ) : activeTab === 'pv' ? (
           <JuridiquePvGeneratorPanel companies={companies} />
+        ) : activeTab === 'assistant' ? (
+          <JuridiqueLegalChatPanel companies={companies} lang={lang} />
         ) : activeTab === 'vault' ? (
           <CorporateVaultPanel lang={lang} />
         ) : (
