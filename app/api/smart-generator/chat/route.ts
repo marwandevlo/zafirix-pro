@@ -90,7 +90,7 @@ async function* streamAnthropicSmartGeneratorChat(params: {
   const client = new Anthropic({ apiKey });
   const stream = client.messages.stream({
     model: 'claude-sonnet-4-5',
-    max_tokens: 8192,
+    max_tokens: 16384,
     system: params.system,
     messages: params.messages,
   });
@@ -129,7 +129,7 @@ export async function POST(request: NextRequest) {
 
   const message =
     messageRaw ||
-    'Analyse la pièce jointe et génère ou mets à jour le document commercial correspondant.';
+    'Analyse la pièce jointe et exécute ma consigne librement (digitalisation, reformatage, calculs, traduction, clauses).';
 
   const history = Array.isArray(body.history) ? body.history : [];
   const documentDraft = String(body.documentDraft ?? '');
@@ -182,7 +182,7 @@ export async function POST(request: NextRequest) {
     const client = new Anthropic({ apiKey });
     const response = await client.messages.create({
       model: 'claude-sonnet-4-5',
-      max_tokens: 8192,
+      max_tokens: 16384,
       system,
       messages,
     });

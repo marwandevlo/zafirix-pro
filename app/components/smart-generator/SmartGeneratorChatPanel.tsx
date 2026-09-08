@@ -19,6 +19,10 @@ import {
 } from 'lucide-react';
 import { companyToHeader } from '@/app/components/smart-generator/SmartGeneratorLegalHeaderPanel';
 import {
+  ChatMessageBody,
+  SmartGeneratorDocumentPreview,
+} from '@/app/components/smart-generator/SmartGeneratorDocumentPreview';
+import {
   parseSmartGeneratorChatResponse,
   splitSmartGeneratorStreamBuffer,
 } from '@/app/lib/atlas-smart-generator-chat-server';
@@ -40,11 +44,11 @@ const MAX_ATTACHMENT_BYTES = 10 * 1024 * 1024;
 const ACCEPT_ATTACHMENTS = '.pdf,.doc,.docx,.txt,.png,.jpg,.jpeg,application/pdf,text/plain,image/png,image/jpeg';
 
 const STARTERS = [
-  'Génère une facture pour prestations comptables — 5000 MAD HT, TVA 20%',
-  'Crée un devis pour 3 postes : audit, conseil, formation',
-  'Digitalise cette facture scannée et formate-la officiellement',
-  'Change la quantité du 2e article à 10 et recalcule les totaux',
-  'Ajoute les mentions ICE/IF/RC de ma société en en-tête',
+  'Calcule les totaux nets avec TVA 20%, ajoute une clause de retenue de garantie 5%, restructure le tableau en 4 colonnes et traduis les en-têtes en arabe',
+  'Génère une facture pour prestations comptables — 5000 MAD HT, TVA 20%, mentions ICE/IF/RC',
+  'Digitalise cette pièce jointe en devis officiel avec tableau markdown et sous-totaux',
+  'Réécris entièrement le document en darija avec les mêmes montants',
+  'Ajoute une ligne transport 800 MAD HT et recalcule le net à payer',
 ];
 
 function isAllowedChatFile(file: File): boolean {
@@ -165,7 +169,7 @@ export function SmartGeneratorChatPanel({
     {
       role: 'assistant',
       content:
-        'Bonjour — je suis votre **Smart Generator IA**. Décrivez librement le document souhaité (facture, devis, bon de commande, reçu, bulletin, lettre…) ou joignez une note/scan à digitaliser. Le document se met à jour en direct à droite.\n\n💡 Exemples : « Change la TVA à 14% », « Ajoute une ligne transport 800 MAD », « Passe en arabe ».',
+        'Bonjour — je suis votre **Smart Generator IA** en mode ouvert. Décrivez n\'importe quelle consigne, simple ou multi-étapes : calculs TVA, clauses custom, reformatage de tableaux, traduction FR/AR, digitalisation de scans… Le document live à droite accepte **markdown**, tableaux et mise en forme officielle marocaine.\n\n💡 Exemple : « Calcule le net TTC avec 20% TVA, ajoute retenue 5%, passe le tableau en 4 colonnes et traduis en arabe ».',
     },
   ]);
   const [input, setInput] = useState('');
@@ -263,7 +267,7 @@ export function SmartGeneratorChatPanel({
 
       const apiMessage =
         trimmed ||
-        'Analyse la pièce jointe et génère ou mets à jour le document commercial correspondant.';
+        'Exécute ma consigne librement sur la pièce jointe (digitalisation, calculs, reformatage, traduction, clauses).';
 
       try {
         const res = await fetch('/api/smart-generator/chat?stream=1', {
@@ -333,7 +337,7 @@ export function SmartGeneratorChatPanel({
 
   const exportDocument = async (format: 'pdf' | 'excel') => {
     if (!structuredDoc?.lines?.length) {
-      setExportStatus('Export PDF/Excel nécessite un document tabulaire structuré.');
+      setExportStatus('PDF/Excel DGI disponible quand le document contient des lignes tabulaires (JSON structuré).');
       return;
     }
     setExportStatus('Export…');
@@ -406,7 +410,7 @@ export function SmartGeneratorChatPanel({
             </div>
             <div>
               <h2 className="font-bold text-gray-900 text-sm">Smart Generator IA</h2>
-              <p className="text-xs text-gray-500">Conversation · documents dynamiques · DGI Maroc</p>
+              <p className="text-xs text-gray-500">Mode ouvert · multi-étapes · markdown · DGI Maroc</p>
             </div>
           </div>
           <div className="mt-3 flex flex-wrap gap-2 items-center">
@@ -452,7 +456,7 @@ export function SmartGeneratorChatPanel({
                     : 'bg-gray-50 border border-gray-100 text-gray-800'
                 }`}
               >
-                {m.content}
+                {m.role === 'assistant' ? <ChatMessageBody content={m.content} /> : m.content}
                 {m.attachmentName ? (
                   <p className="mt-2 text-[11px] opacity-80 flex items-center gap-1">
                     <Paperclip size={11} /> {m.attachmentName}
@@ -556,7 +560,7 @@ export function SmartGeneratorChatPanel({
                 !e.shiftKey &&
                 (e.preventDefault(), void sendMessage(input))
               }
-              placeholder="Décrivez ou modifiez votre document…"
+              placeholder="Toute consigne — calculs, clauses, tableaux, traduction, multi-étapes…"
               disabled={loading}
               className="flex-1 px-4 py-2.5 text-sm border border-gray-200 rounded-xl focus:outline-none focus:border-indigo-400 disabled:opacity-60"
             />
@@ -577,7 +581,7 @@ export function SmartGeneratorChatPanel({
         <div className="px-5 py-4 border-b border-gray-200 bg-white flex flex-wrap items-center justify-between gap-2 shrink-0">
           <div>
             <h3 className="font-bold text-gray-900 text-sm">{documentTitle}</h3>
-            <p className="text-[11px] text-gray-500">Aperçu live · mise à jour à chaque message</p>
+            <p className="text-[11px] text-gray-500">Aperçu live · markdown · tableaux · calculs</p>
           </div>
           <div className="flex flex-wrap gap-1.5">
             <button
@@ -631,12 +635,7 @@ export function SmartGeneratorChatPanel({
 
         <div className="flex-1 overflow-y-auto p-5">
           {documentDraft.trim() ? (
-            <div className="bg-white rounded-xl border border-gray-200 p-4 text-xs text-gray-800 leading-relaxed whitespace-pre-wrap font-mono min-h-[200px] shadow-sm">
-              {documentDraft}
-              {loading ? (
-                <span className="inline-block w-2 h-4 bg-indigo-400 animate-pulse ml-0.5 align-middle" />
-              ) : null}
-            </div>
+            <SmartGeneratorDocumentPreview content={documentDraft} loading={loading} />
           ) : (
             <div className="text-center py-16 text-gray-400 text-sm">
               <Wand2 size={28} className="mx-auto mb-3 opacity-40 text-indigo-400" />

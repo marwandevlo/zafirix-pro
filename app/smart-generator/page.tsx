@@ -69,7 +69,7 @@ export default function SmartGeneratorPage() {
             </div>
             <div>
               <h1 className="text-xl font-bold text-gray-800">Smart Generator</h1>
-              <BetaSurfaceBadge label="Assistant IA · Documents dynamiques · DGI Maroc" className="mt-0.5" />
+              <BetaSurfaceBadge label="Assistant IA ouvert · Markdown · Multi-étapes · DGI Maroc" className="mt-0.5" />
             </div>
           </div>
         </header>
