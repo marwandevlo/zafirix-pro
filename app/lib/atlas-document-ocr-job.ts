@@ -146,7 +146,7 @@ export async function runPdfOcrJob(
         processingStatus: 'processed',
         extraction: multipage.merged,
         extractedText: multipage.invoices
-          .map((inv) => inv.fournisseur || inv.numero_facture)
+          .map((inv) => inv.supplier_name || inv.invoice_number)
           .filter(Boolean)
           .join(' | '),
         pdfMeta,
