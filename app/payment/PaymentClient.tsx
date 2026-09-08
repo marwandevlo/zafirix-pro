@@ -8,6 +8,7 @@ import { getCompanyAddonById } from '@/app/lib/atlas-company-addons';
 import { isAtlasSupabaseDataEnabled } from '@/app/lib/atlas-data-source';
 import { blockCriticalLocalStorageInProduction } from '@/app/lib/atlas-runtime-guards';
 import { supabase } from '@/app/lib/supabase';
+import { PromoCodeInput, type AppliedPromo } from '@/app/components/billing/PromoCodeInput';
 
 type PaymentMethod = 'card' | 'cmi' | 'manual';
 type ManualProvider = 'cashplus' | 'wafacash' | 'western_union';
@@ -44,6 +45,7 @@ function paymentErrorMessage(json: unknown, fallback = 'Erreur paiement'): strin
   }
   if (error === 'auth_required') return 'Connectez-vous pour confirmer le paiement.';
   if (error === 'invalid_plan') return 'Plan invalide. Retournez à la page tarifs.';
+  if (error === 'invalid_promo') return message || 'Code promo invalide.';
   if (error === 'rate_limited') return 'Trop de tentatives. Réessayez dans une minute.';
   if (error === 'payment_requests_table_missing' || error === 'db_error') {
     return [message || 'Erreur base de données', hint].filter(Boolean).join(' · ') || fallback;
@@ -64,6 +66,9 @@ export default function PaymentClient() {
   const [manualProvider, setManualProvider] = useState<ManualProvider>('cashplus');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
+  const [appliedPromo, setAppliedPromo] = useState<AppliedPromo | null>(null);
+
+  const baseAmountMad = addon?.priceMadYear ?? plan?.price ?? 0;
 
   const priceLabel = useMemo(() => {
     if (addon) return `${addon.priceMadYear.toLocaleString('fr-MA')} MAD/an`;
@@ -72,6 +77,17 @@ export default function PaymentClient() {
       ? formatPriceMadYear(plan.price)
       : `${plan.price.toLocaleString()} ${plan.currency} · ${plan.durationDays ?? 7} jours`;
   }, [plan, addon]);
+
+  const displayAmountMad = appliedPromo?.finalAmount ?? baseAmountMad;
+
+  const displayPriceLabel = useMemo(() => {
+    if (addon) return `${displayAmountMad.toLocaleString('fr-MA')} MAD/an`;
+    if (!plan) return '';
+    if (plan.billingPeriod === 'year') {
+      return `${displayAmountMad.toLocaleString('fr-MA')} MAD/an`;
+    }
+    return `${displayAmountMad.toLocaleString()} ${plan.currency} · ${plan.durationDays ?? 7} jours`;
+  }, [addon, displayAmountMad, plan]);
 
   const confirmManual = async () => {
     if (!plan && !addon) return;
@@ -93,7 +109,11 @@ export default function PaymentClient() {
               'Content-Type': 'application/json',
               Authorization: `Bearer ${token}`,
             },
-            body: JSON.stringify({ addonId: addon.id, provider: manualProvider }),
+            body: JSON.stringify({
+              addonId: addon.id,
+              provider: manualProvider,
+              ...(appliedPromo?.code ? { promoCode: appliedPromo.code } : {}),
+            }),
           });
           const json = (await res.json().catch(() => ({}))) as { error?: string; id?: string; message?: string };
           if (!res.ok) {
@@ -149,7 +169,11 @@ export default function PaymentClient() {
             'Content-Type': 'application/json',
             Authorization: `Bearer ${token}`,
           },
-          body: JSON.stringify({ planId: plan.id, provider: manualProvider }),
+          body: JSON.stringify({
+            planId: plan.id,
+            provider: manualProvider,
+            ...(appliedPromo?.code ? { promoCode: appliedPromo.code } : {}),
+          }),
         });
         const json: unknown = await res.json().catch(() => ({}));
         if (!res.ok) {
@@ -229,7 +253,10 @@ export default function PaymentClient() {
                 <p className="text-xs font-bold uppercase tracking-wide text-indigo-700">Extension Pro · hors forfait</p>
                 <p className="text-xl font-bold text-gray-900 mt-1">{addon.labelFr}</p>
                 <p className="text-sm text-gray-600 mt-1">{addon.descriptionFr}</p>
-                <p className="text-2xl font-extrabold text-gray-900 mt-4">{priceLabel}</p>
+                <p className="text-2xl font-extrabold text-gray-900 mt-4">{displayPriceLabel}</p>
+                {appliedPromo && appliedPromo.discountAmount > 0 ? (
+                  <p className="text-xs text-emerald-700 mt-1 line-through opacity-70">{priceLabel}</p>
+                ) : null}
               </div>
               <div className="px-6 py-6">
                 {error && (
@@ -237,6 +264,12 @@ export default function PaymentClient() {
                     {error}
                   </div>
                 )}
+                <PromoCodeInput
+                  baseAmountMad={baseAmountMad}
+                  onApplied={setAppliedPromo}
+                  disabled={submitting}
+                  className="mb-5"
+                />
                 <p className="text-sm font-semibold text-gray-900">Paiement manuel</p>
                 <p className="text-xs text-gray-500 mt-1">Demande enregistrée — activation après validation.</p>
                 <div className="mt-4 grid grid-cols-1 sm:grid-cols-3 gap-3">
@@ -328,7 +361,10 @@ export default function PaymentClient() {
                       </div>
                       <div className="text-right">
                         <p className="text-xs text-gray-500">Prix</p>
-                        <p className="text-xl font-extrabold text-gray-900 mt-1">{priceLabel}</p>
+                        <p className="text-xl font-extrabold text-gray-900 mt-1">{displayPriceLabel}</p>
+                        {appliedPromo && appliedPromo.discountAmount > 0 ? (
+                          <p className="text-xs text-emerald-700 line-through opacity-70">{priceLabel}</p>
+                        ) : null}
                       </div>
                     </div>
 
@@ -512,7 +548,7 @@ export default function PaymentClient() {
                       <div className="mt-4 rounded-xl border border-amber-200 bg-white/70 p-4 text-sm text-amber-950">
                         <p className="font-semibold">Instructions</p>
                         <ul className="mt-2 space-y-1 text-sm">
-                          <li>- Payez le montant <span className="font-semibold">{priceLabel}</span> via <span className="font-semibold">{manualProvider === 'cashplus' ? 'CashPlus' : manualProvider === 'wafacash' ? 'WafaCash' : 'Western Union'}</span>.</li>
+                          <li>- Payez le montant <span className="font-semibold">{displayPriceLabel}</span> via <span className="font-semibold">{manualProvider === 'cashplus' ? 'CashPlus' : manualProvider === 'wafacash' ? 'WafaCash' : 'Western Union'}</span>.</li>
                           <li>- Vous recevrez une <span className="font-semibold">référence unique</span> après confirmation.</li>
                           <li>- Envoyez la preuve de paiement au support (ou via l’admin panel plus tard).</li>
                           <li>- Statut: <span className="font-semibold">pending</span> jusqu’à activation par l’admin.</li>
@@ -566,8 +602,20 @@ export default function PaymentClient() {
 
                 <div className="mt-3 rounded-xl border border-gray-100 bg-gray-50 p-4">
                   <p className="text-xs text-gray-500">Montant</p>
-                  <p className="text-xl font-extrabold text-gray-900 mt-1">{priceLabel}</p>
+                  <p className="text-xl font-extrabold text-gray-900 mt-1">{displayPriceLabel}</p>
+                  {appliedPromo && appliedPromo.discountAmount > 0 ? (
+                    <p className="text-xs text-emerald-700 mt-1">
+                      Réduction {appliedPromo.discountPercent}% (−{appliedPromo.discountAmount.toLocaleString('fr-MA')} MAD)
+                    </p>
+                  ) : null}
                 </div>
+
+                <PromoCodeInput
+                  baseAmountMad={baseAmountMad}
+                  onApplied={setAppliedPromo}
+                  disabled={submitting}
+                  className="mt-4"
+                />
 
                 <div className="mt-3 rounded-xl border border-gray-100 bg-gray-50 p-4">
                   <p className="text-xs text-gray-500">Méthode</p>

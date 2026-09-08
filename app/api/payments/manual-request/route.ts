@@ -7,6 +7,8 @@ import { getAtlasPlanById } from '@/app/lib/atlas-pricing-plans';
 import { checkPaymentRateLimit } from '@/app/lib/payment-rate-limit';
 import { getSupabaseServiceRoleClient } from '@/app/lib/supabase-admin';
 import { MANUAL_PAYMENT_FALLBACK_EMAIL } from '@/app/lib/atlas-manual-subscription';
+import { attachReferralSafely } from '@/app/lib/atlas-referral-server';
+import { validateAffiliatePromoCode } from '@/app/lib/atlas-promo-server';
 
 type ManualProvider = 'cashplus' | 'wafacash' | 'western_union';
 
@@ -84,10 +86,12 @@ export async function POST(request: NextRequest) {
     planId?: string;
     addonId?: string;
     provider?: ManualProvider;
+    promoCode?: string;
   };
   const planId = (body?.planId ?? '').trim();
   const addonId = (body?.addonId ?? '').trim();
   const provider = body?.provider;
+  const promoCodeRaw = (body?.promoCode ?? '').trim();
 
   const addon = addonId ? getCompanyAddonById(addonId) : undefined;
   const plan = planId ? getAtlasPlanById(planId) : undefined;
@@ -113,11 +117,46 @@ export async function POST(request: NextRequest) {
       ? auth.user.email.trim()
       : MANUAL_PAYMENT_FALLBACK_EMAIL;
 
+  const baseAmountMad = addon ? addon.priceMadYear : plan!.price;
+  let promoMeta: Record<string, unknown> = {};
+  let chargedAmountMad = baseAmountMad;
+
+  if (promoCodeRaw) {
+    const promo = await validateAffiliatePromoCode(admin, promoCodeRaw, {
+      referredUserId: auth.user.id,
+      baseAmountMad,
+    });
+    if (!promo.ok) {
+      const messages: Record<string, string> = {
+        invalid_code: 'Code promo invalide ou expiré.',
+        inactive_affiliate: 'Ce code promo n’est pas associé à un affilié actif.',
+        self_referral: 'Vous ne pouvez pas utiliser votre propre code promo.',
+        invalid_amount: 'Montant invalide pour appliquer la réduction.',
+      };
+      return NextResponse.json(
+        { error: 'invalid_promo', message: messages[promo.reason] ?? 'Code promo invalide.' },
+        { status: 400 },
+      );
+    }
+
+    chargedAmountMad = promo.finalAmount;
+    promoMeta = {
+      promo_code: promo.code,
+      promo_referrer_user_id: promo.referrerUserId,
+      promo_discount_percent: promo.discountPercent,
+      promo_discount_mad: promo.discountAmount,
+      promo_base_amount_mad: baseAmountMad,
+      promo_attribution_only: promo.attributionOnly,
+    };
+
+    await attachReferralSafely(admin, auth.user.id, promo.code);
+  }
+
   const insertRow = addon
     ? {
         user_id: auth.user.id,
         plan_id: 'pro',
-        amount_mad: addon.priceMadYear,
+        amount_mad: chargedAmountMad,
         currency: 'MAD' as const,
         billing_period: 'year',
         payment_method: 'manual' as const,
@@ -130,12 +169,13 @@ export async function POST(request: NextRequest) {
           source: 'payment_checkout',
           user_email: userEmail,
           email: userEmail,
+          ...promoMeta,
         },
       }
     : {
         user_id: auth.user.id,
         plan_id: plan!.id,
-        amount_mad: plan!.price,
+        amount_mad: chargedAmountMad,
         currency: plan!.currency,
         billing_period: plan!.billingPeriod,
         payment_method: 'manual' as const,
@@ -145,6 +185,7 @@ export async function POST(request: NextRequest) {
           source: 'payment_checkout',
           user_email: userEmail,
           email: userEmail,
+          ...promoMeta,
         },
       };
 

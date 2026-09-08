@@ -13,6 +13,7 @@ import {
 import { ATLAS_INCIDENT_HOTFIX_GROWTH } from '@/app/lib/atlas-hotfix';
 import { trackEvent } from '@/app/lib/analytics-track';
 import { getAtlasPlanById } from '@/app/lib/atlas-pricing-plans';
+import { PromoCodeInput, type AppliedPromo } from '@/app/components/billing/PromoCodeInput';
 
 type ManualProvider = 'cashplus' | 'wafacash' | 'western_union';
 
@@ -34,6 +35,7 @@ function submitErrorMessage(json: unknown, fallback = 'Échec de l’envoi'): st
   }
   if (error === 'auth_required') return 'Connectez-vous pour envoyer la demande.';
   if (error === 'invalid_plan') return 'Plan invalide. Rouvrez la page tarifs.';
+  if (error === 'invalid_promo') return message || 'Code promo invalide.';
   if (error === 'rate_limited') return 'Trop de tentatives. Réessayez dans une minute.';
   if (error === 'payment_requests_table_missing' || error === 'db_error') {
     return [message || 'Erreur base de données', hint].filter(Boolean).join(' · ') || fallback;
@@ -48,16 +50,21 @@ export function ManualPaymentModal({ open, onClose, planId }: Props) {
   const [submitting, setSubmitting] = useState(false);
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
+  const [appliedPromo, setAppliedPromo] = useState<AppliedPromo | null>(null);
 
   const planLabel = useMemo(() => {
     const fromCatalog = getAtlasPlanById(planId);
     return fromCatalog?.name ?? planDisplayName(planId);
   }, [planId]);
 
+  const catalogPlan = useMemo(() => getAtlasPlanById(planId), [planId]);
+  const baseAmountMad = catalogPlan?.price ?? 0;
+
   useEffect(() => {
     if (!open) return;
     setError('');
     setMessage('');
+    setAppliedPromo(null);
     let cancelled = false;
     void (async () => {
       if (!isAtlasSupabaseDataEnabled()) {
@@ -110,7 +117,11 @@ export function ManualPaymentModal({ open, onClose, planId }: Props) {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${token}`,
         },
-        body: JSON.stringify({ planId: catalogPlan.id, provider }),
+        body: JSON.stringify({
+          planId: catalogPlan.id,
+          provider,
+          ...(appliedPromo?.code ? { promoCode: appliedPromo.code } : {}),
+        }),
       });
       const json = (await res.json().catch(() => ({}))) as {
         id?: string;
@@ -145,7 +156,7 @@ export function ManualPaymentModal({ open, onClose, planId }: Props) {
     } finally {
       setSubmitting(false);
     }
-  }, [planId, provider, router]);
+  }, [appliedPromo?.code, planId, provider, router]);
 
   if (ATLAS_INCIDENT_HOTFIX_GROWTH) return null;
   if (!open) return null;
@@ -209,6 +220,14 @@ export function ManualPaymentModal({ open, onClose, planId }: Props) {
               ))}
             </div>
           </div>
+
+          {baseAmountMad > 0 ? (
+            <PromoCodeInput
+              baseAmountMad={baseAmountMad}
+              onApplied={setAppliedPromo}
+              disabled={submitting}
+            />
+          ) : null}
 
           {error ? (
             <p className="text-sm text-rose-600 bg-rose-50 border border-rose-100 rounded-xl px-3 py-2">{error}</p>
