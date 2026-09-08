@@ -111,7 +111,7 @@ function isPublicPath(pathname: string): boolean {
   if (pathname.startsWith('/auditor/')) return true;
   if (pathname.startsWith('/api/auditor/') && !pathname.startsWith('/api/auditor/pass')) return true;
   if (isClientPortalPublicPath(pathname)) return true;
-  if (pathname === '/affiliates') return true;
+  if (pathname === '/affiliates' || pathname === '/affiliates/program') return true;
   return false;
 }
 
