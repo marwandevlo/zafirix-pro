@@ -372,7 +372,7 @@ export default function AffiliatePortalPage() {
               )}
             </p>
             <p className="text-xs text-white/25">
-              {t('Commission jusqu'à', 'عمولة تصل إلى')} <strong className="text-[#06b6d4]">40%</strong> {t('par paiement', 'لكل دفعة')}
+              {t("Commission jusqu'à", 'عمولة تصل إلى')} <strong className="text-[#06b6d4]">40%</strong> {t('par paiement', 'لكل دفعة')}
             </p>
           </div>
         </div>
@@ -403,7 +403,7 @@ export default function AffiliatePortalPage() {
               </h1>
               <p className="mt-1.5 text-sm text-white/65 max-w-xl">
                 {t(
-                  'Partagez votre lien, suivez les clics et gagnez jusqu'à 40 % sur chaque abonnement payé.',
+                  "Partagez votre lien, suivez les clics et gagnez jusqu'à 40 % sur chaque abonnement payé.",
                   'شارك رابطك، تابع النقرات واربح حتى 40٪ على كل اشتراك مدفوع.',
                 )}
               </p>
@@ -450,7 +450,7 @@ export default function AffiliatePortalPage() {
             <div className="rounded-3xl border border-white/10 bg-white/[0.06] p-8 text-center space-y-3">
               <p className="text-sm text-white/70">
                 {t(
-                  'Impossible de charger votre tableau de bord affilié. Vérifiez que votre compte dispose d'un code de parrainage.',
+                  "Impossible de charger votre tableau de bord affilié. Vérifiez que votre compte dispose d'un code de parrainage.",
                   'تعذّر تحميل لوحة تحكم الإحالة. تحقق من أن حسابك يتوفر على رمز إحالة.',
                 )}
               </p>
@@ -610,7 +610,7 @@ export default function AffiliatePortalPage() {
                 {transactions.length === 0 ? (
                   <p className="px-5 py-10 text-sm text-slate-400 text-center">
                     {t(
-                      'Aucune commission pour le moment. Partagez votre lien — le premier paiement d'un filleul apparaîtra ici.',
+                      "Aucune commission pour le moment. Partagez votre lien — le premier paiement d'un filleul apparaîtra ici.",
                       'لا توجد عمولات بعد. شارك رابطك — ستظهر هنا أول دفعة لمُحال.',
                     )}
                   </p>
