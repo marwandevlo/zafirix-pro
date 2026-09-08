@@ -13,7 +13,7 @@ import {
 import { getSupabaseServiceRoleClient } from '@/app/lib/supabase-admin';
 import { frenchOcrErrorMessage } from '@/app/lib/atlas-document-ocr-errors';
 
-const OCR_JOB_TIMEOUT_MS = 280_000;
+const OCR_JOB_TIMEOUT_MS = 300_000;
 
 type DocumentRow = {
   id: string;

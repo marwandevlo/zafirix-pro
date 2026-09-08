@@ -31,6 +31,8 @@ import {
 import type { AtlasOcrDetectedInvoice } from '@/app/types/atlas-document';
 import { addDaysYmd, todayYmd } from '@/app/lib/atlas-dates';
 import { normalizePaymentTerms } from '@/app/types/atlas-payment-terms';
+import { mapWithConcurrency } from '@/app/lib/atlas-concurrency';
+import { ATLAS_DOCUMENT_BATCH_UPLOAD_CONCURRENCY } from '@/app/lib/atlas-document-storage';
 
 const SUPPLIER_INVOICE_SELECT =
   'id, user_id, company_id, document_id, source_page, supplier_name, supplier_ice, supplier_if, invoice_number, invoice_date, amount_ht, vat_amount, amount_ttc, vat_rate, status, metadata, created_at, updated_at';
@@ -408,50 +410,73 @@ export async function createSupplierInvoicesFromOcr(
   let skipped = 0;
   const invoiceIds: string[] = [];
 
-  for (const detected of invoicesToCreate) {
-    const sourcePage = sourcePageForDetectedInvoice(detected);
-    const existing = await findSupplierInvoiceByDocumentPage(
-      documentId,
-      sourcePage,
-      detected.invoice_number ?? null,
-    );
-    if (existing) {
-      alreadyExists += 1;
-      invoiceIds.push(String(existing.id));
-      continue;
-    }
+  type CreateOutcome =
+    | { kind: 'created'; id: string }
+    | { kind: 'exists'; id: string }
+    | { kind: 'skipped' };
 
-    const mapped = mapDetectedInvoiceToSupplierWriteInput(detected, document);
-    const payload = supplierInvoiceRowPayload(mapped, auth.userId, companyId);
-
-    const { data: inserted, error: insertErr } = await supabase
-      .from('atlas_supplier_invoices')
-      .insert(payload)
-      .select('id')
-      .single();
-
-    if (insertErr) {
-      if (isSupplierInvoicesTableMissingError(insertErr.message)) {
-        return { ok: false, error: 'supplier_invoices_table_missing' };
-      }
-      if (insertErr.code === '23505') {
-        const again = await findSupplierInvoiceByDocumentPage(
+  let outcomes: CreateOutcome[];
+  try {
+    outcomes = await mapWithConcurrency(
+      invoicesToCreate,
+      ATLAS_DOCUMENT_BATCH_UPLOAD_CONCURRENCY,
+      async (detected): Promise<CreateOutcome> => {
+        const sourcePage = sourcePageForDetectedInvoice(detected);
+        const existing = await findSupplierInvoiceByDocumentPage(
           documentId,
           sourcePage,
           detected.invoice_number ?? null,
         );
-        if (again) {
-          alreadyExists += 1;
-          invoiceIds.push(String(again.id));
-          continue;
+        if (existing) {
+          return { kind: 'exists', id: String(existing.id) };
         }
-      }
-      skipped += 1;
-      continue;
-    }
 
-    created += 1;
-    invoiceIds.push(String(inserted.id));
+        const mapped = mapDetectedInvoiceToSupplierWriteInput(detected, document);
+        const payload = supplierInvoiceRowPayload(mapped, auth.userId, companyId);
+
+        const { data: inserted, error: insertErr } = await supabase
+          .from('atlas_supplier_invoices')
+          .insert(payload)
+          .select('id')
+          .single();
+
+        if (insertErr) {
+          if (isSupplierInvoicesTableMissingError(insertErr.message)) {
+            throw new Error('supplier_invoices_table_missing');
+          }
+          if (insertErr.code === '23505') {
+            const again = await findSupplierInvoiceByDocumentPage(
+              documentId,
+              sourcePage,
+              detected.invoice_number ?? null,
+            );
+            if (again) {
+              return { kind: 'exists', id: String(again.id) };
+            }
+          }
+          return { kind: 'skipped' };
+        }
+
+        return { kind: 'created', id: String(inserted.id) };
+      },
+    );
+  } catch (err) {
+    if (err instanceof Error && err.message === 'supplier_invoices_table_missing') {
+      return { ok: false, error: 'supplier_invoices_table_missing' };
+    }
+    throw err;
+  }
+
+  for (const outcome of outcomes) {
+    if (outcome.kind === 'created') {
+      created += 1;
+      invoiceIds.push(outcome.id);
+    } else if (outcome.kind === 'exists') {
+      alreadyExists += 1;
+      invoiceIds.push(outcome.id);
+    } else {
+      skipped += 1;
+    }
   }
 
   return { ok: true, created, alreadyExists, skipped, invoiceIds };

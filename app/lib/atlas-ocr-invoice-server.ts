@@ -8,6 +8,8 @@ import { anthropicImageMediaType, OCR_PROVIDER, parseOcrJsonResponse } from '@/a
 import { parseAnthropicOcrError } from '@/app/lib/atlas-ocr-image-prep';
 import { getAnthropicApiKey } from '@/app/lib/anthropic-env';
 
+const ANTHROPIC_INVOICE_OCR_TIMEOUT_MS = 90_000;
+
 const OCR_SYSTEM = `Tu es un expert en extraction de données de factures marocaines.
 Extrais les informations en JSON avec ces champs exactement:
 {
@@ -68,7 +70,7 @@ export async function runInvoiceOcrExtraction(
   }
 
   try {
-    const client = new Anthropic({ apiKey });
+    const client = new Anthropic({ apiKey, timeout: ANTHROPIC_INVOICE_OCR_TIMEOUT_MS });
     const response = await client.messages.create({
       model: 'claude-sonnet-4-5',
       max_tokens: 4096,

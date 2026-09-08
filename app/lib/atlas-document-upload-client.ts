@@ -24,12 +24,23 @@ import { supabase } from '@/app/lib/supabase';
 /** Above this size, never use multipart `/api/documents/upload`. */
 export const DIRECT_STORAGE_UPLOAD_THRESHOLD_BYTES = 256 * 1024;
 
-/** Fail fast if Supabase Storage upload hangs (per attempt). */
-const STORAGE_UPLOAD_TIMEOUT_MS = 15_000;
-const API_REQUEST_TIMEOUT_MS = 15_000;
+/** Fail fast if Supabase Storage upload hangs (per attempt). Scales with file size. */
+const STORAGE_UPLOAD_TIMEOUT_BASE_MS = 30_000;
+const STORAGE_UPLOAD_TIMEOUT_PER_MB_MS = 8_000;
+const STORAGE_UPLOAD_TIMEOUT_MAX_MS = 120_000;
+const API_REQUEST_TIMEOUT_MS = 30_000;
+const BATCH_REGISTER_TIMEOUT_MS = 45_000;
 const SESSION_REFRESH_IF_EXPIRES_WITHIN_SEC = 300;
 const UPLOAD_MAX_ATTEMPTS = 3;
 const UPLOAD_RETRY_BASE_MS = 800;
+
+function storageUploadTimeoutMs(fileSizeBytes: number): number {
+  const sizeMb = Math.max(1, Math.ceil(fileSizeBytes / (1024 * 1024)));
+  return Math.min(
+    STORAGE_UPLOAD_TIMEOUT_MAX_MS,
+    STORAGE_UPLOAD_TIMEOUT_BASE_MS + sizeMb * STORAGE_UPLOAD_TIMEOUT_PER_MB_MS,
+  );
+}
 
 export type DocumentUploadProgressPhase = 'compressing' | 'storage' | 'registered' | 'ocr' | 'idle';
 
@@ -309,6 +320,7 @@ async function uploadOnceViaAuthenticatedClient(
       resolve(result);
     };
 
+    const uploadTimeoutMs = storageUploadTimeoutMs(file.size);
     const timer = window.setTimeout(() => {
       finish({
         ok: false,
@@ -316,10 +328,10 @@ async function uploadOnceViaAuthenticatedClient(
           error: 'upload_timeout',
           code: 'upload_timeout',
           step: 'client_storage_upload',
-          message: 'Délai dépassé pendant le téléversement vers le stockage (15 s).',
+          message: `Délai dépassé pendant le téléversement vers le stockage (${Math.round(uploadTimeoutMs / 1000)} s).`,
         },
       });
-    }, STORAGE_UPLOAD_TIMEOUT_MS);
+    }, uploadTimeoutMs);
 
     void (async () => {
       try {
@@ -541,7 +553,7 @@ export async function uploadDocumentForOcr(
       }),
     },
     'register',
-    { timeoutMs: API_REQUEST_TIMEOUT_MS },
+    { timeoutMs: BATCH_REGISTER_TIMEOUT_MS },
   );
 
   if (!registerResult.ok) {

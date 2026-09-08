@@ -96,12 +96,14 @@ import {
 } from '@/app/lib/atlas-company-client-cache';
 import { useCompanyWorkspaceReset } from '@/app/lib/use-company-workspace-reset';
 import {
+  ATLAS_DOCUMENT_BATCH_UPLOAD_CONCURRENCY,
   ATLAS_DOCUMENT_MAX_FILES_PER_BATCH,
   documentUploadLimitExceededMessage,
   inferDocumentMimeType,
   isAllowedDocumentMime,
   maxUploadBytesForMime,
 } from '@/app/lib/atlas-document-storage';
+import { mapWithConcurrency } from '@/app/lib/atlas-concurrency';
 import { uploadDocumentForOcr, type DocumentUploadErrorBody } from '@/app/lib/atlas-document-upload-client';
 import type { DocumentUploadErrorPresentation } from '@/app/lib/atlas-document-upload-error-ui';
 import { DocumentUploadErrorBanner } from '@/app/documents/components/DocumentUploadErrorBanner';
@@ -1234,11 +1236,13 @@ export default function DocumentsPage() {
 
   const handleFiles = (fileList: FileList | File[]) => {
     const files = Array.from(fileList).slice(0, ATLAS_DOCUMENT_MAX_FILES_PER_BATCH);
-    for (const file of files) {
+    const validFiles = files.filter((file) => {
       const mime = inferDocumentMimeType(file);
-      if (!mime || (!mime.startsWith('image/') && !isPdfMimeType(mime))) continue;
-      void analyzeImage(file);
-    }
+      return mime && (mime.startsWith('image/') || isPdfMimeType(mime));
+    });
+    if (!validFiles.length) return;
+
+    void mapWithConcurrency(validFiles, ATLAS_DOCUMENT_BATCH_UPLOAD_CONCURRENCY, (file) => analyzeImage(file));
   };
 
   return (

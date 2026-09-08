@@ -6,18 +6,20 @@
 import {
   ATLAS_DOCUMENT_MAX_IMAGE_BYTES,
   ATLAS_DOCUMENT_MAX_PDF_BYTES,
+  ATLAS_DOCUMENT_BATCH_UPLOAD_CONCURRENCY,
   inferDocumentMimeType,
   isPdfMimeType,
 } from '@/app/lib/atlas-document-storage';
+import { mapWithConcurrency } from '@/app/lib/atlas-concurrency';
 
 /** Compress images above this size (bytes). */
-export const CLIENT_IMAGE_COMPRESS_THRESHOLD_BYTES = 400 * 1024;
+export const CLIENT_IMAGE_COMPRESS_THRESHOLD_BYTES = 200 * 1024;
 
 /** Target max size for client-compressed images. */
-export const CLIENT_IMAGE_TARGET_BYTES = 3 * 1024 * 1024;
+export const CLIENT_IMAGE_TARGET_BYTES = 2 * 1024 * 1024;
 
 /** Attempt PDF optimization above this size. */
-export const CLIENT_PDF_COMPRESS_THRESHOLD_BYTES = 1.5 * 1024 * 1024;
+export const CLIENT_PDF_COMPRESS_THRESHOLD_BYTES = 512 * 1024;
 
 const IMAGE_MAX_WIDTH = 2200;
 
@@ -156,4 +158,10 @@ export async function prepareFileForUpload(file: File): Promise<PreparedUploadFi
     preparedBytes: file.size,
     compressed: false,
   };
+}
+
+/** Compress multiple files in parallel before batch upload. */
+export async function prepareFilesForUploadBatch(files: File[]): Promise<PreparedUploadFile[]> {
+  if (!files.length) return [];
+  return mapWithConcurrency(files, ATLAS_DOCUMENT_BATCH_UPLOAD_CONCURRENCY, (file) => prepareFileForUpload(file));
 }

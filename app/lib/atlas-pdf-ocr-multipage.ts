@@ -3,6 +3,8 @@
  */
 
 import type { AtlasOcrDetectedInvoice, AtlasOcrError, AtlasOcrExtraction } from '@/app/types/atlas-document';
+import { ATLAS_DOCUMENT_OCR_PAGE_CONCURRENCY } from '@/app/lib/atlas-document-storage';
+import { mapWithConcurrency } from '@/app/lib/atlas-concurrency';
 import { preparePdfPageForOcr } from '@/app/lib/atlas-ocr-image-prep';
 import { runInvoiceOcrExtraction } from '@/app/lib/atlas-ocr-invoice-server';
 import {
@@ -104,12 +106,12 @@ export async function processMultiPagePdfOcr(
     }
 
     const pagesToProcess = Math.min(totalPages, PDF_OCR_MAX_PAGES);
-    const pageResults: AtlasOcrPageMeta[] = [];
+    const pageNumbers = Array.from({ length: pagesToProcess }, (_, i) => i + 1);
     let lastRenderedMime: 'image/jpeg' | 'image/png' = 'image/png';
 
-    for (let pageNum = 1; pageNum <= pagesToProcess; pageNum++) {
+    const processPage = async (pageNum: number): Promise<AtlasOcrPageMeta> => {
       if (Date.now() >= deadline) {
-        pageResults.push({
+        return {
           page_number: pageNum,
           rendered_image_size: 0,
           rendered_image_mime_type: lastRenderedMime,
@@ -119,8 +121,7 @@ export async function processMultiPagePdfOcr(
             code: 'ocr_timeout',
             message: `Document OCR timed out before page ${pageNum}`,
           },
-        });
-        continue;
+        };
       }
 
       try {
@@ -140,30 +141,30 @@ export async function processMultiPagePdfOcr(
         );
 
         if (ocrResult.ok) {
-          pageResults.push({
+          return {
             page_number: pageNum,
             rendered_image_size: prepared.preparedBytes,
             rendered_image_mime_type: prepared.mimeType,
             success: true,
             extraction: ocrResult.extraction,
-          });
-        } else {
-          pageResults.push({
-            page_number: pageNum,
-            rendered_image_size: prepared.preparedBytes,
-            rendered_image_mime_type: prepared.mimeType,
-            success: false,
-            error: {
-              step: ocrResult.step,
-              code: ocrResult.code,
-              message: ocrResult.message,
-            },
-          });
+          };
         }
+
+        return {
+          page_number: pageNum,
+          rendered_image_size: prepared.preparedBytes,
+          rendered_image_mime_type: prepared.mimeType,
+          success: false,
+          error: {
+            step: ocrResult.step,
+            code: ocrResult.code,
+            message: ocrResult.message,
+          },
+        };
       } catch (err) {
         const message = err instanceof Error ? err.message : 'pdf_page_failed';
         const code = message.includes('timed out') ? 'ocr_timeout' : 'pdf_render_failed';
-        pageResults.push({
+        return {
           page_number: pageNum,
           rendered_image_size: 0,
           rendered_image_mime_type: lastRenderedMime,
@@ -173,9 +174,16 @@ export async function processMultiPagePdfOcr(
             code,
             message,
           },
-        });
+        };
       }
-    }
+    };
+
+    const pageResults = await mapWithConcurrency(
+      pageNumbers,
+      ATLAS_DOCUMENT_OCR_PAGE_CONCURRENCY,
+      processPage,
+    );
+    pageResults.sort((a, b) => a.page_number - b.page_number);
 
     const invoices = buildDetectedInvoicesFromPageResults(pageResults);
     const merged = summaryExtractionFromInvoices(invoices);

@@ -22,7 +22,7 @@ import { revalidateCompanySurfaces } from '@/app/lib/revalidate-company-surfaces
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
-export const maxDuration = 120;
+export const maxDuration = 300;
 
 type RegisterBody = {
   documentId?: string;

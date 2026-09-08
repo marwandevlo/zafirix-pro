@@ -32,6 +32,8 @@ import { parseBankTransactionsFromDocument, statementHeaderFromExtraction } from
 import { registerRoutingAfterValidation } from '@/app/lib/atlas-routing-registry';
 import { parseNestedClassification } from '@/app/lib/atlas-ai-json-parse';
 import { isBankStatementType } from '@/app/lib/atlas-document-type-utils';
+import { mapWithConcurrency } from '@/app/lib/atlas-concurrency';
+import { ATLAS_DOCUMENT_BATCH_UPLOAD_CONCURRENCY } from '@/app/lib/atlas-document-storage';
 
 export type DocumentValidationDetail = {
   page: number;
@@ -623,61 +625,89 @@ export async function registerValidatedDocumentRecords(
       };
     }
   } else {
-    for (const detected of invoicesPlan) {
-      const sourcePage = sourcePageForDetectedInvoice(detected);
-      const valid = validateDetectedInvoiceFields(detected);
-      if (!valid.ok) {
-        details.push({
-          page: sourcePage,
-          invoice_number: detected.invoice_number,
-          missing: valid.missing,
-        });
-        invoicesSkipped += 1;
-        continue;
-      }
+    type InvoiceRegisterOutcome =
+      | { kind: 'created'; invoiceId: string; journalLineCount: number; tvaAmount: number }
+      | { kind: 'skipped_existing'; invoiceId: string }
+      | { kind: 'invalid'; detail: DocumentValidationDetail }
+      | { kind: 'failed'; detail: DocumentValidationDetail };
 
-      const extraction = detectedInvoiceToStructuredExtraction(
-        enrichDetectedInvoiceFromStructured(detected, structured),
-      );
-      const isPurchase = isPurchaseDocument(resolvedDocType, extraction);
-      try {
-        const existing = isPurchase
-          ? await findExistingSupplierInvoice(
-              admin,
-              companyId,
-              documentId,
-              sourcePage,
-              detected.invoice_number,
-            )
-          : await findExistingClientInvoice(admin, companyId, documentId, detected.invoice_number);
-        if (existing) {
-          invoiceIds.push(existing);
-          invoicesSkipped += 1;
-          continue;
+    const outcomes = await mapWithConcurrency(
+      invoicesPlan,
+      ATLAS_DOCUMENT_BATCH_UPLOAD_CONCURRENCY,
+      async (detected): Promise<InvoiceRegisterOutcome> => {
+        const sourcePage = sourcePageForDetectedInvoice(detected);
+        const valid = validateDetectedInvoiceFields(detected);
+        if (!valid.ok) {
+          return {
+            kind: 'invalid',
+            detail: {
+              page: sourcePage,
+              invoice_number: detected.invoice_number,
+              missing: valid.missing,
+            },
+          };
         }
 
-        const r = await registerInvoiceFromExtraction(
-          admin,
-          userId,
-          companyId,
-          documentId,
-          resolvedDocType,
-          extraction,
-          regime,
-          uploadDateYmd,
-          isPurchase ? sourcePage : undefined,
+        const extraction = detectedInvoiceToStructuredExtraction(
+          enrichDetectedInvoiceFromStructured(detected, structured),
         );
-        invoiceIds.push(r.invoiceId);
-        journalLineCount += r.journalLineCount;
-        tvaAmount += r.tvaAmount;
+        const isPurchase = isPurchaseDocument(resolvedDocType, extraction);
+        try {
+          const existing = isPurchase
+            ? await findExistingSupplierInvoice(
+                admin,
+                companyId,
+                documentId,
+                sourcePage,
+                detected.invoice_number,
+              )
+            : await findExistingClientInvoice(admin, companyId, documentId, detected.invoice_number);
+          if (existing) {
+            return { kind: 'skipped_existing', invoiceId: existing };
+          }
+
+          const r = await registerInvoiceFromExtraction(
+            admin,
+            userId,
+            companyId,
+            documentId,
+            resolvedDocType,
+            extraction,
+            regime,
+            uploadDateYmd,
+            isPurchase ? sourcePage : undefined,
+          );
+          return {
+            kind: 'created',
+            invoiceId: r.invoiceId,
+            journalLineCount: r.journalLineCount,
+            tvaAmount: r.tvaAmount,
+          };
+        } catch (err) {
+          const message = err instanceof Error ? err.message : String(err);
+          return {
+            kind: 'failed',
+            detail: {
+              page: sourcePage,
+              invoice_number: detected.invoice_number,
+              error: message,
+            },
+          };
+        }
+      },
+    );
+
+    for (const outcome of outcomes) {
+      if (outcome.kind === 'created') {
+        invoiceIds.push(outcome.invoiceId);
+        journalLineCount += outcome.journalLineCount;
+        tvaAmount += outcome.tvaAmount;
         invoicesCreated += 1;
-      } catch (err) {
-        const message = err instanceof Error ? err.message : String(err);
-        details.push({
-          page: sourcePage,
-          invoice_number: detected.invoice_number,
-          error: message,
-        });
+      } else if (outcome.kind === 'skipped_existing') {
+        invoiceIds.push(outcome.invoiceId);
+        invoicesSkipped += 1;
+      } else if (outcome.kind === 'invalid' || outcome.kind === 'failed') {
+        details.push(outcome.detail);
         invoicesSkipped += 1;
       }
     }

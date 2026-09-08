@@ -26,6 +26,8 @@ import {
 import { documentTypeLabel } from '@/app/lib/atlas-document-routing';
 import { applyMoroccoIdentifierNormalization } from '@/app/lib/atlas-morocco-ocr-identifiers';
 
+const ANTHROPIC_OCR_TIMEOUT_MS = 240_000;
+
 const PDF_OCR_SYSTEM = `Tu es un expert en analyse de documents financiers marocains (factures, relevés bancaires, bulletins de paie, contrats, déclarations fiscales).
 
 IMPORTANT — MODE VISION :
@@ -532,7 +534,7 @@ export async function runDirectPdfOcrExtraction(
   const pdfBase64 = pdfBuffer.toString('base64');
 
   try {
-    const client = new Anthropic({ apiKey });
+    const client = new Anthropic({ apiKey, timeout: ANTHROPIC_OCR_TIMEOUT_MS });
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const docBlock: any = {
       type: 'document',
@@ -582,7 +584,7 @@ export async function runDirectImageOcrExtraction(
   }
 
   try {
-    const client = new Anthropic({ apiKey });
+    const client = new Anthropic({ apiKey, timeout: ANTHROPIC_OCR_TIMEOUT_MS });
     const response = await client.messages.create({
       model: 'claude-sonnet-4-5',
       max_tokens: 8192,

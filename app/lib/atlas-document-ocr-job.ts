@@ -17,7 +17,18 @@ import { isPdfMimeType } from '@/app/lib/atlas-document-storage';
 import { PDF_OCR_RENDERED_MIME } from '@/app/lib/atlas-pdf-ocr-render';
 import { logAtlasServerEvent } from '@/app/lib/atlas-server-log';
 import { runDirectPdfOcrExtraction, runDirectImageOcrExtraction } from '@/app/lib/atlas-pdf-direct-ocr';
+import { processMultiPagePdfOcr } from '@/app/lib/atlas-pdf-ocr-multipage';
 import { anthropicImageMediaType } from '@/app/lib/atlas-ocr';
+
+function shouldFallbackToMultipageOcr(code: string): boolean {
+  return (
+    code === 'ocr_timeout' ||
+    code === 'ai_provider_error' ||
+    code === 'ai_provider_overloaded' ||
+    code === 'empty_response' ||
+    code === 'json_parse_failed'
+  );
+}
 
 type DocumentRow = {
   id: string;
@@ -97,7 +108,65 @@ export async function runPdfOcrJob(
   await updateDocumentOcrProgress(supabase, userId, documentId, { phase: 'analyzing', page: 1, total: 1 });
 
   // ── 4. Send PDF directly to Anthropic (no local rendering) ────────────────
-  const ocrResult = await runDirectPdfOcrExtraction(pdfBytes, row.filename);
+  let ocrResult = await runDirectPdfOcrExtraction(pdfBytes, row.filename);
+
+  if (!ocrResult.ok && shouldFallbackToMultipageOcr(ocrResult.code)) {
+    logAtlasServerEvent('documents/ocr', 'info', 'pdf_direct_ocr_fallback_multipage', {
+      documentId,
+      userId,
+      code: ocrResult.code,
+    });
+
+    const multipage = await processMultiPagePdfOcr(pdfBytes, {
+      onProgress: async (event) => {
+        await updateDocumentOcrProgress(supabase, userId, documentId, {
+          phase: event.phase,
+          page: event.pageNumber,
+          total: event.totalPages,
+        });
+      },
+    });
+
+    if (multipage.processingStatus === 'processed') {
+      const pdfMeta = {
+        original_mime_type: mimeType,
+        page_count: multipage.totalPages,
+        total_pages: multipage.totalPages,
+        processed_pages: multipage.processedPages,
+        processed_page_count: multipage.processedPages,
+        pages_processed: multipage.processedPages,
+        invoices: multipage.invoices,
+        page_results: multipage.pageResults,
+        rendered_image_mime_type: multipage.renderedMime,
+        partial_failure: multipage.partialFailure,
+        ocr_mode: 'multipage_parallel',
+      };
+
+      const persist = await persistDocumentOcrResult(supabase, userId, documentId, {
+        processingStatus: 'processed',
+        extraction: multipage.merged,
+        extractedText: multipage.invoices
+          .map((inv) => inv.fournisseur || inv.numero_facture)
+          .filter(Boolean)
+          .join(' | '),
+        pdfMeta,
+        preserveFileMeta: { filename: row.filename, mimeType, sizeBytes: row.size_bytes, existingMetadata: row.metadata },
+      });
+
+      if (!persist.ok) {
+        return { ok: false, status: 500, code: 'db_update_failed', message: persist.error };
+      }
+
+      logAtlasServerEvent('documents/ocr', 'info', 'pdf_ocr_complete', {
+        documentId,
+        userId,
+        totalPages: multipage.totalPages,
+        invoiceCount: multipage.invoices.length,
+        mode: 'multipage_parallel',
+      });
+      return { ok: true };
+    }
+  }
 
   if (!ocrResult.ok) {
     const msg = frenchOcrErrorMessage(ocrResult.code, ocrResult.message);

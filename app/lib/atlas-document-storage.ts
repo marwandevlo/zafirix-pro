@@ -28,6 +28,12 @@ export const LARGE_FILE_STABILIZATION_MESSAGE_FR =
 
 export const ATLAS_DOCUMENT_MAX_FILES_PER_BATCH = 10;
 
+/** Concurrent client uploads in one batch (storage + register). */
+export const ATLAS_DOCUMENT_BATCH_UPLOAD_CONCURRENCY = 4;
+
+/** Concurrent PDF page OCR jobs within one document. */
+export const ATLAS_DOCUMENT_OCR_PAGE_CONCURRENCY = 4;
+
 export const ATLAS_DOCUMENT_ALLOWED_MIME = new Set([
   'image/jpeg',
   'image/png',
