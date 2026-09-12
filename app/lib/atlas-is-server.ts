@@ -7,6 +7,7 @@ import {
   IS_FORMULA_VERSION,
   isRateLabel,
 } from '@/app/lib/atlas-payroll-calculations';
+import { cgncEtatsFromAccountingRows } from '@/app/lib/atlas-cgnc-etats';
 
 function roundMad(n: number): number {
   return Math.round(n * 100) / 100;
@@ -136,8 +137,15 @@ export async function computeAndSaveIsDraft(
       );
 
   const totalExpenses = roundMad(supplierExpensesHT + payrollTotal + accountingCharges);
-  const taxableResult = roundMad(revenueHT - totalExpenses);
-  const liquidation = computeIsLiquidation(revenueHT, taxableResult, fiscalYear);
+  const etats = cgncEtatsFromAccountingRows(accRes.data ?? [], { fiscalYear });
+  const hasJournal = etats.totalDebit > 0 || etats.totalCredit > 0;
+  const taxableResult = hasJournal
+    ? etats.tableauPassage.resultatFiscal
+    : roundMad(revenueHT - totalExpenses);
+  const caForCm = hasJournal && etats.impotSocietes.chiffreAffairesHT > 0
+    ? etats.impotSocietes.chiffreAffairesHT
+    : revenueHT;
+  const liquidation = computeIsLiquidation(caForCm, taxableResult, fiscalYear);
   const estimatedIS = liquidation.estimatedIS;
   const minimalContribution = liquidation.minimalContribution;
   const isDue = liquidation.isDue;
@@ -149,7 +157,7 @@ export async function computeAndSaveIsDraft(
     fiscal_year: fiscalYear,
     period_start: periodStart,
     period_end: periodEnd,
-    revenue_ht: roundMad(revenueHT),
+    revenue_ht: roundMad(caForCm || revenueHT),
     supplier_expenses_ht: roundMad(supplierExpensesHT),
     payroll_total: roundMad(payrollTotal),
     accounting_charges: roundMad(accountingCharges),
@@ -166,6 +174,10 @@ export async function computeAndSaveIsDraft(
       accountingEntryCount: (accRes.data ?? []).length,
       payrollRunCount: payrollRes.error ? 0 : (payrollRes.data ?? []).length,
       appliedRate: isRateLabel(taxableResult),
+      sourceResultatFiscal: hasJournal ? 'tableau_passage_cgnc' : 'ca_moins_charges',
+      resultatNetComptable: hasJournal ? etats.cpcNormal.resultatNet : taxableResult,
+      reintegrations: hasJournal ? etats.tableauPassage.totalReintegrations : 0,
+      deductions: hasJournal ? etats.tableauPassage.totalDeductions : 0,
       cotisationMinimaleAppliquee: liquidation.cotisationMinimaleAppliquee,
       acomptesProvisionnels: liquidation.acomptes,
       acomptesExercice: liquidation.acomptesExercice,

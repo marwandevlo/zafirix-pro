@@ -13,6 +13,7 @@ import type { ExportColumn } from '@/app/components/ExportMenu';
 import { getActiveCompanyDbRowId } from '@/app/lib/atlas-active-company';
 import { isAtlasSupabaseDataEnabled } from '@/app/lib/atlas-data-source';
 import type { LiasseFiscaleRecord, LiasseValidationCheck } from '@/app/types/atlas-liasse';
+import { CgncEtatsPanels, etatsFromLiassePayload } from '@/app/components/cgnc/CgncEtatsPanels';
 
 async function apiFetch<T>(path: string, init?: RequestInit): Promise<{ ok: boolean; data: T }> {
   const res = await fetch(path, { ...init, credentials: 'include', headers: { 'Content-Type': 'application/json', ...init?.headers } });
@@ -141,6 +142,7 @@ export default function LiassePage() {
 
   const bank = record?.payload?.bank_summary as Record<string, unknown> | undefined;
   const payroll = record?.payload?.payroll_summary as Record<string, unknown> | undefined;
+  const etats = etatsFromLiassePayload(record?.payload);
 
   if (!isAtlasSupabaseDataEnabled()) {
     return (
@@ -162,7 +164,7 @@ export default function LiassePage() {
               <BetaSurfaceBadge />
             </div>
             <p className="text-xs text-gray-500 mt-0.5">
-              Intégration banque (Phase 11) · paie CNSS/IR · TVA · bilan · package audit
+              États CGNC (Bilan / CPC) · tableau de passage CGI · IS / cotisation minimale
             </p>
           </div>
           <div className="flex gap-2 items-center">
@@ -265,6 +267,13 @@ export default function LiassePage() {
               </ul>
             </div>
           </div>
+
+          {etats && (
+            <div className="bg-white rounded-xl p-6 border shadow-sm">
+              <h2 className="font-semibold text-gray-800 text-sm mb-4">États de synthèse CGNC & CGI</h2>
+              <CgncEtatsPanels etats={etats} />
+            </div>
+          )}
 
           <div className="bg-white rounded-xl border shadow-sm overflow-hidden">
             <div className="px-4 py-3 border-b flex items-center justify-between">

@@ -52,8 +52,10 @@ export function calculateEstimatedIS(taxableResult: number): number {
   return roundMad(r * 0.31);
 }
 
+/** CGI art. 144 — 0,50 % du CA HT, plancher 3 000 MAD (hors exonération des 36 premiers mois). */
 export function calculateMinimalISContribution(revenueHT: number): number {
-  return roundMad(Math.max(0, revenueHT) * 0.005);
+  if (revenueHT <= 0) return 0;
+  return roundMad(Math.max(revenueHT * 0.005, 3_000));
 }
 
 export function isRateLabel(taxableResult: number): string {

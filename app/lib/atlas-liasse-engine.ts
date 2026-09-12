@@ -9,18 +9,16 @@ import type {
   LiassePayrollSummary,
   LiasseValidationCheck,
 } from '@/app/types/atlas-liasse';
+import {
+  cgncEtatsFromAccountingRows,
+  toLiasseEtatsPayload,
+} from '@/app/lib/atlas-cgnc-etats';
 
 const BALANCE_TOLERANCE = 1;
 const TVA_TOLERANCE_PCT = 0.05;
 
 function round2(n: number): number {
   return Math.round(n * 100) / 100;
-}
-
-function accountClass(compte: string): number {
-  const c = String(compte).trim().charAt(0);
-  const n = parseInt(c, 10);
-  return Number.isFinite(n) ? n : 0;
 }
 
 export type LiasseEngineInput = {
@@ -68,7 +66,7 @@ export async function runLiasseEngine(
     liasseExistsRes,
     paidInvoicesRes,
   ] = await Promise.all([
-    db.from('atlas_accounting_entries').select('entry_json, validation_status, company_id').eq('user_id', userId),
+    db.from('atlas_accounting_entries').select('entry_json, entry_date, validation_status, company_id').eq('user_id', userId),
     db.from('atlas_invoices').select('id, status, total_ttc, client_name, validation_status, company_id').eq('user_id', userId),
     db.from('atlas_supplier_invoices').select('id, status, amount_ttc, validation_status, company_id').eq('user_id', userId),
     db.from('zafirix_bank_statements').select('id, closing_balance, opening_balance, statement_period_end, company_id').eq('user_id', userId),
@@ -101,28 +99,25 @@ export async function runLiasseEngine(
     liasseExistsRes.data = null;
   }
 
-  // ── Accounting aggregates ───────────────────────────────────────────────────
-  let totalDebit = 0;
-  let totalCredit = 0;
-  let actif = 0;
-  let passif = 0;
-  let bankAccountBalance = 0;
-  let draftEntries = 0;
+  // ── Accounting aggregates (CGNC Modèle Normal / Simplifié) ──────────────────
+  const yearEntries = (entriesRes.data ?? []).filter((row) => {
+    const dated = String((row as { entry_date?: string | null }).entry_date ?? '');
+    const jsonDate = String(((row.entry_json as { date?: string } | null)?.date) ?? '');
+    const date = dated.slice(0, 10) || jsonDate.slice(0, 10);
+    if (!date) return true;
+    return date >= yearStart && date <= yearEnd;
+  });
 
-  for (const row of entriesRes.data ?? []) {
-    const j = row.entry_json as { compte?: string; debit?: number; credit?: number } | null;
-    if (!j) continue;
-    const d = Number(j.debit ?? 0);
-    const c = Number(j.credit ?? 0);
-    totalDebit += d;
-    totalCredit += c;
-    const cls = accountClass(String(j.compte ?? ''));
-    if (cls === 5 || cls === 2) bankAccountBalance += c - d;
-    if (cls === 1 || cls === 2) actif += d - c;
-    if (cls === 1 && String(j.compte).startsWith('1') && !String(j.compte).startsWith('10')) passif += c - d;
-    if (cls === 3) passif += c - d;
-    if (row.validation_status === 'draft') draftEntries++;
-  }
+  const etats = cgncEtatsFromAccountingRows(yearEntries, { fiscalYear });
+  const etatsPayload = toLiasseEtatsPayload(etats);
+  const totalDebit = etats.totalDebit;
+  const totalCredit = etats.totalCredit;
+  const actif = etats.bilanNormal.actif.totalNet;
+  const passif = etats.bilanNormal.passif.totalNet;
+  const bankAccountBalance = round2(
+    (etats.bilanNormal.actif.masses[2]?.totalNet ?? 0) - (etats.bilanNormal.passif.masses[2]?.totalNet ?? 0),
+  );
+  const draftEntries = yearEntries.filter((row) => row.validation_status === 'draft').length;
 
   // ── Bank ────────────────────────────────────────────────────────────────────
   const transactions = transactionsRes.data ?? [];
@@ -242,14 +237,26 @@ export async function runLiasseEngine(
     });
   }
 
-  if (Math.abs(actif - passif) > BALANCE_TOLERANCE && actif > 0 && passif > 0) {
+  if (Math.abs(actif - passif) > BALANCE_TOLERANCE && (actif > 0 || passif > 0)) {
     checks.push({
       id: 'bilan-actif-passif',
       severity: 'critical',
       category: 'Bilan',
-      message: `Bilan non équilibré: actif ${round2(actif)} ≠ passif ${round2(passif)}`,
+      message: `Bilan CGNC non équilibré: actif ${round2(actif)} ≠ passif ${round2(passif)}`,
       blocking: true,
-      details: { actif, passif },
+      details: { actif, passif, ecart: etats.bilanNormal.ecart },
+    });
+  }
+
+  for (const c of etats.consistency) {
+    if (c.ok || c.id === 'bilan-equilibre' || c.id === 'journal-equilibre') continue;
+    checks.push({
+      id: `cgnc-${c.id}`,
+      severity: 'critical',
+      category: c.id.startsWith('cpc') ? 'CPC' : c.id.startsWith('passage') ? 'Fiscal' : 'Liasse',
+      message: `${c.message}${c.expected != null && c.actual != null ? ` (${round2(c.expected)} ≠ ${round2(c.actual)})` : ''}`,
+      blocking: true,
+      details: { expected: c.expected, actual: c.actual },
     });
   }
 
@@ -399,7 +406,17 @@ export async function runLiasseEngine(
     });
   }
 
-  const entryCount = entriesRes.data?.length ?? 0;
+  if (draftEntries > 0) {
+    checks.push({
+      id: 'entries-draft',
+      severity: 'warning',
+      category: 'Comptabilité',
+      message: `${draftEntries} écriture(s) en brouillon sur l'exercice`,
+      blocking: false,
+    });
+  }
+
+  const entryCount = yearEntries.length;
   const requiredKeys = ['bilan', 'cpc', 'etat_tva', 'etat_cnss', 'etat_ir'] as const;
   const missingSections = requiredKeys.filter((k) => {
     if (entryCount === 0 && (k === 'bilan' || k === 'cpc')) return true;
@@ -421,7 +438,7 @@ export async function runLiasseEngine(
   let score = 0;
 
   if (Math.abs(totalDebit - totalCredit) <= BALANCE_TOLERANCE) { breakdown.accounting_balanced = 15; score += 15; }
-  if (Math.abs(actif - passif) <= BALANCE_TOLERANCE || actif === 0) { breakdown.bilan_balanced = 15; score += 15; }
+  if (etats.bilanNormal.equilibre || (actif === 0 && passif === 0)) { breakdown.bilan_balanced = 15; score += 15; }
   const invTotal = (invoicesRes.data?.length ?? 0) + (supplierRes.data?.length ?? 0);
   const invValidated = (invoicesRes.data ?? []).filter(i => i.validation_status === 'validated').length
     + (supplierRes.data ?? []).filter(i => i.validation_status === 'validated').length;
@@ -448,16 +465,9 @@ export async function runLiasseEngine(
   const payload: Record<string, unknown> = {
     fiscal_year: fiscalYear,
     generated_at: new Date().toISOString(),
-    bilan: {
-      actif: round2(actif),
-      passif: round2(passif),
-      total_debit: round2(totalDebit),
-      total_credit: round2(totalCredit),
-    },
-    cpc: {
-      charges: round2(totalDebit),
-      produits: round2(totalCredit),
-    },
+    ...etatsPayload,
+    bilan: etatsPayload.bilan,
+    cpc: etatsPayload.cpc,
     etat_tva: {
       suggestions_count: tvaSuggestionsRes.data?.length ?? 0,
     },

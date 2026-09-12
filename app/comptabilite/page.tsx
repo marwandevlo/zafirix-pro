@@ -21,6 +21,8 @@ import { EntityAuditTable } from '@/app/components/history/EntityAuditTable';
 import { RowActions } from '@/app/components/actions';
 import { EditRecordModal } from '@/app/components/actions/EditRecordModal';
 import { isValidPcgeAccount, isValidIce, isValidIf } from '@/app/lib/atlas-morocco-compliance';
+import { compileCgncEtats } from '@/app/lib/atlas-cgnc-etats';
+import { CgncEtatsPanels } from '@/app/components/cgnc/CgncEtatsPanels';
 import GlobalTable from '@/app/components/data-grid/GlobalTable';
 import type { GlobalTableColumn, GlobalTableRow } from '@/app/components/data-grid/GlobalTable';
 import {
@@ -162,6 +164,16 @@ export default function ComptabilitePage() {
     document.addEventListener('visibilitychange', onVis);
     return () => document.removeEventListener('visibilitychange', onVis);
   }, [reloadAccountingData]);
+
+  const etatsCgnc = useMemo(
+    () => compileCgncEtats(ecritures.map((e) => ({
+      compte: e.compte,
+      debit: e.debit,
+      credit: e.credit,
+      libelle: e.libelle,
+    }))),
+    [ecritures],
+  );
 
   const totalDebit = ecritures.reduce((s, e) => s + e.debit, 0);
   const totalCredit = ecritures.reduce((s, e) => s + e.credit, 0);
@@ -830,7 +842,46 @@ export default function ComptabilitePage() {
           {activeTab === 'historique' && (
             <EntityAuditTable entityType="accounting_entry" title="Historique — Écritures comptables" />
           )}
-          <div className="bg-white rounded-xl shadow-sm border border-gray-100 min-w-0 max-w-full overflow-x-visible" style={{ display: activeTab === 'historique' ? 'none' : undefined }}>
+          {activeTab === 'bilan' && (
+            <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
+              <h2 className="font-semibold text-gray-800 text-sm mb-4">États de synthèse CGNC & CGI</h2>
+              <CgncEtatsPanels etats={etatsCgnc} />
+            </div>
+          )}
+          {activeTab === 'grandlivre' && (
+            <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
+              <div className="px-6 py-4 border-b border-gray-100">
+                <h2 className="font-semibold text-gray-800 text-sm">Grand-livre PCGE</h2>
+                <p className="text-xs text-gray-400 mt-0.5">Soldes par compte — base des masses du bilan</p>
+              </div>
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="text-left text-xs text-gray-400 border-b border-gray-100 bg-gray-50">
+                    <th className="px-6 py-3">Compte</th>
+                    <th className="px-6 py-3">Libellé</th>
+                    <th className="px-6 py-3 text-right">Débit</th>
+                    <th className="px-6 py-3 text-right">Crédit</th>
+                    <th className="px-6 py-3 text-right">Solde</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {etatsCgnc.balances.length === 0 && (
+                    <tr><td colSpan={5} className="px-6 py-8 text-center text-gray-400">Aucune écriture</td></tr>
+                  )}
+                  {etatsCgnc.balances.map((b) => (
+                    <tr key={b.compte} className="border-b border-gray-50">
+                      <td className="px-6 py-2 font-mono text-xs text-gray-700">{b.compte}</td>
+                      <td className="px-6 py-2 text-gray-600">{b.libelle || '—'}</td>
+                      <td className="px-6 py-2 text-right text-blue-700">{formatMadAmountLabel(b.debit)}</td>
+                      <td className="px-6 py-2 text-right text-green-700">{formatMadAmountLabel(b.credit)}</td>
+                      <td className="px-6 py-2 text-right font-medium">{formatMadAmountLabel(b.solde)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+          <div className="bg-white rounded-xl shadow-sm border border-gray-100 min-w-0 max-w-full overflow-x-visible" style={{ display: activeTab === 'journal' ? undefined : 'none' }}>
             <div className="flex border-b border-gray-100">
               {(['journal', 'grandlivre', 'bilan', 'historique'] as const).map(tab => (
                 <button key={tab} onClick={() => setActiveTab(tab)}

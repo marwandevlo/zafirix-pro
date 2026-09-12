@@ -11,6 +11,7 @@ import type {
 } from '@/app/types/atlas-reports';
 import { asRecord } from '@/app/lib/atlas-json';
 import { computeTvaPeriod } from '@/app/lib/atlas-tva-server';
+import { cgncEtatsFromAccountingRows } from '@/app/lib/atlas-cgnc-etats';
 
 const MONTH_NAMES = [
   'Jan', 'Fév', 'Mar', 'Avr', 'Mai', 'Jun',
@@ -763,26 +764,18 @@ function buildBilanReport(
   data: Awaited<ReturnType<typeof loadCompanyData>>,
   period: AtlasReportPeriod,
 ): AtlasReportPayload {
-  let actif = 0;
-  let passif = 0;
-  let charges = 0;
-  let produits = 0;
+  const year = new Date(period.periodEnd).getFullYear();
+  const etats = cgncEtatsFromAccountingRows(data.accounting, { fiscalYear: year });
+  const b = etats.bilanNormal;
+  const cpc = etats.cpcNormal;
+  const p = etats.tableauPassage;
+  const is = etats.impotSocietes;
 
-  for (const row of data.accounting) {
-    const entry = asRecord(row.entry_json);
-    if (!entry) continue;
-    const compte = String(entry.compte ?? '');
-    const debit = Number(entry.debit ?? 0);
-    const credit = Number(entry.credit ?? 0);
-    const cls = compte.charAt(0);
-    if (cls === '2' || cls === '3' || cls === '5') actif += debit - credit;
-    if (cls === '1' || cls === '4') passif += credit - debit;
-    if (cls === '6') charges += debit - credit;
-    if (cls === '7') produits += credit - debit;
-  }
-
-  const situationNette = actif - passif;
-  const resultat = produits - charges;
+  const bilanRows = (side: typeof b.actif, prefix: string) =>
+    side.masses.flatMap((m) => [
+      [`${prefix} ${m.code}. ${m.label}`, fmt(m.totalNet)],
+      ...m.lines.map((l) => [`    ${l.label}`, fmt(l.net)]),
+    ]);
 
   return {
     type: 'bilan',
@@ -792,23 +785,63 @@ function buildBilanReport(
     period,
     sections: [
       {
-        title: 'Bilan simplifié (écritures comptables)',
+        title: 'Bilan CGNC — Modèle Normal (Actif)',
+        headers: ['Poste', 'Net (MAD)'],
+        rows: [
+          ...bilanRows(b.actif, 'ACTIF'),
+          ['TOTAL GÉNÉRAL ACTIF', fmt(b.actif.totalNet)],
+        ],
+      },
+      {
+        title: 'Bilan CGNC — Modèle Normal (Passif)',
+        headers: ['Poste', 'Net (MAD)'],
+        rows: [
+          ...bilanRows(b.passif, 'PASSIF'),
+          ['TOTAL GÉNÉRAL PASSIF', fmt(b.passif.totalNet)],
+          ['Équilibre (Actif − Passif)', fmt(b.ecart)],
+        ],
+      },
+      {
+        title: 'CPC — Compte de Produits et Charges',
         headers: ['Poste', 'Montant (MAD)'],
         rows: [
-          ['Actif (classes 2, 3, 5)', fmt(actif)],
-          ['Passif (classes 1, 4)', fmt(passif)],
-          ['Situation nette', fmt(situationNette)],
-          ['Charges (classe 6)', fmt(charges)],
-          ['Produits (classe 7)', fmt(produits)],
-          ['Résultat (produits − charges)', fmt(resultat)],
+          ['Produits d\'exploitation', fmt(cpc.totalProduitsExploitation)],
+          ['Charges d\'exploitation', fmt(cpc.totalChargesExploitation)],
+          ['Résultat d\'exploitation', fmt(cpc.resultatExploitation)],
+          ['Résultat financier', fmt(cpc.resultatFinancier)],
+          ['Résultat courant', fmt(cpc.resultatCourant)],
+          ['Résultat non courant', fmt(cpc.resultatNonCourant)],
+          ['Résultat avant impôts', fmt(cpc.resultatAvantImpots)],
+          ['Impôts sur les résultats', fmt(cpc.impotsSurLesResultats)],
+          ['Résultat net', fmt(cpc.resultatNet)],
+        ],
+      },
+      {
+        title: 'Tableau de passage (CGI) et liquidation IS',
+        headers: ['Poste', 'Montant (MAD)'],
+        rows: [
+          ['Résultat net comptable', fmt(p.resultatNetComptable)],
+          ['(+) Réintégrations', fmt(p.totalReintegrations)],
+          ['(−) Déductions', fmt(p.totalDeductions)],
+          ['Résultat fiscal', fmt(p.resultatFiscal)],
+          [`IS calculé (${is.tauxApplique})`, fmt(is.isCalcule)],
+          ['Cotisation minimale', fmt(is.cotisationMinimale)],
+          ['Impôt dû', fmt(is.impotDu)],
         ],
       },
       {
         title: 'Note',
         headers: ['Information'],
-        rows: [['Bilan indicatif basé sur atlas_accounting_entries — à valider par expert-comptable']],
+        rows: [['États CGNC / CGI compilés depuis atlas_accounting_entries — à valider par expert-comptable']],
       },
     ],
+    summary: {
+      totalActif: b.actif.totalNet,
+      totalPassif: b.passif.totalNet,
+      resultatNet: cpc.resultatNet,
+      resultatFiscal: p.resultatFiscal,
+      impotDu: is.impotDu,
+    },
   };
 }
 
