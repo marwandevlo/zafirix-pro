@@ -78,8 +78,6 @@ const nextConfig: NextConfig = {
   outputFileTracingIncludes: {
     '/api/documents/**': nativeTraceGlobs,
     '/api/documents/upload/**': nativeTraceGlobs,
-    '/sitemap.xml': ['./content/blog/**'],
-    '/sitemap': ['./content/blog/**'],
   },
   outputFileTracingExcludes: {
     '/api/admin/diagnose': ['.git/**', '.next/**', 'public/images/blog/**'],

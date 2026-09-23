@@ -1,5 +1,4 @@
 import type { MetadataRoute } from 'next';
-import { absoluteUrl } from '@/app/lib/atlas-app-url';
 
 export default function robots(): MetadataRoute.Robots {
   return {
@@ -10,7 +9,7 @@ export default function robots(): MetadataRoute.Robots {
         disallow: ['/admin', '/api/', '/dashboard'],
       },
     ],
-    sitemap: absoluteUrl('/sitemap.xml'),
-    host: new URL(absoluteUrl('/')).host,
+    sitemap: 'https://www.zafirixpro.com/sitemap.xml',
+    host: 'www.zafirixpro.com',
   };
 }
