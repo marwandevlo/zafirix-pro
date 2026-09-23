@@ -60,6 +60,7 @@ const nativeTraceGlobs = [
 const nextConfig: NextConfig = {
   env: {
     NEXT_PUBLIC_APP_BUILD_ID: appBuildId,
+    NEXT_PUBLIC_GA_MEASUREMENT_ID: process.env.NEXT_PUBLIC_GA_MEASUREMENT_ID?.trim() || "G-XXXXXXXXXX",
     ...(bundledSiteUrl
       ? {
           NEXT_PUBLIC_SITE_URL: bundledSiteUrl,

@@ -1,5 +1,6 @@
 import type { Metadata, Viewport } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
+import { GoogleAnalytics } from "@next/third-parties/google";
 import "./globals.css";
 import { AssistantOverlay } from "@/app/components/assistant/AssistantOverlay";
 import { GlobalSearchOverlay } from "@/app/components/search/GlobalSearchOverlay";
@@ -108,6 +109,7 @@ export default function RootLayout({
   // TEMPORARY: hide the global search overlay (full-screen fixed overlay).
   // Re-enable by setting NEXT_PUBLIC_ATLAS_ENABLE_GLOBAL_SEARCH_OVERLAY="true".
   const enableGlobalSearchOverlay = process.env.NEXT_PUBLIC_ATLAS_ENABLE_GLOBAL_SEARCH_OVERLAY === "true";
+  const gaId = process.env.NEXT_PUBLIC_GA_MEASUREMENT_ID?.trim() || "G-XXXXXXXXXX";
 
   return (
     <html lang="fr" className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}>
@@ -140,6 +142,7 @@ export default function RootLayout({
         <PwaRegister />
         <AppToastHost />
       </body>
+      {gaId ? <GoogleAnalytics gaId={gaId} /> : null}
     </html>
   );
 }
