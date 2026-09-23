@@ -66,11 +66,11 @@ const PUBLIC_PATHS = new Set([
   '/auth/callback',
 ]);
 
-/** Public files under /public must never hit the auth gate (covers, icons, fonts). */
+/** Public files under /public must never hit the auth gate (covers, icons, fonts, verification HTML). */
 function isPublicStaticAsset(pathname: string): boolean {
   if (pathname.startsWith('/images/')) return true;
   if (pathname.startsWith('/fonts/')) return true;
-  return /\.(?:avif|css|gif|ico|jpe?g|js|map|mp4|png|svg|ttf|txt|webm|webmanifest|webp|woff2?|xml)$/i.test(
+  return /\.(?:avif|css|gif|html|ico|jpe?g|js|map|mp4|png|svg|ttf|txt|webm|webmanifest|webp|woff2?|xml)$/i.test(
     pathname,
   );
 }
@@ -238,10 +238,15 @@ function maybeLocaleAliasRewrite(request: NextRequest): NextResponse | null {
 }
 
 export async function middleware(request: NextRequest) {
+  const { pathname } = request.nextUrl;
+
+  // Search Console / static HTML in /public must skip locale and auth rewrites.
+  if (isPublicStaticAsset(pathname)) {
+    return NextResponse.next();
+  }
+
   const localeAlias = maybeLocaleAliasRewrite(request);
   if (localeAlias) return localeAlias;
-
-  const { pathname } = request.nextUrl;
 
   if (isAnonymousTelemetryPath(pathname)) {
     return NextResponse.next();
@@ -432,6 +437,6 @@ export async function middleware(request: NextRequest) {
 
 export const config = {
   matcher: [
-    '/((?!_next/static|_next/image|favicon\\.ico|.*\\.(?:avif|gif|ico|jpe?g|png|svg|ttf|txt|webm|webp|woff2?)$).*)',
+    '/((?!_next/static|_next/image|favicon\\.ico|.*\\.(?:avif|gif|html|ico|jpe?g|png|svg|ttf|txt|webm|webp|woff2?)$).*)',
   ],
 };
