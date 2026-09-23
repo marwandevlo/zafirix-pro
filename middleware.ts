@@ -240,6 +240,16 @@ function maybeLocaleAliasRewrite(request: NextRequest): NextResponse | null {
 export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
+  // Search Console must receive raw /sitemap.xml and /robots.txt — never /landing/fr.
+  if (
+    pathname === '/sitemap.xml' ||
+    pathname === '/sitemap.xml/' ||
+    pathname.startsWith('/sitemap') ||
+    pathname === '/robots.txt'
+  ) {
+    return NextResponse.next();
+  }
+
   // Search Console / static HTML in /public must skip locale and auth rewrites.
   if (isPublicStaticAsset(pathname)) {
     return NextResponse.next();
@@ -437,6 +447,6 @@ export async function middleware(request: NextRequest) {
 
 export const config = {
   matcher: [
-    '/((?!_next/static|_next/image|favicon\\.ico|.*\\.(?:avif|gif|html|ico|jpe?g|png|svg|ttf|txt|webm|webp|woff2?)$).*)',
+    '/((?!_next/static|_next/image|favicon\\.ico|sitemap\\.xml|robots\\.txt|.*\\.(?:avif|gif|html|ico|jpe?g|png|svg|ttf|txt|webm|webp|woff2?|xml)$).*)',
   ],
 };
