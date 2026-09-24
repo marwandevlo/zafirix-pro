@@ -44,7 +44,7 @@ export function FreemiumUpgradeModal({
           <div>
             <p className="text-[11px] uppercase tracking-[0.16em] text-cyan-700 font-semibold">Forfait Gratuit</p>
             <h2 id="freemium-upgrade-title" className="text-lg font-bold text-[#0F1F3D] mt-1">
-              Upgrade to Pro
+              Passer à Pro
             </h2>
           </div>
           <button type="button" onClick={onClose} className="p-2 rounded-lg hover:bg-white" aria-label="Fermer">
@@ -54,10 +54,10 @@ export function FreemiumUpgradeModal({
         <div className="px-5 py-4 space-y-3">
           <p className="text-sm text-slate-600 leading-relaxed">{detail}</p>
           <ul className="text-sm text-slate-700 space-y-1.5">
-            <li>Factures & devis illimités</li>
-            <li>Commandes COD / expéditions illimitées</li>
-            <li>OCR IA sans plafond mensuel</li>
-            <li>Équipe multi-utilisateurs</li>
+            <li>Factures & Devis illimités</li>
+            <li>Suivi COD illimité</li>
+            <li>Scans IA étendus</li>
+            <li>Multi-utilisateurs & support prioritaire</li>
           </ul>
         </div>
         <div className="px-5 pb-5 flex flex-wrap gap-2 justify-end">
@@ -77,7 +77,7 @@ export function FreemiumUpgradeModal({
             className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg bg-[#0F1F3D] text-white text-sm font-semibold hover:bg-[#1a3060]"
           >
             <Sparkles size={14} />
-            Upgrade to Pro
+            Passer à Pro
           </button>
         </div>
       </div>

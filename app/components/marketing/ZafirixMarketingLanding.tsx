@@ -94,12 +94,10 @@ const COPY: Record<MarketingLocale, Copy> = {
       },
     ],
     pricingTitle: 'Des forfaits clairs',
-    pricingSupport: 'Quatre offres adaptées à votre stade — packs add-on si vous dépassez.',
+    pricingSupport: 'Freemium : démarrez gratuitement, passez à Pro quand vous grandissez.',
     tiers: [
-      { name: 'Indépendant', price: '49 MAD', hint: '/ mois · Auto-entrepreneur' },
-      { name: 'Profession Libérale', price: '149 MAD', hint: '/ mois · Personne Physique' },
-      { name: 'PME & E-commerce', price: '399 MAD', hint: '/ mois', popular: true },
-      { name: 'Ultimate', price: 'Sur mesure', hint: 'Cabinets & usage-based' },
+      { name: 'Plan Gratuit', price: '0 DH', hint: '/ mois · 15 factures · 30 COD · 5 scans IA' },
+      { name: 'Plan Pro', price: '149 DH', hint: '/ mois · illimité + support prioritaire', popular: true },
     ],
     auditTitle: 'Audit & Conformité Maroc',
     auditSupport:
@@ -112,7 +110,7 @@ const COPY: Record<MarketingLocale, Copy> = {
     audiencesTitle: 'Pour qui ?',
     audiences: ['Auto-entrepreneurs', 'PME', 'Comptables & fiduciaires', 'E-commerce'],
     finalTitle: 'Choisissez le forfait adapté à votre activité.',
-    finalSupport: 'Comparez Indépendant, Profession Libérale, PME et Ultimate.',
+    finalSupport: 'Comparez le Plan Gratuit et le Plan Pro.',
     finalCta: 'Aller aux tarifs',
   },
   ar: {
@@ -156,12 +154,10 @@ const COPY: Record<MarketingLocale, Copy> = {
       },
     ],
     pricingTitle: 'باقات واضحة',
-    pricingSupport: 'أربع عروض حسب مرحلتك — مع باقات إضافية عند تجاوز الحصص.',
+    pricingSupport: 'ابدأ مجاناً ثم انتقل إلى Pro عندما ينمو نشاطك.',
     tiers: [
-      { name: 'مستقل', price: '49 درهماً', hint: '/ شهر · مقاول ذاتي' },
-      { name: 'مهنة حرة', price: '149 درهماً', hint: '/ شهر · شخص ذاتي' },
-      { name: 'شركات وتجارة إلكترونية', price: '399 درهماً', hint: '/ شهر', popular: true },
-      { name: 'Ultimate', price: 'حسب الطلب', hint: 'مكاتب ومحاسبة حسب الاستخدام' },
+      { name: 'الباقة المجانية', price: '0 درهم', hint: '/ شهر · 15 فاتورة · 30 COD · 5 مسح ذكي' },
+      { name: 'الباقة Pro', price: '149 درهماً', hint: '/ شهر · بلا حدود ودعم أولوية', popular: true },
     ],
     auditTitle: 'التدقيق والامتثال — المغرب',
     auditSupport:
@@ -174,7 +170,7 @@ const COPY: Record<MarketingLocale, Copy> = {
     audiencesTitle: 'لمن؟',
     audiences: ['المقاولون الذاتيون', 'الشركات الصغرى والمتوسطة', 'المحاسبون والمكاتب', 'التجارة الإلكترونية'],
     finalTitle: 'اختر الباقة المناسبة لنشاطك.',
-    finalSupport: 'قارن المستقل والمهنة الحرة والشركات وUltimate.',
+    finalSupport: 'قارن الباقة المجانية وباقة Pro.',
     finalCta: 'الانتقال إلى الأسعار',
   },
 };
@@ -315,7 +311,7 @@ export function ZafirixMarketingLanding({ locale }: { locale: MarketingLocale })
         <div className="max-w-6xl mx-auto px-4 sm:px-6">
           <h2 className="text-2xl sm:text-3xl font-extrabold text-[#0F1F3D]">{c.pricingTitle}</h2>
           <p className="mt-2 text-slate-600 max-w-2xl">{c.pricingSupport}</p>
-          <div className="mt-8 grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3 sm:gap-4">
+          <div className="mt-8 grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4 max-w-3xl">
             {c.tiers.map((tier) => (
               <div
                 key={tier.name}

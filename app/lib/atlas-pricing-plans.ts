@@ -64,7 +64,7 @@ export const ATLAS_PRICING_PLANS: AtlasPricingPlan[] = [
     invoicesLimit: fixedLimit(15),
     description: "Essai gratuit pour découvrir ZAFIRIX PRO pendant 7 jours.",
     isPopular: false,
-    ctaLabel: 'Commencer l’essai',
+    ctaLabel: 'Commencer gratuitement',
   },
   {
     id: 'starter',
@@ -106,7 +106,7 @@ export const ATLAS_PRICING_PLANS: AtlasPricingPlan[] = [
     invoicesLimit: unlimited(),
     description: 'Le meilleur rapport valeur : volume confortable et collaboration.',
     isPopular: true,
-    ctaLabel: 'Choisir Pro',
+    ctaLabel: 'Passer à Pro',
   },
   {
     id: 'business',

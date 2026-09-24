@@ -1,12 +1,12 @@
 /**
  * Public marketing catalog for Zafirixpro pricing tiers
- * (aligned with zafirix_subscriptions plan_code).
+ * (Freemium: Plan Gratuit + Plan Pro).
  */
 
-import type { ZafirixPlanCode } from '@/app/types/zafirix-usage';
+export type ZafirixPublicTierCode = 'FREE' | 'PRO';
 
 export type ZafirixPublicTier = {
-  code: ZafirixPlanCode;
+  code: ZafirixPublicTierCode;
   /** URL / payment slug */
   slug: string;
   nameFr: string;
@@ -26,96 +26,48 @@ export type ZafirixPublicTier = {
 
 export const ZAFIRIX_PUBLIC_TIERS: ZafirixPublicTier[] = [
   {
-    code: 'INDEPENDANT',
-    slug: 'independant',
-    nameFr: 'Indépendant',
-    subtitleFr: 'Auto-entrepreneur',
-    taglineFr: 'Facturation et conformité essentielles pour démarrer solo.',
-    priceMadMonth: 49,
-    priceLabelFr: '49 MAD',
+    code: 'FREE',
+    slug: 'gratuit',
+    nameFr: 'Plan Gratuit',
+    subtitleFr: 'Freemium',
+    taglineFr: 'Démarrez sans carte — quotas mensuels pour facturer, suivre vos colis et scanner.',
+    priceMadMonth: 0,
+    priceLabelFr: '0 DH',
     priceHintFr: '/ mois',
     popular: false,
-    ctaLabel: 'Choisir Indépendant',
-    ctaHref: '/signup?plan=INDEPENDANT',
-    secondaryCtaLabel: 'Essai gratuit',
+    ctaLabel: 'Commencer gratuitement',
+    ctaHref: '/signup',
     benefitsFr: [
-      'Module Auto-entrepreneur',
-      'Factures & clients',
-      'Jusqu’à 40 factures / mois',
-      '25 expéditions / mois',
-      '80 requêtes IA / mois',
+      '15 Factures & Devis par mois',
+      '30 Suivis de colis COD par mois',
+      '5 Scans IA (OCR) par mois',
+      '1 Utilisateur inclus',
     ],
-    limitsFr: ['1 société', 'Packs pay-as-you-go disponibles'],
+    limitsFr: ['Quotas réinitialisés chaque mois'],
   },
   {
-    code: 'PERSONNE_PHYSIQUE',
-    slug: 'profession-liberale',
-    nameFr: 'Profession Libérale',
-    subtitleFr: 'Personne Physique',
-    taglineFr: 'Pilotage fiscal et ledger pour professions libérales.',
+    code: 'PRO',
+    slug: 'pro',
+    nameFr: 'Plan Pro',
+    subtitleFr: 'Pour scaler',
+    taglineFr: 'Volume illimité, scans IA étendus, équipe et support prioritaire.',
     priceMadMonth: 149,
-    priceLabelFr: '149 MAD',
-    priceHintFr: '/ mois',
-    popular: false,
-    ctaLabel: 'Choisir Profession Libérale',
-    ctaHref: '/signup?plan=PERSONNE_PHYSIQUE',
-    secondaryCtaLabel: 'Essai gratuit',
-    benefitsFr: [
-      'Module Personne Physique',
-      'Ledger & déclarations',
-      'Jusqu’à 60 factures / mois',
-      '120 requêtes IA / mois',
-      'Support prioritaire e-mail',
-    ],
-    limitsFr: ['1 société', 'Add-ons factures & IA'],
-  },
-  {
-    code: 'PME',
-    slug: 'pme',
-    nameFr: 'PME & E-commerce',
-    subtitleFr: 'Croissance & logistique',
-    taglineFr: 'Le forfait cœur de cible — volume, COD et collaboration.',
-    priceMadMonth: 399,
-    priceLabelFr: '399 MAD',
+    priceLabelFr: '149 DH',
     priceHintFr: '/ mois',
     popular: true,
-    ctaLabel: 'Choisir PME & E-commerce',
-    ctaHref: '/signup?plan=PME',
-    secondaryCtaLabel: 'Essai gratuit',
+    ctaLabel: 'Passer à Pro',
+    ctaHref: '/signup?plan=PRO',
     benefitsFr: [
-      'Logistique COD & inventaire',
-      '500 factures / mois',
-      '250 expéditions / mois',
-      '1 500 requêtes IA / mois',
-      'Multi-utilisateurs & packs add-on',
+      'Factures & Devis illimités',
+      'Suivi COD illimité',
+      'Scans IA étendus',
+      'Multi-utilisateurs & support prioritaire',
     ],
-    limitsFr: ['Multi-sociétés selon quota', 'Pay-as-you-go au-delà des plafonds'],
-  },
-  {
-    code: 'ULTIMATE',
-    slug: 'ultimate',
-    nameFr: 'Ultimate',
-    subtitleFr: 'Cabinets & Entreprises',
-    taglineFr: 'Usage-based, fair usage et accompagnement sur mesure.',
-    priceMadMonth: null,
-    priceLabelFr: 'Sur mesure',
-    priceHintFr: 'Usage-based',
-    popular: false,
-    ctaLabel: 'Demander un devis',
-    ctaHref: 'mailto:contact@zafirix.group?subject=ZAFIRIX%20Ultimate%20—%20devis',
-    secondaryCtaLabel: 'Parler à un conseiller',
-    benefitsFr: [
-      'Quotas illimités (fair usage)',
-      'Audit IA, gouvernance & pass auditeur',
-      'Cabinets multi-dossiers',
-      'Account manager & SLA',
-      'Packs & overages négociés',
-    ],
-    limitsFr: ['Tarification adaptée au volume', 'Contrat annuel possible'],
+    limitsFr: ['Sans plafonds mensuels sur factures, devis et COD'],
   },
 ];
 
 export function formatTierPrice(tier: ZafirixPublicTier): string {
   if (tier.priceMadMonth == null) return tier.priceLabelFr;
-  return `${tier.priceMadMonth.toLocaleString('fr-MA')} MAD`;
+  return `${tier.priceMadMonth.toLocaleString('fr-MA')} DH`;
 }

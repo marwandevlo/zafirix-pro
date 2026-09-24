@@ -306,18 +306,18 @@ test.describe('Prospective customer journey', () => {
       const pricingNav = page.locator('header').getByRole('link', { name: /^Tarifs$/ });
       await pricingNav.click();
       await page.waitForURL(/\/pricing/, { timeout: 15_000 });
-      const title = page.getByRole('heading', { name: /Quatre forfaits clairs/i });
+      const title = page.getByRole('heading', { name: /Freemium clair/i });
       const visible = await title.isVisible().catch(() => false);
       record('Pricing', 'Open /pricing from nav', visible ? 'Pass' : 'Fail', page.url());
       await expect(title).toBeVisible();
 
       await page.locator('#plans').scrollIntoViewIfNeeded();
-      const trialCta = page.getByRole('button', { name: /Essai 7 jours/i });
+      const trialCta = page.getByRole('button', { name: /Commencer gratuitement/i }).first();
       record(
         'Pricing',
-        'Trial CTA',
+        'Free CTA',
         (await trialCta.isVisible()) ? 'Pass' : 'Fail',
-        'Essai 7 jours — sans carte',
+        'Commencer gratuitement',
       );
       const overflow = await measureOverflow(page, 'pricing desktop');
       record(

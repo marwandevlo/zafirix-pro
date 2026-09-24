@@ -266,10 +266,10 @@ test.describe('Internal dashboard deep tour', () => {
     });
 
     await test.step('Pricing tiers (skip mailto CTAs)', async () => {
-      await expect(page.getByRole('heading', { name: /Quatre forfaits clairs/i })).toBeVisible();
+      await expect(page.getByRole('heading', { name: /Freemium clair/i })).toBeVisible();
       await page.locator('#plans').scrollIntoViewIfNeeded();
       record('Public', 'Pricing plans', 'Pass', 'plans section visible');
-      const trial = page.getByRole('button', { name: /Essai 7 jours/i });
+      const trial = page.getByRole('button', { name: /Commencer gratuitement/i }).first();
       if (await trial.isVisible()) {
         await trial.click();
         await page.waitForURL(/\/signup/, { timeout: 15_000 }).catch(() => undefined);
