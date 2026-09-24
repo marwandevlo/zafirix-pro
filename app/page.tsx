@@ -64,6 +64,7 @@ import { CompanySwitcher } from '@/app/components/shell/CompanySwitcher';
 import { CompanyMasterExportMenu } from '@/app/components/company/CompanyMasterExportMenu';
 import { ConsolidatedDashboardWidget } from '@/app/components/cabinet/ConsolidatedDashboardWidget';
 import { UsagePlanWidget } from '@/app/components/billing/UsagePlanWidget';
+import { FreemiumUsageWidget } from '@/app/components/billing/FreemiumUsageWidget';
 import { DeadlineRadarWidget } from '@/app/components/dashboard/DeadlineRadarWidget';
 import { LegalCalendarWidget } from '@/app/components/dashboard/LegalCalendarWidget';
 import { NotificationCenterWidget } from '@/app/components/dashboard/NotificationCenterWidget';
@@ -428,7 +429,10 @@ export default function Home() {
           <section className="grid grid-cols-1 xl:grid-cols-5 gap-4 lg:gap-5">
             <div className="xl:col-span-2">
               <DashboardSafeSection name="usage-plan">
-                <UsagePlanWidget />
+                <div className="space-y-4">
+                  <FreemiumUsageWidget />
+                  <UsagePlanWidget />
+                </div>
               </DashboardSafeSection>
             </div>
             <div className="xl:col-span-3 grid grid-cols-2 gap-3 sm:gap-4">

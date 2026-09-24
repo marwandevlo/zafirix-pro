@@ -10,6 +10,8 @@ import { USAGE_EVENT_TO_FEATURE } from '@/app/types/atlas-billing';
 import { checkZafirixUsage, consumeZafirixUsage } from '@/app/lib/zafirix-usage-server';
 import type { ZafirixMeterCode } from '@/app/types/zafirix-usage';
 import { isExpiredTrialMessage, shouldSkipExpiredTrial } from '@/app/lib/admin/admin-entitlement-guard';
+import { consumeFreemiumMeter } from '@/app/lib/atlas-freemium-server';
+import type { FreemiumMeter } from '@/app/lib/atlas-freemium';
 
 export type UsageEventType = keyof typeof USAGE_EVENT_TO_FEATURE;
 
@@ -22,6 +24,13 @@ const EVENT_TO_ZAFIRIX_METER: Partial<Record<UsageEventType, ZafirixMeterCode>> 
   document_upload: 'documents',
   ocr_request: 'ocr',
   invoice_created: 'invoices',
+  shipment_created: 'shipments',
+};
+
+const EVENT_TO_FREEMIUM: Partial<Record<UsageEventType, FreemiumMeter>> = {
+  invoice_created: 'invoices',
+  shipment_created: 'cod',
+  ocr_request: 'ai_scans',
 };
 
 export async function meterFeatureUsage(
@@ -59,6 +68,19 @@ export async function meterFeatureUsage(
         code: 'quota_exceeded',
         messageFr: zCheck.messageFr,
         suggestedAddons: zCheck.suggestedAddons,
+      };
+    }
+  }
+
+  const freemiumMeter = EVENT_TO_FREEMIUM[eventType];
+  if (enforce && freemiumMeter) {
+    const free = await consumeFreemiumMeter(db, userId, freemiumMeter, quantity, workspaceId);
+    if (!free.allowed) {
+      return {
+        ok: false,
+        status: 429,
+        code: 'quota_exceeded',
+        messageFr: free.messageFr,
       };
     }
   }

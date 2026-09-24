@@ -144,6 +144,11 @@ const STEPS = [
     file: '20260830010000_atlas_affiliate_earnings_dashboard.sql',
     probeTable: 'atlas_affiliate_tier_config',
   },
+  {
+    label: 'Freemium monthly usage counters',
+    file: '20260924160000_freemium_usage_limits.sql',
+    probeTable: 'atlas_workspace_usage_cycles',
+  },
 ];
 
 const VERIFY_TABLES = [
@@ -183,6 +188,7 @@ const VERIFY_TABLES = [
   'atlas_affiliate_tier_config',
   'atlas_affiliate_plan_rates',
   'analytics_events',
+  'atlas_workspace_usage_cycles',
 ];
 
 function parseCliArgs() {

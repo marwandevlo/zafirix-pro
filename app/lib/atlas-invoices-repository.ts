@@ -167,7 +167,7 @@ export async function listAtlasInvoices(opts?: ListAtlasInvoicesOptions): Promis
 export async function upsertAtlasInvoice(
   invoice: AtlasInvoice,
   opts?: { companyId?: string | null; clientId?: string | null },
-): Promise<{ ok: true } | { ok: false; error: string }> {
+): Promise<{ ok: true } | { ok: false; error: string; upgradeRequired?: boolean }> {
   if (!isAtlasSupabaseDataEnabled()) {
     const existing = readInvoicesFromLocalStorage();
     const next = existing.some((i) => i.id === invoice.id)
@@ -191,9 +191,24 @@ export async function upsertAtlasInvoice(
     if (!clientOk.ok) return { ok: false, error: clientOk.error };
   }
 
-  if (typeof invoice.id === 'string') {
-    const ownedInvoice = await requireOwnedInvoice(invoice.id, companyId);
+  const existingId = typeof invoice.id === 'string' ? invoice.id : null;
+  const existing = existingId ? await getAtlasInvoiceById(existingId, { companyId }) : null;
+
+  if (existingId && existing) {
+    const ownedInvoice = await requireOwnedInvoice(existingId, companyId);
     if (!ownedInvoice.ok) return { ok: false, error: ownedInvoice.error };
+  }
+
+  if (!existing) {
+    const { consumeFreemiumClient } = await import('@/app/lib/atlas-freemium-client');
+    const gate = await consumeFreemiumClient('invoices');
+    if (!gate.allowed) {
+      return {
+        ok: false,
+        error: gate.messageFr ?? 'Limite factures / devis atteinte. Passez à Pro.',
+        upgradeRequired: true,
+      };
+    }
   }
 
   const row = {
@@ -214,11 +229,11 @@ export async function upsertAtlasInvoice(
     updated_at: new Date().toISOString(),
   };
 
-  if (typeof invoice.id === 'string') {
+  if (existing && existingId) {
     const { error } = await supabase
       .from('atlas_invoices')
       .update(row)
-      .eq('id', invoice.id)
+      .eq('id', existingId)
       .eq('company_id', companyId);
     if (error) return { ok: false, error: error.message };
     const invMeta = (invoice.metadata ?? {}) as InvoiceInventoryMetadata;
@@ -234,7 +249,8 @@ export async function upsertAtlasInvoice(
       return {
         ok: false,
         error: error.message.replace(/^.*zafirix_quota_exceeded:\s*/i, '').trim()
-          || 'Quota factures atteint. Achetez un pack ou passez à un forfait supérieur.',
+          || 'Quota factures atteint. Passez à Pro pour continuer.',
+        upgradeRequired: true,
       };
     }
     return { ok: false, error: error.message };

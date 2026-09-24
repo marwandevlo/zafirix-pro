@@ -33,6 +33,7 @@ import {
   syncInvoiceUsageCount,
 } from '@/app/lib/atlas-usage-limits';
 import { TrialLimitNudgeModal } from '@/app/components/trial/TrialLimitNudgeModal';
+import { FreemiumUpgradeModal } from '@/app/components/billing/FreemiumUpgradeModal';
 import { AppSidebar } from '@/app/components/shell/AppSidebar';
 import { EmptyStateCta } from '@/app/components/ui/EmptyStateCta';
 import { trackOnboardingMilestoneOnce } from '@/app/lib/atlas-onboarding-milestones';
@@ -89,6 +90,7 @@ export default function FacturesPage() {
   const [insight, setInsight] = useState<{ loading: boolean; text: string }>({ loading: false, text: '' });
   const [limitNotice, setLimitNotice] = useState('');
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [upgradeOpen, setUpgradeOpen] = useState(false);
   const [limitModal, setLimitModal] = useState<{ open: boolean; variant: 'warning' | 'blocked'; title: string; desc: string }>({
     open: false,
     variant: 'warning',
@@ -230,12 +232,7 @@ export default function FacturesPage() {
     const invDecision = canCreateInvoice();
     if (!invDecision.allowed) {
       setLimitNotice(invDecision.messageFr ?? invDecision.messageAr ?? '');
-      setLimitModal({
-        open: true,
-        variant: 'blocked',
-        title: 'Limite factures (essai)',
-        desc: invDecision.messageFr ?? invDecision.messageAr ?? 'Passez à une offre payante pour continuer.',
-      });
+      setUpgradeOpen(true);
       return;
     }
     const opDecision = canPerformOperation();
@@ -280,6 +277,7 @@ export default function FacturesPage() {
       const res = await upsertAtlasInvoice(next, { companyId, clientId });
       if (!res.ok) {
         setLimitNotice(atlasInvoiceErrorMessage(res.error));
+        if (res.upgradeRequired) setUpgradeOpen(true);
         return;
       }
       const inv = await listAtlasInvoices();
@@ -808,6 +806,12 @@ export default function FacturesPage() {
 
   return (
     <div className="flex h-screen bg-gray-50 overflow-hidden">
+      <FreemiumUpgradeModal
+        open={upgradeOpen}
+        meter="invoices"
+        message={limitNotice || undefined}
+        onClose={() => setUpgradeOpen(false)}
+      />
       <TrialLimitNudgeModal
         open={limitModal.open}
         variant={limitModal.variant}
@@ -832,12 +836,7 @@ export default function FacturesPage() {
               const d = canCreateInvoice();
               if (!d.allowed) {
                 setLimitNotice(d.messageFr ?? d.messageAr ?? '');
-                setLimitModal({
-                  open: true,
-                  variant: 'blocked',
-                  title: 'Limite factures atteinte',
-                  desc: d.messageFr ?? d.messageAr ?? 'Mettez à niveau votre offre pour créer plus de factures.',
-                });
+                setUpgradeOpen(true);
                 return;
               }
               if (d.level === 'warning' && typeof sessionStorage !== 'undefined' && !sessionStorage.getItem('zafirix_invoice_warn_modal')) {

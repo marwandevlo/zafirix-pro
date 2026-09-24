@@ -14,6 +14,7 @@ import {
 } from '@/app/lib/use-enterprise-module-fetch';
 import type { AtlasDelivery, AtlasDeliveryPartner } from '@/app/types/atlas-enterprise-modules';
 import { deliveryStatusColor, deliveryStatusLabel } from '@/app/lib/atlas-logistics';
+import { FreemiumUpgradeModal } from '@/app/components/billing/FreemiumUpgradeModal';
 
 function LogisticsSkeleton() {
   return (
@@ -50,6 +51,7 @@ export default function LogistiquePage() {
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
+  const [upgradeOpen, setUpgradeOpen] = useState(false);
   const [mutating, setMutating] = useState(false);
   const [showForm, setShowForm] = useState(false);
   const [showPartnerForm, setShowPartnerForm] = useState(false);
@@ -191,7 +193,9 @@ export default function LogistiquePage() {
         }),
       });
       if (!res.ok) {
-        setActionError(await parseActionError(res));
+        const message = await parseActionError(res);
+        setActionError(message);
+        if (res.status === 429) setUpgradeOpen(true);
         return;
       }
       setShowForm(false);
@@ -326,6 +330,12 @@ export default function LogistiquePage() {
         </>
       }
     >
+      <FreemiumUpgradeModal
+        open={upgradeOpen}
+        meter="cod"
+        message={actionError || undefined}
+        onClose={() => setUpgradeOpen(false)}
+      />
       <div className="space-y-6">
           <BetaSurfaceBadge className="sm:hidden" />
           <ModuleLoadErrorBanner message={loadError} onDismiss={() => setLoadError(null)} />

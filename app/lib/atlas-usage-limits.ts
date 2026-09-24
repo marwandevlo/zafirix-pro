@@ -337,8 +337,8 @@ function decideHard(used: number, limit: number | null, kind: 'company' | 'invoi
           }
         : kind === 'invoice'
           ? {
-              messageFr: 'Limite d’essai : 5 factures maximum. Mettez à niveau pour continuer.',
-              messageAr: 'حد التجربة: 5 فواتير كحد أقصى. قم بالترقية للمتابعة.',
+              messageFr: 'Limite Gratuit : 15 factures / devis par mois. Passez à Pro pour continuer.',
+              messageAr: 'الحد المجاني: 15 فاتورة / عرض سعر شهرياً. انتقل إلى Pro للمتابعة.',
             }
           : {
               messageFr: 'Limite utilisateurs atteinte pour votre forfait.',

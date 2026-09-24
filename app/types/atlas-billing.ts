@@ -10,7 +10,9 @@ export type FeatureCode =
   | 'ocr_limit'
   | 'ai_requests_limit'
   | 'bank_accounts_limit'
-  | 'payroll_limit';
+  | 'payroll_limit'
+  | 'invoices_quotes_per_month'
+  | 'cod_shipments_per_month';
 
 export const ATLAS_FEATURE_CODES: FeatureCode[] = [
   'documents_per_month',
@@ -21,6 +23,8 @@ export const ATLAS_FEATURE_CODES: FeatureCode[] = [
   'ai_requests_limit',
   'bank_accounts_limit',
   'payroll_limit',
+  'invoices_quotes_per_month',
+  'cod_shipments_per_month',
 ];
 
 export type AtlasSubscriptionPlan = {
@@ -83,6 +87,8 @@ export const FEATURE_LABELS_FR: Record<FeatureCode, string> = {
   ai_requests_limit: 'Requêtes IA / mois',
   bank_accounts_limit: 'Comptes bancaires',
   payroll_limit: 'Paie / mois',
+  invoices_quotes_per_month: 'Factures & devis / mois',
+  cod_shipments_per_month: 'COD / expéditions / mois',
 };
 
 export const PLAN_CODES: PlanCode[] = ['FREE', 'STARTER', 'PRO', 'CABINET', 'ENTERPRISE'];
@@ -94,7 +100,8 @@ export const USAGE_EVENT_TO_FEATURE: Record<string, FeatureCode> = {
   document_upload: 'documents_per_month',
   ocr_request: 'ocr_limit',
   ai_request: 'ai_requests_limit',
-  invoice_created: 'documents_per_month',
+  invoice_created: 'invoices_quotes_per_month',
+  shipment_created: 'cod_shipments_per_month',
   payroll_run: 'payroll_limit',
   bank_import: 'bank_accounts_limit',
 };

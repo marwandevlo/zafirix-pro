@@ -253,6 +253,12 @@ export async function POST(request: NextRequest) {
     );
   }
 
+  const { consumeFreemiumMeter, freemiumDeniedResponse } = await import('@/app/lib/atlas-freemium-server');
+  const freemium = await consumeFreemiumMeter(admin, session.userId, 'cod', 1);
+  if (!freemium.allowed) {
+    return NextResponse.json(freemiumDeniedResponse(freemium), { status: 429 });
+  }
+
   let partnerName: string | null = body.carrier?.trim() ?? null;
   let partnerTemplate: string | null = null;
   if (body.partnerId) {

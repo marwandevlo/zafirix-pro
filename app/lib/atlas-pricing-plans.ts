@@ -61,7 +61,7 @@ export const ATLAS_PRICING_PLANS: AtlasPricingPlan[] = [
     companiesLimit: fixedLimit(1),
     usersLimit: fixedLimit(1),
     operationsLimit: fixedLimit(20),
-    invoicesLimit: fixedLimit(5),
+    invoicesLimit: fixedLimit(15),
     description: "Essai gratuit pour découvrir ZAFIRIX PRO pendant 7 jours.",
     isPopular: false,
     ctaLabel: 'Commencer l’essai',
