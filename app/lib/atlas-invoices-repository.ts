@@ -238,7 +238,7 @@ export async function upsertAtlasInvoice(
     if (error) return { ok: false, error: error.message };
     const invMeta = (invoice.metadata ?? {}) as InvoiceInventoryMetadata;
     if (invMeta.inventoryLines?.length) {
-      void syncInvoiceInventoryCogs(companyId, invoice.id, invMeta.inventoryLines);
+      void syncInvoiceInventoryCogs(companyId, String(invoice.id), invMeta.inventoryLines);
     }
     return { ok: true };
   }
