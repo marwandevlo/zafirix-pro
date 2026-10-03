@@ -9,6 +9,8 @@
 
 
 import type { AtlasCompany } from '@/app/types/atlas-company';
+import { placeholderCompanyName } from '@/app/lib/atlas-activation';
+import { getAtlasProfile } from '@/app/lib/atlas-profiles-repository';
 
 import { isAtlasSupabaseDataEnabled } from '@/app/lib/atlas-data-source';
 
@@ -132,6 +134,60 @@ export async function resolveClientIdByName(
 
   return match && typeof match.id === 'string' ? match.id : null;
 
+}
+
+/** Creates the signup placeholder when an invoice is saved with no active company. */
+export async function ensureDefaultPlaceholderCompany(): Promise<
+  { ok: true; dbRowId: string } | { ok: false; error: string }
+> {
+  const existingId = await getActiveCompanyDbRowId();
+  if (existingId) return { ok: true, dbRowId: existingId };
+
+  const companies = await listAtlasCompanies();
+  if (companies.length > 0) {
+    const id = String(companies[0].dbRowId ?? companies[0].id);
+    const active = await setActiveAtlasCompany(id);
+    if (!active.ok) return active;
+    return { ok: true, dbRowId: id };
+  }
+
+  let fullName = '';
+  let email = '';
+  if (isAtlasSupabaseDataEnabled()) {
+    const profile = await getAtlasProfile();
+    fullName = profile?.full_name ?? '';
+    email = profile?.email ?? '';
+  }
+
+  const name = placeholderCompanyName(fullName);
+  const nextCompany: AtlasCompany = {
+    id: isAtlasSupabaseDataEnabled() ? crypto.randomUUID() : Date.now(),
+    raisonSociale: name,
+    formeJuridique: 'SARL',
+    if_fiscal: '',
+    ice: '',
+    rc: '',
+    cnss: '',
+    adresse: '',
+    ville: '',
+    telephone: '',
+    email,
+    activite: '',
+    regimeTVA: 'mensuel',
+    actif: true,
+    balance: 0,
+    paymentTerms: { kind: 'preset', days: 30 },
+  };
+
+  const created = await upsertAtlasCompany(nextCompany);
+  if (!created.ok) return created;
+
+  if (isAtlasSupabaseDataEnabled()) {
+    const active = await setActiveAtlasCompany(created.dbRowId);
+    if (!active.ok) return active;
+  }
+
+  return { ok: true, dbRowId: created.dbRowId };
 }
 
 

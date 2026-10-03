@@ -15,6 +15,7 @@ import {
   writeCompaniesToLocalStorage,
 } from '@/app/lib/atlas-companies-repository';
 import { PublicFooter } from '@/app/components/public/PublicFooter';
+import { activationCallbackUrl, ACTIVATION_INVOICE_PATH } from '@/app/lib/atlas-activation';
 import { isAtlasSupabaseDataEnabled } from '@/app/lib/atlas-data-source';
 import { claimAtlasFreeTrialAfterAuth, shouldPersistAtlasTrialNotice } from '@/app/lib/atlas-trial-claim-client';
 import {
@@ -197,11 +198,14 @@ export default function SignUpPage() {
         password,
         options: {
           emailRedirectTo:
-            typeof window !== 'undefined'
-              ? `${window.location.origin}/auth/callback?next=/dashboard`
-              : undefined,
+            typeof window !== 'undefined' ? activationCallbackUrl(window.location.origin) : undefined,
           data: {
             full_name: trimmedFullName || undefined,
+            company_name: companyName.trim() || undefined,
+            company_type: companyType || undefined,
+            phone: normalizePhone(phone) || undefined,
+            city: city || undefined,
+            ice: ice.trim() || undefined,
           },
         },
       });
@@ -309,7 +313,7 @@ export default function SignUpPage() {
         setSuccess(
           'Compte créé. Si un e-mail de confirmation est requis, ouvrez le lien puis connectez-vous : l’essai gratuit s’activera ensuite selon l’éligibilité.',
         );
-        router.push('/login?next=/onboarding');
+        router.push(`/login?next=${encodeURIComponent(ACTIVATION_INVOICE_PATH)}`);
         return;
       }
 
@@ -317,7 +321,7 @@ export default function SignUpPage() {
         flow: isAtlasSupabaseDataEnabled() ? 'session' : 'local_demo',
       });
       setSuccess('Compte créé. Redirection…');
-      router.push('/onboarding');
+      router.push(ACTIVATION_INVOICE_PATH);
     } finally {
       setLoading(false);
     }

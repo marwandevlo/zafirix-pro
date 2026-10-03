@@ -19,6 +19,12 @@ const ALLOWED = new Set([
   'onboarding_first_company_created',
   'onboarding_first_client_created',
   'onboarding_first_invoice_created',
+  'onboarding_tour_started',
+  'onboarding_tour_completed',
+  'onboarding_wizard_opened',
+  'first_session_landed',
+  'invoice_blocked_no_company',
+  'first_invoice_started',
   'referral_progress',
   'reward_unlocked',
 ]);

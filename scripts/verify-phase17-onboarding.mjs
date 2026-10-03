@@ -98,14 +98,9 @@ const WIZARD_STEPS = ['company', 'fiscal', 'tva', 'accounting', 'payroll', 'bank
 WIZARD_STEPS.forEach((s) => check(`wizard step ${s}`, has(TYPES, `'${s}'`)));
 
 const CHECKLIST_IDS = [
-  'company_created',
-  'tva_configured',
-  'first_document',
   'first_invoice',
-  'first_ai_analysis',
-  'first_bank_import',
-  'first_payroll_run',
-  'setup_wizard_done',
+  'first_client',
+  'company_customized',
 ];
 CHECKLIST_IDS.forEach((id) => check(`checklist id ${id}`, has(TYPES, id)));
 
@@ -122,8 +117,8 @@ const COMPONENTS = [
 ];
 COMPONENTS.forEach((c) => check(`component ${c}`, exists(`app/components/onboarding/${c}`)));
 
-check('FirstRunManager listAtlasCompanies', has('app/components/onboarding/FirstRunManager.tsx', 'listAtlasCompanies'));
-check('FirstRunManager /setup redirect', has('app/components/onboarding/FirstRunManager.tsx', '/setup'));
+check('FirstRunManager keeps invoice path', has('app/components/onboarding/FirstRunManager.tsx', '/factures'));
+check('FirstRunManager keeps /setup optional', has('app/components/onboarding/FirstRunManager.tsx', '/setup'));
 check('ChecklistWidget buildChecklistItems', has('app/components/onboarding/OnboardingChecklistWidget.tsx', 'buildChecklistItems'));
 check('GettingStarted buildSmartRecommendations', has('app/components/onboarding/GettingStartedWidget.tsx', 'buildSmartRecommendations'));
 check('Tour TOUR_STEPS', has('app/components/onboarding/GuidedTourEngine.tsx', 'TOUR_STEPS'));
@@ -161,7 +156,7 @@ check('dashboard data-tour', has('app/page.tsx', 'data-tour="dashboard"'));
 check('nav /setup', has('app/lib/atlas-app-nav.ts', '/setup'));
 check('nav /help', has('app/lib/atlas-app-nav.ts', '/help'));
 check('chat onboarding context', has('app/api/assistant/chat/route.ts', 'buildOnboardingAiPromptBlock'));
-check('onboarding → setup', has('app/onboarding/page.tsx', '/setup'));
+check('onboarding → first invoice', has('app/onboarding/page.tsx', '/factures?welcome=1'));
 check('analytics allowlist wizard', has('app/lib/analytics-track.ts', 'onboarding_wizard_step'));
 check('analytics API allowlist feedback', has('app/api/analytics/track/route.ts', 'feedback_submitted'));
 
@@ -229,13 +224,9 @@ console.log('\n[10] Tour steps');
 
 console.log('\n[11] Smart recommendations');
 [
-  'create_company',
-  'configure_tva',
-  'upload_invoice',
   'first_invoice',
-  'complete_setup',
-  'payroll_setup',
-  'generate_liasse',
+  'first_client',
+  'customize_company',
 ].forEach((id) => check(`recommendation ${id}`, has(RECS, id)));
 
 console.log('\n[12] Demo workspace isolation');
@@ -389,7 +380,7 @@ const setupSrc = read('app/setup/page.tsx');
 );
 
 console.log('\n[34] Recommendation hrefs');
-['/setup', '/documents', '/factures', '/rh', '/liasse'].forEach((h) => check(`rec href ${h}`, has(RECS, h)));
+['/factures?welcome=1', '/clients', '/companies'].forEach((h) => check(`rec href ${h}`, has(RECS, h)));
 
 console.log('\n[35] Tour hrefs');
 ['/documents', '/factures', '/assistant', '/tva', '/liasse'].forEach((h) => check(`tour href ${h}`, has(TOUR, h)));
@@ -449,7 +440,7 @@ console.log('\n[42] Audit doc sections');
 );
 
 console.log('\n[43] Engine checklist hrefs');
-['/companies', '/setup', '/documents', '/factures', '/assistant', '/banque', '/rh'].forEach((h) =>
+['/factures?welcome=1', '/clients', '/companies'].forEach((h) =>
   check(`checklist href ${h}`, has(ENGINE, h)),
 );
 
@@ -487,15 +478,10 @@ for (let i = 0; i < 108; i++) {
 
 console.log('\n[31] Checklist labels French');
 [
-  'Société créée',
-  'TVA configurée',
-  'Premier document',
-  'Première facture',
-  'Première analyse IA',
-  'Premier import bancaire',
-  'Première paie',
-  'Assistant de configuration',
-].forEach((l) => check(`checklist label ${l.slice(0, 12)}`, has(ENGINE, l.split(' ')[0])));
+  'Créer ma première facture',
+  'Ajouter un client',
+  'Personnaliser les informations de mon entreprise',
+].forEach((l) => check(`checklist label ${l.slice(0, 24)}`, has(ENGINE, l)));
 
 console.log('\n[32] Nav item ids');
 ['setup', 'help'].forEach((id) => check(`nav id ${id}`, has('app/lib/atlas-app-nav.ts', id)));

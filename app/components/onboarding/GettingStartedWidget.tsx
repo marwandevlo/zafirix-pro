@@ -3,9 +3,8 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { Sparkles, Clock, PlayCircle, XCircle } from 'lucide-react';
-import { listAtlasCompanies } from '@/app/lib/atlas-companies-repository';
-import { listAtlasInvoices } from '@/app/lib/atlas-invoices-repository';
-import { isAtlasSupabaseDataEnabled } from '@/app/lib/atlas-data-source';
+import { loadChecklistSignals } from '@/app/lib/atlas-checklist-signals';
+import { trackOnboardingWizardOpened } from '@/app/lib/atlas-onboarding-analytics';
 import {
   buildChecklistItems,
   checklistCompletionPercent,
@@ -13,6 +12,7 @@ import {
   wizardProgressPercent,
   type ChecklistSignals,
 } from '@/app/lib/atlas-onboarding-engine';
+import { DEFAULT_ONBOARDING_PROGRESS, type OnboardingProgress } from '@/app/types/atlas-onboarding';
 import { buildSmartRecommendations } from '@/app/lib/atlas-smart-recommendations';
 import {
   DEMO_MODE_UPDATED_EVENT,
@@ -26,37 +26,24 @@ export function GettingStartedWidget({ lang }: Props) {
   const router = useRouter();
   const [signals, setSignals] = useState<ChecklistSignals>({
     hasCompany: false,
+    hasClient: false,
+    hasInvoice: false,
+    companyCustomized: false,
     tvaConfigured: false,
     hasDocument: false,
-    hasInvoice: false,
     hasAiAnalysis: false,
     hasBankImport: false,
     hasPayrollRun: false,
     wizardCompleted: false,
   });
+  const [progress, setProgress] = useState<OnboardingProgress>(DEFAULT_ONBOARDING_PROGRESS);
   const [demoActive, setDemoActive] = useState(false);
   const t = useMemo(() => (fr: string, ar: string) => (lang === 'ar' ? ar : fr), [lang]);
 
   const refreshSignals = useCallback(async () => {
-    const progress = loadOnboardingProgress();
-    let hasCompany = false;
-    let hasInvoice = false;
-    if (isAtlasSupabaseDataEnabled()) {
-      const [companies, inv] = await Promise.all([listAtlasCompanies(), listAtlasInvoices()]);
-      hasCompany = companies.length > 0;
-      hasInvoice = inv.length > 0;
-    }
-    const stepTva = progress.stepData.tva as { configured?: boolean } | undefined;
-    setSignals({
-      hasCompany,
-      tvaConfigured: Boolean(stepTva?.configured),
-      hasDocument: Boolean(progress.stepData.company?.firstDocument),
-      hasInvoice,
-      hasAiAnalysis: Boolean(progress.stepData.finish?.aiDone),
-      hasBankImport: Boolean(progress.stepData.banking?.imported),
-      hasPayrollRun: Boolean(progress.stepData.payroll?.runDone),
-      wizardCompleted: progress.wizardCompleted,
-    });
+    const next = await loadChecklistSignals();
+    setSignals(next);
+    setProgress(loadOnboardingProgress());
   }, []);
 
   const syncDemoState = useCallback(() => {
@@ -70,7 +57,6 @@ export function GettingStartedWidget({ lang }: Props) {
     return () => window.removeEventListener(DEMO_MODE_UPDATED_EVENT, syncDemoState);
   }, [syncDemoState, refreshSignals]);
 
-  const progress = loadOnboardingProgress();
   const checklistItems = buildChecklistItems(signals);
   const percent = checklistCompletionPercent(checklistItems);
   const wizardPct = wizardProgressPercent(progress.wizardStep, progress.wizardCompleted);
@@ -98,10 +84,13 @@ export function GettingStartedWidget({ lang }: Props) {
         </div>
         <button
           type="button"
-          onClick={() => router.push('/setup')}
+          onClick={() => {
+            trackOnboardingWizardOpened('getting_started');
+            router.push('/setup');
+          }}
           className="text-xs font-semibold text-indigo-700 hover:text-indigo-900 bg-white border border-indigo-200 px-3 py-1.5 rounded-lg"
         >
-          {t('Assistant setup', 'معالج الإعداد')} ({wizardPct}%)
+          {t('Assistant (optionnel)', 'معالج اختياري')} ({wizardPct}%)
         </button>
       </div>
       <div className="mt-3 h-2 rounded-full bg-indigo-100 overflow-hidden">

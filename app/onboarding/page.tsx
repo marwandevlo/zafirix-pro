@@ -108,7 +108,7 @@ export default function OnboardingPage() {
       }
 
       trackOnboardingStarted('profile_onboarding');
-      router.push('/setup');
+      router.push('/factures?welcome=1');
     } finally {
       setSaving(false);
     }

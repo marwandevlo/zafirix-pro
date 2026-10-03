@@ -2,7 +2,7 @@
  * Phase 17 — Onboarding progress, checklist, completion scoring.
  */
 
-import type { ChecklistItem, ChecklistItemId, OnboardingProgress, SetupWizardStepId } from '@/app/types/atlas-onboarding';
+import type { ChecklistItem, OnboardingProgress, SetupWizardStepId } from '@/app/types/atlas-onboarding';
 import { DEFAULT_ONBOARDING_PROGRESS, SETUP_WIZARD_STEPS } from '@/app/types/atlas-onboarding';
 
 const STORAGE_KEY = 'atlas_onboarding_progress_v1';
@@ -19,14 +19,23 @@ export function loadOnboardingProgress(): OnboardingProgress {
   }
 }
 
-export function saveOnboardingProgress(progress: OnboardingProgress): void {
+export function writeOnboardingProgressLocal(progress: OnboardingProgress, notify = true): void {
   if (typeof window === 'undefined') return;
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(progress));
-    window.dispatchEvent(new Event('atlas-onboarding-updated'));
+    if (notify) window.dispatchEvent(new Event('atlas-onboarding-updated'));
   } catch {
     /* ignore */
   }
+}
+
+export function saveOnboardingProgress(progress: OnboardingProgress): void {
+  writeOnboardingProgressLocal(progress);
+  void import('@/app/lib/atlas-onboarding-progress-sync')
+    .then((mod) => mod.pushOnboardingProgress(progress))
+    .catch(() => {
+      /* local cache already written */
+    });
 }
 
 export function markFirstRunSeen(): void {
@@ -66,9 +75,11 @@ export function wizardProgressPercent(step: SetupWizardStepId, completed: boolea
 
 export type ChecklistSignals = {
   hasCompany: boolean;
+  hasClient: boolean;
+  hasInvoice: boolean;
+  companyCustomized: boolean;
   tvaConfigured: boolean;
   hasDocument: boolean;
-  hasInvoice: boolean;
   hasAiAnalysis: boolean;
   hasBankImport: boolean;
   hasPayrollRun: boolean;
@@ -76,29 +87,33 @@ export type ChecklistSignals = {
 };
 
 export function buildChecklistItems(signals: ChecklistSignals): ChecklistItem[] {
-  const items: Array<Omit<ChecklistItem, 'done'> & { id: ChecklistItemId }> = [
-    { id: 'company_created', labelFr: 'Société créée', labelAr: 'تم إنشاء الشركة', href: '/companies' },
-    { id: 'tva_configured', labelFr: 'TVA configurée', labelAr: 'تم إعداد TVA', href: '/setup' },
-    { id: 'first_document', labelFr: 'Premier document uploadé', labelAr: 'أول وثيقة مرفوعة', href: '/documents' },
-    { id: 'first_invoice', labelFr: 'Première facture créée', labelAr: 'أول فاتورة', href: '/factures' },
-    { id: 'first_ai_analysis', labelFr: 'Première analyse IA', labelAr: 'أول تحليل ذكي', href: '/assistant' },
-    { id: 'first_bank_import', labelFr: 'Premier import bancaire', labelAr: 'أول استيراد بنكي', href: '/banque' },
-    { id: 'first_payroll_run', labelFr: 'Première paie exécutée', labelAr: 'أول مسير رواتب', href: '/rh' },
-    { id: 'setup_wizard_done', labelFr: 'Assistant de configuration terminé', labelAr: 'اكتمل معالج الإعداد', href: '/setup' },
+  const items: ChecklistItem[] = [
+    {
+      id: 'first_invoice',
+      labelFr: 'Créer ma première facture',
+      labelAr: 'إنشاء أول فاتورة',
+      href: '/factures?welcome=1',
+      done: signals.hasInvoice,
+      primary: true,
+    },
+    {
+      id: 'first_client',
+      labelFr: 'Ajouter un client',
+      labelAr: 'إضافة عميل',
+      href: '/clients',
+      done: signals.hasClient,
+    },
+    {
+      id: 'company_customized',
+      labelFr: 'Personnaliser les informations de mon entreprise',
+      labelAr: 'تخصيص معلومات الشركة',
+      href: '/companies',
+      done: signals.companyCustomized,
+      optional: true,
+    },
   ];
 
-  const doneMap: Record<ChecklistItemId, boolean> = {
-    company_created: signals.hasCompany,
-    tva_configured: signals.tvaConfigured,
-    first_document: signals.hasDocument,
-    first_invoice: signals.hasInvoice,
-    first_ai_analysis: signals.hasAiAnalysis,
-    first_bank_import: signals.hasBankImport,
-    first_payroll_run: signals.hasPayrollRun,
-    setup_wizard_done: signals.wizardCompleted,
-  };
-
-  return items.map((item) => ({ ...item, done: doneMap[item.id] }));
+  return items;
 }
 
 export function checklistCompletionPercent(items: ChecklistItem[]): number {

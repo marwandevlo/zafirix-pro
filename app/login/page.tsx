@@ -12,6 +12,7 @@ import {
   captureReferralFromWindow,
   logReferralLandingClick,
 } from '@/app/lib/atlas-referral-client';
+import { ACTIVATION_INVOICE_PATH, activationCallbackUrl } from '@/app/lib/atlas-activation';
 import { resolvePostAuthRoute } from '@/app/lib/atlas-auth-routing';
 import { fetchSessionProfileStatus } from '@/app/lib/atlas-profile-status-client';
 
@@ -82,9 +83,7 @@ export default function LoginPage() {
         password,
         options: {
           emailRedirectTo:
-            typeof window !== 'undefined'
-              ? `${window.location.origin}/auth/callback?next=/dashboard`
-              : undefined,
+            typeof window !== 'undefined' ? activationCallbackUrl(window.location.origin) : undefined,
         },
       });
       if (error) setError(error.message);
@@ -104,8 +103,10 @@ export default function LoginPage() {
               console.warn('[login] welcome email failed', error instanceof Error ? error.message : error);
             });
           }
+          router.push(ACTIVATION_INVOICE_PATH);
+        } else {
+          setSuccess('Compte créé ! Vérifiez votre e-mail si une confirmation est requise, puis connectez-vous pour activer l’essai selon l’éligibilité.');
         }
-        setSuccess('Compte créé ! Vérifiez votre e-mail si une confirmation est requise, puis connectez-vous pour activer l’essai selon l’éligibilité.');
       }
     } else {
       try {

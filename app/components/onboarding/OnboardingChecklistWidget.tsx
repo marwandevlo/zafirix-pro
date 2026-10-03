@@ -3,9 +3,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { CheckCircle2, Circle } from 'lucide-react';
-import { listAtlasCompanies } from '@/app/lib/atlas-companies-repository';
-import { listAtlasInvoices } from '@/app/lib/atlas-invoices-repository';
-import { isAtlasSupabaseDataEnabled } from '@/app/lib/atlas-data-source';
+import { loadChecklistSignals } from '@/app/lib/atlas-checklist-signals';
 import {
   buildChecklistItems,
   checklistCompletionPercent,
@@ -21,9 +19,11 @@ export function OnboardingChecklistWidget({ lang }: Props) {
   const router = useRouter();
   const [signals, setSignals] = useState<ChecklistSignals>({
     hasCompany: false,
+    hasClient: false,
+    hasInvoice: false,
+    companyCustomized: false,
     tvaConfigured: false,
     hasDocument: false,
-    hasInvoice: false,
     hasAiAnalysis: false,
     hasBankImport: false,
     hasPayrollRun: false,
@@ -35,27 +35,7 @@ export function OnboardingChecklistWidget({ lang }: Props) {
   useEffect(() => {
     const p = loadOnboardingProgress();
     setDismissed(p.checklistDismissed);
-    void (async () => {
-      const progress = loadOnboardingProgress();
-      let hasCompany = false;
-      let hasInvoice = false;
-      if (isAtlasSupabaseDataEnabled()) {
-        const [companies, inv] = await Promise.all([listAtlasCompanies(), listAtlasInvoices()]);
-        hasCompany = companies.length > 0;
-        hasInvoice = inv.length > 0;
-      }
-      const stepTva = progress.stepData.tva as { configured?: boolean } | undefined;
-      setSignals({
-        hasCompany,
-        tvaConfigured: Boolean(stepTva?.configured),
-        hasDocument: Boolean(progress.stepData.company?.firstDocument),
-        hasInvoice,
-        hasAiAnalysis: Boolean(progress.stepData.finish?.aiDone),
-        hasBankImport: Boolean(progress.stepData.banking?.imported),
-        hasPayrollRun: Boolean(progress.stepData.payroll?.runDone),
-        wizardCompleted: progress.wizardCompleted,
-      });
-    })();
+    void loadChecklistSignals().then(setSignals);
   }, []);
 
   const items = buildChecklistItems(signals);
@@ -89,19 +69,32 @@ export function OnboardingChecklistWidget({ lang }: Props) {
       </div>
       <ul className="mt-4 space-y-2">
         {items.map((item) => (
-          <li key={item.id} className="flex items-center gap-2 text-sm">
-            {item.done ? (
-              <CheckCircle2 className="text-emerald-600 shrink-0" size={18} />
+          <li key={item.id}>
+            {item.primary && !item.done ? (
+              <button
+                type="button"
+                onClick={() => router.push(item.href)}
+                className="w-full rounded-xl bg-[#1B2A4A] px-4 py-2.5 text-sm font-semibold text-white hover:bg-[#243660]"
+              >
+                {t(item.labelFr, item.labelAr)}
+              </button>
             ) : (
-              <Circle className="text-emerald-300 shrink-0" size={18} />
+              <div className="flex items-center gap-2 text-sm">
+                {item.done ? (
+                  <CheckCircle2 className="text-emerald-600 shrink-0" size={18} />
+                ) : (
+                  <Circle className="text-emerald-300 shrink-0" size={18} />
+                )}
+                <button
+                  type="button"
+                  onClick={() => router.push(item.href)}
+                  className={`text-left ${item.done ? 'text-gray-500 line-through' : 'text-gray-900 font-medium hover:text-emerald-800'}`}
+                >
+                  {t(item.labelFr, item.labelAr)}
+                  {item.optional ? <span className="ml-1 text-xs font-normal text-gray-400">{t('(optionnel)', '(اختياري)')}</span> : null}
+                </button>
+              </div>
             )}
-            <button
-              type="button"
-              onClick={() => router.push(item.href)}
-              className={`text-left ${item.done ? 'text-gray-500 line-through' : 'text-gray-900 font-medium hover:text-emerald-800'}`}
-            >
-              {t(item.labelFr, item.labelAr)}
-            </button>
           </li>
         ))}
       </ul>

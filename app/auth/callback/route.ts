@@ -8,8 +8,11 @@ import { attachReferralSafely } from '@/app/lib/atlas-referral-server';
 import { ensureUserProfile } from '@/app/lib/ensure-user-profile';
 import { ensurePlatformSuperAdminSession } from '@/app/lib/admin/platform-super-admin';
 import { recordUserLogin } from '@/app/lib/atlas-user-activity';
+import { ACTIVATION_INVOICE_PATH } from '@/app/lib/atlas-activation';
+import { ensureSignupPlaceholderCompany } from '@/app/lib/atlas-signup-company';
+import { recordServerAnalyticsEvent } from '@/app/lib/server-analytics-event';
 
-const DEFAULT_NEXT = '/dashboard';
+const DEFAULT_NEXT = ACTIVATION_INVOICE_PATH;
 
 function safeNextPath(raw: string | null): string {
   const next = String(raw ?? '').trim() || DEFAULT_NEXT;
@@ -135,6 +138,29 @@ export async function GET(request: NextRequest) {
         }
       }
       await ensurePlatformSuperAdminSession(admin, userData.user);
+
+      let createdCompany = false;
+      try {
+        const placeholder = await ensureSignupPlaceholderCompany(admin, userData.user);
+        createdCompany = placeholder.created;
+      } catch (error) {
+        console.warn('[auth/callback] placeholder company failed', {
+          message: error instanceof Error ? error.message : error,
+        });
+      }
+
+      if (type === 'signup' || createdCompany) {
+        console.info('[auth/callback] signup_completed', {
+          source: 'email_callback',
+          userId: userData.user.id,
+        });
+        await recordServerAnalyticsEvent(admin, {
+          userId: userData.user.id,
+          eventName: 'signup_completed',
+          path: '/auth/callback',
+          metadata: { source: 'email_callback' },
+        });
+      }
     } else {
       console.warn('[auth/callback] service_role missing — profile not ensured server-side');
     }

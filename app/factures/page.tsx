@@ -17,7 +17,7 @@ import { isAtlasSupabaseDataEnabled } from '@/app/lib/atlas-data-source';
 import type { AtlasPayment } from '@/app/types/atlas-payment';
 import { listAtlasPayments, upsertAtlasPayment } from '@/app/lib/atlas-payments-repository';
 import { fetchAi } from '@/app/lib/fetch-ai';
-import { getActiveAtlasCompany, getActiveCompanyDbRowId, resolveClientIdByName } from '@/app/lib/atlas-active-company';
+import { ensureDefaultPlaceholderCompany, getActiveAtlasCompany, getActiveCompanyDbRowId, resolveClientIdByName } from '@/app/lib/atlas-active-company';
 import {
   getCompanyWorkspaceGeneration,
   isCurrentCompanyWorkspaceGeneration,
@@ -37,6 +37,8 @@ import { FreemiumUpgradeModal } from '@/app/components/billing/FreemiumUpgradeMo
 import { AppSidebar } from '@/app/components/shell/AppSidebar';
 import { EmptyStateCta } from '@/app/components/ui/EmptyStateCta';
 import { trackOnboardingMilestoneOnce } from '@/app/lib/atlas-onboarding-milestones';
+import { trackEvent } from '@/app/lib/analytics-track';
+import { trackInitialAuthenticatedLanding } from '@/app/lib/atlas-activation-telemetry';
 import type { ExportColumn } from '@/app/components/ExportMenu';
 import type { GlobalTableColumn } from '@/app/components/data-grid/GlobalTable';
 import { exportTable } from '@/app/lib/atlas-table-export';
@@ -101,7 +103,7 @@ export default function FacturesPage() {
   const [showForm, setShowForm] = useState(false);
   const [termsKind, setTermsKind] = useState<'30' | '60' | '90' | 'custom'>('30');
   const [termsCustomDays, setTermsCustomDays] = useState('45');
-  const [form, setForm] = useState({ numero: '', client: '', date: '', montantHT: '', taux: '20' });
+  const [form, setForm] = useState({ numero: '', client: '', date: '', designation: '', montantHT: '', taux: '20' });
   const [confirmDeleteId, setConfirmDeleteId] = useState<AtlasInvoice['id'] | null>(null);
   const [historyInvoiceId, setHistoryInvoiceId] = useState<string | null>(null);
   const [paymentForm, setPaymentForm] = useState<{ openFor: AtlasInvoice['id'] | null; amount: string; paidAt: string }>({
@@ -116,7 +118,7 @@ export default function FacturesPage() {
 
   const resetInvoiceUiState = useCallback(() => {
     setShowForm(false);
-    setForm({ numero: '', client: '', date: '', montantHT: '', taux: '20' });
+    setForm({ numero: '', client: '', date: '', designation: '', montantHT: '', taux: '20' });
     setTermsKind('30');
     setTermsCustomDays('45');
     setPaymentForm({ openFor: null, amount: '', paidAt: todayYmd() });
@@ -218,14 +220,55 @@ export default function FacturesPage() {
     });
   }, [loadPageData]);
 
+  useEffect(() => {
+    trackInitialAuthenticatedLanding();
+  }, []);
+
+  useEffect(() => {
+    if (searchParams.get('welcome') !== '1') return;
+    setShowForm(true);
+    try {
+      if (sessionStorage.getItem('atlas_invoice_started_welcome') === '1') return;
+      sessionStorage.setItem('atlas_invoice_started_welcome', '1');
+    } catch {
+      /* ignore */
+    }
+    trackEvent('first_invoice_started', { source: 'welcome' });
+  }, [searchParams]);
+
+  useEffect(() => {
+    const open = () => {
+      setShowForm((current) => {
+        if (!current) trackEvent('first_invoice_started', { source: 'nouvelle_facture' });
+        return true;
+      });
+    };
+    window.addEventListener('atlas-open-invoice-form', open);
+    return () => window.removeEventListener('atlas-open-invoice-form', open);
+  }, []);
+
+  const openInvoiceForm = (source: 'nouvelle_facture' | 'empty_state') => {
+    setShowForm(true);
+    trackEvent('first_invoice_started', { source });
+  };
+
   const addFacture = async () => {
     if (!form.numero || !form.client || !form.montantHT) return;
+    let companyId: string | null = null;
     if (isAtlasSupabaseDataEnabled()) {
       await refreshAtlasUsageState();
-      const companyId = await getActiveCompanyDbRowId();
+      companyId = await getActiveCompanyDbRowId();
       if (!companyId) {
-        setLimitNotice('Sélectionnez une société active dans Mes sociétés pour créer une facture.');
-        return;
+        const healed = await ensureDefaultPlaceholderCompany();
+        if (!healed.ok) {
+          trackEvent('invoice_blocked_no_company', { reason: healed.error });
+          setLimitNotice(
+            'Impossible d’enregistrer la facture : aucune société active. Réessayez, ou créez-en une dans Mes sociétés.',
+          );
+          return;
+        }
+        companyId = healed.dbRowId;
+        setActiveCompanyId(companyId);
       }
     }
     const wasEmpty = invoices.length === 0;
@@ -267,12 +310,12 @@ export default function FacturesPage() {
       status: 'sent',
       createdAt: now,
       updatedAt: now,
+      ...(form.designation.trim() ? { metadata: { designation: form.designation.trim() } } : {}),
     };
 
     const updated = [...invoices, next];
 
     if (isAtlasSupabaseDataEnabled()) {
-      const companyId = await getActiveCompanyDbRowId();
       const clientId = await resolveClientIdByName(form.client, companyId);
       const res = await upsertAtlasInvoice(next, { companyId, clientId });
       if (!res.ok) {
@@ -291,7 +334,7 @@ export default function FacturesPage() {
     incrementUsage('operations', 1);
     if (wasEmpty) trackOnboardingMilestoneOnce('atlas_ms_first_invoice', 'onboarding_first_invoice_created');
 
-    setForm({ numero: '', client: '', date: '', montantHT: '', taux: '20' });
+    setForm({ numero: '', client: '', date: '', designation: '', montantHT: '', taux: '20' });
     setTermsKind('30');
     setTermsCustomDays('45');
     setShowForm(false);
@@ -826,12 +869,14 @@ export default function FacturesPage() {
       <AppSidebar variant="module" />
 
       <main className="flex-1 flex flex-col min-w-0 overflow-hidden">
-        <header className="bg-white border-b border-gray-200 px-8 py-4 flex items-center justify-between">
+        <header className="bg-white border-b border-gray-200 px-4 sm:px-8 py-4 flex flex-wrap items-center justify-between gap-3">
           <div>
             <h1 className="text-xl font-bold text-gray-800">Factures</h1>
             <p className="text-xs text-gray-400 mt-0.5">Gestion des factures clients</p>
           </div>
           <button
+            id="tour-new-invoice"
+            type="button"
             onClick={() => {
               const d = canCreateInvoice();
               if (!d.allowed) {
@@ -848,7 +893,18 @@ export default function FacturesPage() {
                   desc: d.messageFr ?? d.messageAr ?? '',
                 });
               }
-              setShowForm(!showForm);
+              let tourKeepsFormOpen = false;
+              try {
+                const phase = sessionStorage.getItem('atlas_onboarding_tour_phase');
+                tourKeepsFormOpen = phase === 'create' || phase === 'form';
+              } catch {
+                tourKeepsFormOpen = false;
+              }
+              if (showForm && !tourKeepsFormOpen) {
+                setShowForm(false);
+              } else if (!showForm) {
+                openInvoiceForm('nouvelle_facture');
+              }
             }}
             className="flex items-center gap-2 px-4 py-2 bg-[#1B2A4A] text-white rounded-lg text-sm hover:bg-[#243660] transition-colors"
           >
@@ -996,16 +1052,25 @@ export default function FacturesPage() {
           )}
 
           {showForm && (
-            <div className="bg-white rounded-xl p-6 shadow-sm border border-blue-200">
+            <div className="bg-white rounded-xl p-4 sm:p-6 shadow-sm border border-blue-200">
               <h2 className="font-semibold text-gray-700 mb-4">Nouvelle facture</h2>
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <input value={form.numero} onChange={e => setForm({...form, numero: e.target.value})} placeholder="Numéro (ex: F-2026-004)" className="px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:border-blue-400" />
-                <input value={form.client} onChange={e => setForm({...form, client: e.target.value})} placeholder="Nom du client" className="px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:border-blue-400" />
+                <input id="tour-client-step" value={form.client} onChange={e => setForm({...form, client: e.target.value})} placeholder="Nom du client" className="px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:border-blue-400" />
                 <div>
                   <label className="text-xs text-gray-500 mb-1 block">Date émission</label>
                   <input value={form.date} onChange={e => setForm({...form, date: e.target.value})} type="date" className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:border-blue-400" />
                 </div>
-                <input value={form.montantHT} onChange={e => setForm({...form, montantHT: e.target.value})} placeholder="Montant HT (MAD)" type="number" className="px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:border-blue-400" />
+                <div id="tour-items-step" className="md:col-span-2 grid grid-cols-1 sm:grid-cols-2 gap-4 rounded-xl border border-dashed border-blue-200 bg-blue-50/40 p-3">
+                  <div>
+                    <label className="text-xs text-gray-500 mb-1 block">Désignation / السلعة</label>
+                    <input value={form.designation} onChange={e => setForm({...form, designation: e.target.value})} placeholder="Service ou produit" className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:border-blue-400 bg-white" />
+                  </div>
+                  <div>
+                    <label className="text-xs text-gray-500 mb-1 block">Montant HT (MAD)</label>
+                    <input value={form.montantHT} onChange={e => setForm({...form, montantHT: e.target.value})} placeholder="Montant HT (MAD)" type="number" className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:border-blue-400 bg-white" />
+                  </div>
+                </div>
                 <div>
                   <label className="text-xs text-gray-500 mb-1 block">Délai de paiement</label>
                   <div className="flex gap-2">
@@ -1046,8 +1111,8 @@ export default function FacturesPage() {
                   <option value="7">TVA 7%</option>
                   <option value="0">Exonéré</option>
                 </select>
-                <div className="flex gap-2">
-                  <button type="button" onClick={() => void addFacture()} className="flex-1 px-4 py-2 bg-[#1B2A4A] text-white rounded-lg text-sm hover:bg-[#243660] transition-colors">Créer</button>
+                <div className="flex gap-2 md:col-span-2">
+                  <button id="tour-save-step" type="button" onClick={() => void addFacture()} className="flex-1 px-4 py-2 bg-[#1B2A4A] text-white rounded-lg text-sm hover:bg-[#243660] transition-colors">Créer</button>
                   <button onClick={() => setShowForm(false)} className="px-4 py-2 border border-gray-200 rounded-lg text-sm text-gray-600 hover:bg-gray-50">Annuler</button>
                 </div>
               </div>
@@ -1109,11 +1174,11 @@ export default function FacturesPage() {
                 emptyState={
                   <EmptyStateCta
                     lang="fr"
-                    title="Aucune facture"
-                    description="Créez votre première facture client pour suivre encaissements et relances."
-                    primaryLabelFr="Ajouter maintenant"
-                    primaryLabelAr="ابدأ الآن"
-                    onPrimary={() => setShowForm(true)}
+                    title="Créez votre première facture en 30 secondes"
+                    description="Client, montant HT, et c'est enregistré. Pas besoin de configuration complexe pour commencer."
+                    primaryLabelFr="Créer ma facture"
+                    primaryLabelAr="إنشاء فاتورة"
+                    onPrimary={() => openInvoiceForm('empty_state')}
                   />
                 }
               />

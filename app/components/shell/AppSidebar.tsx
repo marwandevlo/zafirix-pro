@@ -18,6 +18,7 @@ import {
   type AtlasAppNavItem,
 } from '@/app/lib/atlas-app-nav';
 import type { User } from '@supabase/supabase-js';
+import { trackOnboardingWizardOpened } from '@/app/lib/atlas-onboarding-analytics';
 import { supabase } from '@/app/lib/supabase';
 import { isOwnerEmail, jwtShowsPlatformSuperAdmin } from '@/app/lib/owner';
 import { SoundEffectsSidebarControl } from '@/app/components/sound/SoundEffectsSidebarControl';
@@ -140,6 +141,12 @@ export function AppSidebar({
     };
   }, []);
 
+  useEffect(() => {
+    const open = () => setMenuOpen?.(true);
+    window.addEventListener('atlas-open-mobile-nav', open);
+    return () => window.removeEventListener('atlas-open-mobile-nav', open);
+  }, [setMenuOpen]);
+
   const visibleItems = useMemo(() => {
     const base = filterAtlasNavItemsForPath(pathname);
     return showAdminNav ? base : base.filter((item) => item.id !== 'admin');
@@ -152,6 +159,9 @@ export function AppSidebar({
   const go = (href: string) => {
     onNavigate?.();
     setMenuOpen?.(false);
+    if (href === '/setup' || href.startsWith('/setup?')) {
+      trackOnboardingWizardOpened('sidebar');
+    }
     router.push(href);
   };
 
@@ -190,6 +200,7 @@ export function AppSidebar({
       <button
         key={item.id}
         type="button"
+        id={item.id === 'factures' ? 'menu-item-factures' : undefined}
         onClick={() => go(item.href)}
         className={navButtonClass(item, isActive)}
         title={item.href}

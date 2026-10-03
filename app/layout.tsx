@@ -8,6 +8,7 @@ import { EmailLifecycleBootstrap } from "@/app/components/lifecycle/EmailLifecyc
 import { RecoveryHashRedirectScript } from "@/app/components/auth/RecoveryHashRedirectScript";
 import { AppSubscriptionProviders } from "@/app/components/subscription/AppSubscriptionProviders";
 import { FirstRunManager } from "@/app/components/onboarding/FirstRunManager";
+import { DashboardOnboardingTour } from "@/app/components/onboarding/DashboardOnboardingTour";
 import { SoundEffectsGlobalChrome } from "@/app/components/sound/SoundEffectsGlobalChrome";
 import { UserPresencePing } from "@/app/components/activity/UserPresencePing";
 import { PageViewTracker } from "@/app/components/analytics/PageViewTracker";
@@ -137,6 +138,7 @@ export default function RootLayout({
         <PageViewTracker />
         <UserPresencePing />
         <FirstRunManager />
+        <DashboardOnboardingTour />
         {enableGlobalSearchOverlay ? <GlobalSearchOverlay /> : null}
         {enableAssistantOverlay ? <AssistantOverlay /> : null}
         <PwaRegister />

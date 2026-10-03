@@ -17,89 +17,41 @@ export type SmartRecommendation = {
 export function buildSmartRecommendations(signals: ChecklistSignals): SmartRecommendation[] {
   const recs: SmartRecommendation[] = [];
 
-  if (!signals.hasCompany) {
+  if (!signals.hasInvoice) {
     recs.push({
-      id: 'create_company',
-      titleFr: 'Créez votre société',
-      titleAr: 'أنشئ شركتك',
-      descriptionFr: 'Commencez par renseigner ICE, RC et IF.',
-      descriptionAr: 'ابدأ بإدخال ICE وRC وIF.',
-      href: '/setup',
+      id: 'first_invoice',
+      titleFr: 'Créer ma première facture',
+      titleAr: 'إنشاء أول فاتورة',
+      descriptionFr: 'Client, montant HT, et c’est enregistré.',
+      descriptionAr: 'عميل ومبلغ دون ضريبة، ثم يُحفظ.',
+      href: '/factures?welcome=1',
       priority: 100,
     });
   }
 
-  if (signals.hasCompany && !signals.tvaConfigured) {
+  if (!signals.hasClient) {
     recs.push({
-      id: 'configure_tva',
-      titleFr: 'Configurez la TVA',
-      titleAr: 'اضبط TVA',
-      descriptionFr: 'Définissez votre régime et vos taux de TVA.',
-      descriptionAr: 'حدد نظام ومعدلات TVA.',
-      href: '/setup',
-      priority: 90,
-    });
-  }
-
-  if (!signals.hasDocument) {
-    recs.push({
-      id: 'upload_invoice',
-      titleFr: 'Uploadez votre première facture',
-      titleAr: 'ارفع أول فاتورة',
-      descriptionFr: 'Documents IA extrait automatiquement les données.',
-      descriptionAr: 'Documents IA يستخرج البيانات تلقائياً.',
-      href: '/documents',
+      id: 'first_client',
+      titleFr: 'Ajouter un client',
+      titleAr: 'إضافة عميل',
+      descriptionFr: 'Enregistrez un client pour les prochaines factures.',
+      descriptionAr: 'سجّل عميلاً للفواتير القادمة.',
+      href: '/clients',
       priority: 80,
     });
   }
 
-  if (!signals.hasInvoice) {
+  if (!signals.companyCustomized) {
     recs.push({
-      id: 'first_invoice',
-      titleFr: 'Créez une facture',
-      titleAr: 'أنشئ فاتورة',
-      descriptionFr: 'Module Factures — client, lignes, validation.',
-      descriptionAr: 'وحدة الفواتير — عميل وبنود.',
-      href: '/factures',
-      priority: 75,
+      id: 'customize_company',
+      titleFr: 'Personnaliser les informations de mon entreprise',
+      titleAr: 'تخصيص معلومات الشركة',
+      descriptionFr: 'Optionnel : ICE, adresse et coordonnées, quand vous voulez.',
+      descriptionAr: 'اختياري: ICE والعنوان وبيانات الاتصال.',
+      href: '/companies',
+      priority: 40,
     });
   }
 
-  if (!signals.wizardCompleted) {
-    recs.push({
-      id: 'complete_setup',
-      titleFr: 'Terminez l\'assistant de configuration',
-      titleAr: 'أكمل معالج الإعداد',
-      descriptionFr: '7 étapes pour une mise en route complète.',
-      descriptionAr: '7 خطوات للإعداد الكامل.',
-      href: '/setup',
-      priority: 70,
-    });
-  }
-
-  if (signals.hasCompany && !signals.hasPayrollRun) {
-    recs.push({
-      id: 'payroll_setup',
-      titleFr: 'Configurez la paie',
-      titleAr: 'اضبط الرواتب',
-      descriptionFr: 'Ajoutez vos employés et lancez un premier run.',
-      descriptionAr: 'أضف الموظفين وشغّل أول run.',
-      href: '/rh',
-      priority: 60,
-    });
-  }
-
-  if (signals.hasCompany && signals.tvaConfigured && signals.hasDocument) {
-    recs.push({
-      id: 'generate_liasse',
-      titleFr: 'Préparez votre liasse fiscale',
-      titleAr: 'جهّز الحزمة الضريبية',
-      descriptionFr: 'Vérifiez la readiness puis générez le package.',
-      descriptionAr: 'تحقق من الجاهزية ثم ولّد الحزمة.',
-      href: '/liasse',
-      priority: 50,
-    });
-  }
-
-  return recs.sort((a, b) => b.priority - a.priority).slice(0, 4);
+  return recs.sort((a, b) => b.priority - a.priority).slice(0, 3);
 }

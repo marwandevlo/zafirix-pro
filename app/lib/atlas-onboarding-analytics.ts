@@ -20,6 +20,11 @@ export function trackWizardAbandoned(step: string): void {
   trackEvent('onboarding_wizard_abandoned', { step });
 }
 
+/** Fired only from an explicit click that opens `/setup`. */
+export function trackOnboardingWizardOpened(source: string): void {
+  trackEvent('onboarding_wizard_opened', { source });
+}
+
 export function trackTourCompleted(): void {
   trackEvent('onboarding_tour_completed', {});
 }

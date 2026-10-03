@@ -39,6 +39,8 @@ import { GlobalSearchButton } from '@/app/components/search/GlobalSearchButton';
 import { TrialUpgradeBanner } from '@/app/components/trial/TrialUpgradeBanner';
 import { TrialOnboardingChecklist } from '@/app/components/trial/TrialOnboardingChecklist';
 import { GettingStartedWidget } from '@/app/components/onboarding/GettingStartedWidget';
+import { EmptyStateCta } from '@/app/components/ui/EmptyStateCta';
+import { trackInitialAuthenticatedLanding } from '@/app/lib/atlas-activation-telemetry';
 import { DemoModeBanner } from '@/app/components/onboarding/DemoModeBanner';
 import { OnboardingChecklistWidget } from '@/app/components/onboarding/OnboardingChecklistWidget';
 import { SmartRecommendationsWidget } from '@/app/components/onboarding/SmartRecommendationsWidget';
@@ -146,7 +148,7 @@ const MODULE_GROUPS: ModuleGroup[] = [
 ];
 
 const QUICK_ACTIONS = [
-  { id: 'invoice', labelFr: 'Nouvelle facture', labelAr: 'فاتورة جديدة', href: '/factures', icon: FileText },
+  { id: 'invoice', labelFr: 'Nouvelle facture', labelAr: 'فاتورة جديدة', href: '/factures?welcome=1', icon: FileText },
   { id: 'shipment', labelFr: 'Nouvelle expédition', labelAr: 'شحنة جديدة', href: '/logistique', icon: Truck },
   { id: 'expense', labelFr: 'Ajouter une dépense', labelAr: 'إضافة مصروف', href: '/comptabilite', icon: Wallet },
   { id: 'audit', labelFr: 'Audit fiscal Maroc', labelAr: 'تدقيق ضريبي', href: '#morocco-audit', icon: Sparkles },
@@ -169,6 +171,7 @@ export default function Home() {
   const [deadlinesError, setDeadlinesError] = useState(false);
   const [notificationUnread, setNotificationUnread] = useState(0);
   const [moreOpen, setMoreOpen] = useState(false);
+  const [legacyTourAutoStart, setLegacyTourAutoStart] = useState(false);
   const t = (fr: string, ar: string) => (lang === 'fr' ? fr : ar);
 
   useEffect(() => {
@@ -190,6 +193,15 @@ export default function Home() {
     return () => {
       cancelled = true;
     };
+  }, []);
+
+  useEffect(() => {
+    trackInitialAuthenticatedLanding();
+    try {
+      setLegacyTourAutoStart(localStorage.getItem('has_completed_onboarding_tour') === 'true');
+    } catch {
+      setLegacyTourAutoStart(true);
+    }
   }, []);
 
   useEffect(() => {
@@ -425,6 +437,10 @@ export default function Home() {
             </div>
           )}
 
+          <DashboardSafeSection name="getting-started">
+            <GettingStartedWidget lang={lang} />
+          </DashboardSafeSection>
+
           {/* ── 2. Usage & KPIs ─────────────────────────────────────────── */}
           <section className="grid grid-cols-1 xl:grid-cols-5 gap-4 lg:gap-5">
             <div className="xl:col-span-2">
@@ -530,7 +546,19 @@ export default function Home() {
             {/* Mobile cards */}
             <div className="lg:hidden divide-y divide-slate-100">
               {recentInvoices.length === 0 ? (
-                <p className="p-5 text-sm text-slate-400">{t('Aucune facture pour le moment.', 'لا توجد فواتير بعد.')}</p>
+                <div className="p-4">
+                  <EmptyStateCta
+                    lang={lang}
+                    title={t('Créez votre première facture en 30 secondes', 'أنشئ أول فاتورة في 30 ثانية')}
+                    description={t(
+                      'Client, montant HT, et c’est enregistré. Pas besoin de configuration complexe pour commencer.',
+                      'عميل ومبلغ دون ضريبة، ثم يُحفظ. لا حاجة لإعداد معقد للبدء.',
+                    )}
+                    primaryLabelFr="Créer ma facture"
+                    primaryLabelAr="إنشاء فاتورة"
+                    onPrimary={() => navigate('/factures?welcome=1')}
+                  />
+                </div>
               ) : (
                 recentInvoices.map((inv) => (
                   <button
@@ -575,8 +603,18 @@ export default function Home() {
                 <tbody>
                   {recentInvoices.length === 0 ? (
                     <tr>
-                      <td colSpan={5} className="px-5 py-8 text-slate-400 text-center">
-                        {t('Aucune facture pour le moment.', 'لا توجد فواتير بعد.')}
+                      <td colSpan={5} className="px-5 py-6">
+                        <EmptyStateCta
+                          lang={lang}
+                          title={t('Créez votre première facture en 30 secondes', 'أنشئ أول فاتورة في 30 ثانية')}
+                          description={t(
+                            'Client, montant HT, et c’est enregistré. Pas besoin de configuration complexe pour commencer.',
+                            'عميل ومبلغ دون ضريبة، ثم يُحفظ. لا حاجة لإعداد معقد للبدء.',
+                          )}
+                          primaryLabelFr="Créer ma facture"
+                          primaryLabelAr="إنشاء فاتورة"
+                          onPrimary={() => navigate('/factures?welcome=1')}
+                        />
                       </td>
                     </tr>
                   ) : (
@@ -656,9 +694,6 @@ export default function Home() {
 
           {/* Onboarding / growth (secondary) */}
           <div className="space-y-4">
-            <DashboardSafeSection name="getting-started">
-              <GettingStartedWidget lang={lang} />
-            </DashboardSafeSection>
             <DashboardSafeSection name="onboarding-checklist">
               <OnboardingChecklistWidget lang={lang} />
             </DashboardSafeSection>
@@ -796,7 +831,7 @@ export default function Home() {
       </main>
 
       <MobileBottomNav onOpenMenu={() => setMenuOpen(true)} />
-      <GuidedTourEngine lang={lang} autoStart />
+      <GuidedTourEngine lang={lang} autoStart={legacyTourAutoStart} />
       <FeedbackWidget lang={lang} />
     </div>
   );
