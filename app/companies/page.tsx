@@ -31,7 +31,7 @@ import { EmptyStateCta } from '@/app/components/ui/EmptyStateCta';
 import { trackOnboardingMilestoneOnce } from '@/app/lib/atlas-onboarding-milestones';
 import { CompanyLimitProUpsell } from '@/app/components/conversion/CompanyLimitProUpsell';
 import { CopyClientPortalLinkButton } from '@/app/components/client-portal/CopyClientPortalLinkButton';
-import { AppSidebar } from '@/app/components/shell/AppSidebar';
+import { AppSidebar, AppSidebarMobileOverlay } from '@/app/components/shell/AppSidebar';
 import { useManualSubscription } from '@/app/components/subscription/manual-subscription-context';
 
 export default function CompaniesPage() {
@@ -39,6 +39,7 @@ export default function CompaniesPage() {
   const { blockPremiumActions } = useManualSubscription();
   const [companies, setCompanies] = useState<AtlasCompany[]>([]);
   const [showForm, setShowForm] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
   const [search, setSearch] = useState('');
   const [limitNotice, setLimitNotice] = useState('');
   const [termsKind, setTermsKind] = useState<'30' | '60' | '90' | 'custom'>('30');
@@ -176,6 +177,12 @@ export default function CompaniesPage() {
     setShowForm(false);
   };
 
+  useEffect(() => {
+    const open = () => setShowForm(true);
+    window.addEventListener('atlas-open-company-form', open);
+    return () => window.removeEventListener('atlas-open-company-form', open);
+  }, []);
+
   const selectCompany = async (c: AtlasCompany) => {
     const prevId = companies.find((row) => row.actif)?.dbRowId ?? null;
     if (isAtlasSupabaseDataEnabled()) {
@@ -269,8 +276,12 @@ export default function CompaniesPage() {
 
   return (
     <div className="flex h-screen bg-gray-50">
+      <AppSidebarMobileOverlay open={menuOpen} onClose={() => setMenuOpen(false)} />
       <AppSidebar
         variant="module"
+        menuOpen={menuOpen}
+        setMenuOpen={setMenuOpen}
+        onNavigate={() => setMenuOpen(false)}
         footer={
           <div className="px-4 py-4 border-t border-white/10">
             <div className="bg-amber-400/20 rounded-lg p-3 text-center">
@@ -299,12 +310,14 @@ export default function CompaniesPage() {
       />
 
       <main className="flex-1 flex flex-col overflow-hidden">
-        <header className="bg-white border-b border-gray-200 px-8 py-4 flex items-center justify-between">
+        <header className="bg-white border-b border-gray-200 px-4 sm:px-8 py-4 flex flex-wrap items-center justify-between gap-3">
           <div>
             <h1 className="text-xl font-bold text-gray-800">Gestion des sociétés</h1>
             <p className="text-xs text-gray-400 mt-0.5">Gérez toutes vos sociétés depuis un seul espace</p>
           </div>
           <button
+            id="btn-new-company"
+            type="button"
             onClick={() => {
               if (!canAddCompany()) {
                 const p = getActivePlan();
@@ -314,7 +327,15 @@ export default function CompaniesPage() {
               }
               const decision = canCreateCompany();
               if (decision.level === 'warning') setLimitNotice(decision.messageFr ?? decision.messageAr ?? '');
-              setShowForm(!showForm);
+              let tourKeepsFormOpen = false;
+              try {
+                const phase = sessionStorage.getItem('atlas_onboarding_tour_phase');
+                tourKeepsFormOpen = phase === 'new-company' || phase === 'submit';
+              } catch {
+                tourKeepsFormOpen = false;
+              }
+              if (showForm && !tourKeepsFormOpen) setShowForm(false);
+              else setShowForm(true);
             }}
             className="flex items-center gap-2 px-4 py-2 bg-[#1B2A4A] text-white rounded-lg text-sm hover:bg-[#243660] transition-colors"
           >
@@ -359,8 +380,8 @@ export default function CompaniesPage() {
           {showForm && (
             <div className="bg-white rounded-xl p-6 shadow-sm border border-blue-200">
               <h2 className="font-semibold text-gray-700 mb-4">Nouvelle société</h2>
-              <div className="grid grid-cols-3 gap-4">
-                <div className="col-span-2">
+              <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+                <div className="lg:col-span-2">
                   <label className="text-xs text-gray-400 mb-1 block">Raison sociale *</label>
                   <input value={form.raisonSociale} onChange={e => setForm({...form, raisonSociale: e.target.value})} placeholder="Ex: MON ENTREPRISE SARL" className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:border-blue-400" />
                 </div>
@@ -408,7 +429,7 @@ export default function CompaniesPage() {
                     <option value="exonere">Exonéré</option>
                   </select>
                 </div>
-                <div className="col-span-2">
+                <div className="lg:col-span-2">
                   <label className="text-xs text-gray-400 mb-1 block">Délai de paiement</label>
                   <div className="flex gap-2">
                     <select
@@ -437,8 +458,8 @@ export default function CompaniesPage() {
                   <label className="text-xs text-gray-400 mb-1 block">Balance (MAD)</label>
                   <input value={form.balance} onChange={e => setForm({...form, balance: e.target.value})} type="number" className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:border-blue-400" />
                 </div>
-                <div className="col-span-3 flex gap-3">
-                  <button onClick={() => void addCompany()} className="px-6 py-2 bg-[#1B2A4A] text-white rounded-lg text-sm hover:bg-[#243660]">Ajouter</button>
+                <div className="lg:col-span-3 flex gap-3">
+                  <button id="btn-add-company-submit" type="button" onClick={() => void addCompany()} className="px-6 py-2 bg-[#1B2A4A] text-white rounded-lg text-sm hover:bg-[#243660]">Ajouter</button>
                   <button onClick={() => setShowForm(false)} className="px-4 py-2 border border-gray-200 rounded-lg text-sm text-gray-600">Annuler</button>
                 </div>
               </div>
@@ -460,7 +481,9 @@ export default function CompaniesPage() {
             <p className="text-sm text-gray-500 text-center py-10">Aucun résultat pour cette recherche.</p>
           ) : (
           <div className="space-y-3">
-            {filtered.map(c => (
+            {filtered.map(c => {
+              const selectTarget = filtered.find((row) => !row.actif);
+              return (
               <div key={`${String(c.id)}-${c.dbRowId ?? ''}`} className={`bg-white rounded-xl p-5 shadow-sm border transition-all ${c.actif ? 'border-green-300 bg-green-50' : 'border-gray-100 hover:border-blue-200'}`}>
                 <div className="flex items-center gap-4">
                   <div className={`w-12 h-12 rounded-xl flex items-center justify-center text-white font-bold text-lg shrink-0 ${c.actif ? 'bg-green-500' : 'bg-[#1B2A4A]'}`}>
@@ -499,7 +522,12 @@ export default function CompaniesPage() {
                   <div className="flex items-center gap-2 shrink-0">
                     <CopyClientPortalLinkButton company={c} />
                     {!c.actif && (
-                      <button onClick={() => void selectCompany(c)} className="flex items-center gap-1 px-3 py-2 bg-[#1B2A4A] text-white rounded-lg text-xs hover:bg-[#243660]">
+                      <button
+                        id={selectTarget && selectTarget.id === c.id ? 'btn-select-company' : undefined}
+                        type="button"
+                        onClick={() => void selectCompany(c)}
+                        className="flex items-center gap-1 px-3 py-2 bg-[#1B2A4A] text-white rounded-lg text-xs hover:bg-[#243660]"
+                      >
                         Sélectionner <ChevronRight size={12} />
                       </button>
                     )}
@@ -518,7 +546,8 @@ export default function CompaniesPage() {
                   </div>
                 </div>
               </div>
-            ))}
+            );
+            })}
           </div>
           )}
         </div>

@@ -200,7 +200,9 @@ export function AppSidebar({
       <button
         key={item.id}
         type="button"
-        id={item.id === 'factures' ? 'menu-item-factures' : undefined}
+        id={
+          item.id === 'factures' ? 'menu-item-factures' : item.id === 'companies' ? 'menu-item-societes' : undefined
+        }
         onClick={() => go(item.href)}
         className={navButtonClass(item, isActive)}
         title={item.href}

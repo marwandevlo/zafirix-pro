@@ -29,7 +29,7 @@ const SKIP_PREFIXES = [
 let tourStartTracked = false;
 let tourCompleteTracked = false;
 
-type Phase = '' | 'menu' | 'create' | 'form';
+type Phase = '' | 'societes' | 'new-company' | 'submit' | 'select' | 'factures';
 
 function readSeenLocal(): boolean {
   try {
@@ -50,7 +50,9 @@ function writeSeenLocal(): void {
 function readPhase(): Phase {
   try {
     const value = sessionStorage.getItem(PHASE_KEY);
-    if (value === 'menu' || value === 'create' || value === 'form') return value;
+    if (value === 'societes' || value === 'new-company' || value === 'submit' || value === 'select' || value === 'factures') {
+      return value;
+    }
     return '';
   } catch {
     return '';
@@ -142,10 +144,6 @@ function clampPopover(): void {
   if (rect.top < margin) pop.style.top = `${margin}px`;
 }
 
-function hint(french: string, darija: string): string {
-  return `${french}\n${darija}`;
-}
-
 type Run = {
   tour: Driver | null;
   cancelled: boolean;
@@ -160,14 +158,14 @@ function remember(run: Run, reason: 'done' | 'skip'): void {
   persistCompleted();
   if (reason === 'done' && !tourCompleteTracked) {
     tourCompleteTracked = true;
-    trackEvent('onboarding_tour_completed', { tour: 'first_invoice' });
+    trackEvent('onboarding_tour_completed', { tour: 'company_then_invoice' });
   }
 }
 
 function trackStarted(): void {
   if (tourStartTracked) return;
   tourStartTracked = true;
-  trackEvent('onboarding_tour_started', { tour: 'first_invoice' });
+  trackEvent('onboarding_tour_started', { tour: 'company_then_invoice' });
 }
 
 function renderSkip(popover: PopoverDOM, onSkip: () => void, absoluteStep: number): void {
@@ -183,8 +181,24 @@ function renderSkip(popover: PopoverDOM, onSkip: () => void, absoluteStep: numbe
   window.requestAnimationFrame(clampPopover);
 }
 
+const SPOTLIGHT = {
+  animate: true,
+  duration: 280,
+  smoothScroll: true,
+  allowClose: true,
+  overlayClickBehavior: 'close' as const,
+  overlayOpacity: 0.75,
+  overlayColor: '#0b1220',
+  stagePadding: 8,
+  stageRadius: 12,
+  popoverOffset: 12,
+  showProgress: true,
+  popoverClass: 'activation-tour-popover',
+  disableActiveInteraction: false,
+};
+
 /**
- * Five-step spotlight from the dashboard Factures item through saving the first invoice.
+ * Company first, then the Factures menu.
  * Starts only while `has_completed_onboarding_tour` is false.
  */
 export function DashboardOnboardingTour() {
@@ -195,8 +209,8 @@ export function DashboardOnboardingTour() {
     if (SKIP_PREFIXES.some((prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`))) return;
 
     const onDashboard = pathname === '/' || pathname === '/dashboard';
-    const onFactures = pathname === '/factures' || pathname.startsWith('/factures/');
-    if (!onDashboard && !onFactures) return;
+    const onCompanies = pathname === '/companies' || pathname.startsWith('/companies/');
+    if (!onDashboard && !onCompanies) return;
 
     const run: Run = {
       tour: null,
@@ -223,231 +237,244 @@ export function DashboardOnboardingTour() {
         }
 
         const phase = readPhase();
-        const welcome = new URLSearchParams(window.location.search).get('welcome') === '1';
         const { driver } = await import('driver.js');
         if (run.cancelled) return;
 
         const narrow = isNarrow();
-        const popoverSide = narrow ? 'bottom' : 'right';
+        const menuSide = narrow ? 'bottom' : 'right';
+
+        const destroyQuietly = () => {
+          run.advancing = true;
+          run.detach();
+          run.tour?.destroy();
+          run.tour = null;
+        };
 
         if (onDashboard) {
+          const showFactures = phase === 'factures';
           if (narrow) window.dispatchEvent(new Event('atlas-open-mobile-nav'));
-          const menu = await waitForVisible('menu-item-factures', 2500);
+          const menu = await waitForVisible(showFactures ? 'menu-item-factures' : 'menu-item-societes', 2500);
           if (!menu || run.cancelled) return;
 
-          const leaveMenu = () => {
-            run.advancing = true;
-            writePhase('create');
-            run.detach();
-            run.tour?.destroy();
-            run.tour = null;
+          const leaveToCompanies = () => {
+            writePhase('new-company');
+            destroyQuietly();
+            router.push('/companies');
+          };
+          const finishOnFactures = () => {
+            remember(run, 'done');
+            destroyQuietly();
             router.push('/factures');
           };
 
           const onMenuClick = () => {
+            if (showFactures) remember(run, 'done');
+            else writePhase('new-company');
             run.advancing = true;
-            writePhase('create');
           };
           menu.addEventListener('click', onMenuClick, true);
           run.detach = () => menu.removeEventListener('click', onMenuClick, true);
 
           run.tour = driver({
-            animate: true,
-            duration: 280,
-            smoothScroll: true,
-            allowClose: true,
-            overlayClickBehavior: 'close',
-            overlayOpacity: 0.75,
-            overlayColor: '#0b1220',
-            stagePadding: 8,
-            stageRadius: 12,
-            popoverOffset: 12,
-            showProgress: true,
-            progressText: '1 / 5',
+            ...SPOTLIGHT,
+            progressText: showFactures ? '5 / 5' : '1 / 5',
             showButtons: ['next', 'close'],
             nextBtnText: 'التالي',
-            doneBtnText: 'التالي',
-            popoverClass: 'activation-tour-popover',
+            doneBtnText: showFactures ? 'تم / Terminer' : 'التالي',
             onHighlightStarted: () => {
               trackStarted();
-              writePhase('menu');
+              writePhase(showFactures ? 'factures' : 'societes');
             },
             onPopoverRender: (popover) => {
-              renderSkip(popover, skip, 1);
+              renderSkip(popover, skip, showFactures ? 5 : 1);
             },
             onDoneClick: () => {
-              leaveMenu();
+              if (showFactures) finishOnFactures();
+              else leaveToCompanies();
             },
             onDestroyStarted: (_element, _step, opts) => {
               if (!run.advancing) remember(run, 'skip');
               opts.driver.destroy();
             },
             steps: [
-              {
-                element: '#menu-item-factures',
-                advanceOnClick: true,
-                popover: {
-                  title: '1. من هنا غاتبدا الخدمة',
-                  description: hint(
-                    'Ouvrez Factures pour créer votre première facture.',
-                    "برك على 'Factures' باش تدخل للصفحة فين غاتصاوب أول فاكتورة ديالك فثواني.",
-                  ),
-                  side: popoverSide,
-                  align: 'center',
-                },
-              },
+              showFactures
+                ? {
+                    element: '#menu-item-factures',
+                    advanceOnClick: true,
+                    popover: {
+                      title: '5. الانتقال إلى الفواتير',
+                      description: 'دابا شركتك واجدة! تقدر تدخل لـ Factures وتصاوب أول فاتورة ديالك.',
+                      side: menuSide,
+                      align: 'center',
+                    },
+                  }
+                : {
+                    element: '#menu-item-societes',
+                    advanceOnClick: true,
+                    popover: {
+                      title: '1. إعداد وإدارة الشركات',
+                      description: 'أول خطوة: ادخل هنا باش تضيف أو تختار الشركة ديالك.',
+                      side: menuSide,
+                      align: 'center',
+                    },
+                  },
             ],
           });
 
           if (run.cancelled) {
-            run.detach();
-            run.tour.destroy();
-            run.tour = null;
+            destroyQuietly();
             return;
           }
           run.tour.drive();
           return;
         }
 
-        if (!onFactures) return;
-        if (phase !== 'create' && phase !== 'form' && !welcome) return;
+        if (!onCompanies) return;
+        if (phase !== 'new-company' && phase !== 'submit' && phase !== 'select' && phase !== 'factures') return;
 
-        const startAtForm = phase === 'form';
-        if (startAtForm) window.dispatchEvent(new Event('atlas-open-invoice-form'));
+        if (phase === 'submit') window.dispatchEvent(new Event('atlas-open-company-form'));
+        if ((phase === 'factures' || phase === 'select') && narrow) {
+          window.dispatchEvent(new Event('atlas-open-mobile-nav'));
+        }
 
-        const anchorId = startAtForm ? 'tour-client-step' : 'tour-new-invoice';
-        const anchor = await waitForVisible(anchorId, 3000);
+        let activePhase = phase;
+        const anchorId =
+          activePhase === 'submit'
+            ? 'btn-add-company-submit'
+            : activePhase === 'select'
+              ? 'btn-select-company'
+              : activePhase === 'factures'
+                ? 'menu-item-factures'
+                : 'btn-new-company';
+        let anchor = await waitForVisible(anchorId, activePhase === 'select' ? 4000 : 3000);
+        if (!anchor && activePhase === 'select') {
+          activePhase = 'factures';
+          writePhase('factures');
+          if (narrow) window.dispatchEvent(new Event('atlas-open-mobile-nav'));
+          anchor = await waitForVisible('menu-item-factures', 2500);
+        }
         if (!anchor || run.cancelled) return;
 
-        const openFormThenNext = () => {
-          window.dispatchEvent(new Event('atlas-open-invoice-form'));
-          run.tour?.moveNext();
-        };
-
-        const buttonStep: DriveStep = {
-          element: '#tour-new-invoice',
-          advanceOnClick: true,
-          popover: {
-            title: '2. أنشئ فاتورة جديدة',
-            description: hint(
-              'Ce bouton ouvre le formulaire de facture.',
-              'اضغط على هذا الزر لفتح نموذج إنشاء الفاتورة.',
-            ),
-            side: 'bottom',
-            align: 'center',
-            onNextClick: openFormThenNext,
-          },
-        };
-
-        const formSteps: DriveStep[] = [
+        const companySteps: DriveStep[] = [
           {
-            element: '#tour-client-step',
-            waitForElement: 2500,
+            element: '#btn-new-company',
+            advanceOnClick: true,
             popover: {
-              title: '3. اسم الزبون',
-              description: hint(
-                'Écrivez le nom du client. Un nouveau client est enregistré automatiquement.',
-                'اكتب هنا اسم الزبون. إذا كان أول مرة كتعامل معاه كيتسجل تلقائياً.',
-              ),
+              title: '2. إضافة شركة جديدة',
+              description: 'اضغط هنا باش تدخل معلومات شركتك (الاسم، الـ ICE، والسجل التجاري).',
               side: 'bottom',
               align: 'center',
+              onNextClick: () => {
+                window.dispatchEvent(new Event('atlas-open-company-form'));
+                writePhase('submit');
+                run.tour?.moveNext();
+              },
             },
           },
           {
-            element: '#tour-items-step',
+            element: '#btn-add-company-submit',
             waitForElement: 2500,
             popover: {
-              title: '4. السلعة والثمن',
-              description: hint(
-                'Indiquez la prestation et le montant HT. La TVA se calcule toute seule.',
-                'حدد نوع السلعة والمبلغ. الحسابات كتدار لراسها.',
-              ),
-              side: 'bottom',
+              title: '3. حفظ معلومات الشركة',
+              description: 'عمر المعلومات الأساسية وضغط هنا باش تسجل الشركة.',
+              side: narrow ? 'bottom' : 'top',
               align: 'center',
+              onNextClick: () => {
+                writePhase('select');
+                run.tour?.moveNext();
+              },
             },
           },
           {
-            element: '#tour-save-step',
-            waitForElement: 2500,
+            element: '#btn-select-company',
+            waitForElement: 4000,
+            skipMissingElement: true,
             popover: {
-              title: '5. حفظ ومشاركة',
-              description: hint(
-                'Enregistrez. Vous pourrez imprimer la facture ou l’envoyer sur WhatsApp.',
-                'برك هنا وتكون الفاكتورة واجدة تقدر تطبعها أو تصيفطها فـ WhatsApp فالحين!',
-              ),
-              side: 'top',
+              title: '4. تفعيل الشركة',
+              description: "اضغط على 'Sélectionner' باش تولي هي الشركة النشطة اللي كتخدم بها.",
+              side: narrow ? 'bottom' : 'left',
+              align: 'center',
+              onNextClick: () => {
+                writePhase('factures');
+                if (isNarrow()) window.dispatchEvent(new Event('atlas-open-mobile-nav'));
+                run.tour?.moveNext();
+              },
+            },
+          },
+          {
+            element: '#menu-item-factures',
+            advanceOnClick: true,
+            popover: {
+              title: '5. الانتقال إلى الفواتير',
+              description: 'دابا شركتك واجدة! تقدر تدخل لـ Factures وتصاوب أول فاتورة ديالك.',
+              side: menuSide,
               align: 'center',
             },
           },
         ];
 
-        const steps = startAtForm ? formSteps : [buttonStep, ...formSteps];
-        const base = startAtForm ? 3 : 2;
+        const startIndex = activePhase === 'submit' ? 1 : activePhase === 'select' ? 2 : activePhase === 'factures' ? 3 : 0;
 
         run.tour = driver({
-          animate: true,
-          duration: 280,
-          smoothScroll: true,
-          allowClose: true,
-          overlayClickBehavior: 'close',
-          overlayOpacity: 0.75,
-          overlayColor: '#0b1220',
-          stagePadding: 8,
-          stageRadius: 12,
-          popoverOffset: 12,
-          showProgress: true,
+          ...SPOTLIGHT,
           showButtons: ['next', 'previous', 'close'],
           nextBtnText: 'التالي',
           prevBtnText: 'رجوع',
           doneBtnText: 'تم / Terminer',
-          popoverClass: 'activation-tour-popover',
-          disableActiveInteraction: false,
           onHighlightStarted: (_element, _step, opts) => {
             trackStarted();
-            const index = opts.index ?? 0;
-            const absolute = base + index;
-            writePhase(absolute >= 3 ? 'form' : 'create');
+            const absolute = 2 + (opts.index ?? 0);
+            writePhase(absolute <= 2 ? 'new-company' : absolute === 3 ? 'submit' : absolute === 4 ? 'select' : 'factures');
           },
           onHighlighted: (element) => {
             clampPopover();
-            if (!(element instanceof HTMLElement) || element.id !== 'tour-save-step') return;
-            const onSave = () => {
-              window.setTimeout(() => {
-                if (document.getElementById('tour-save-step')) return;
+            if (!(element instanceof HTMLElement)) return;
+            if (element.id === 'btn-select-company') {
+              const onSelect = () => {
+                run.advancing = true;
+                writePhase('factures');
+              };
+              element.addEventListener('click', onSelect, true);
+              const previous = run.detach;
+              run.detach = () => {
+                previous();
+                element.removeEventListener('click', onSelect, true);
+              };
+            }
+            if (element.id === 'menu-item-factures') {
+              const onFactures = () => {
                 remember(run, 'done');
                 run.advancing = true;
-                run.tour?.destroy();
-                run.tour = null;
-              }, 600);
-            };
-            element.addEventListener('click', onSave);
-            const previous = run.detach;
-            run.detach = () => {
-              previous();
-              element.removeEventListener('click', onSave);
-            };
+              };
+              element.addEventListener('click', onFactures, true);
+              const previous = run.detach;
+              run.detach = () => {
+                previous();
+                element.removeEventListener('click', onFactures, true);
+              };
+            }
           },
           onPopoverRender: (popover, opts) => {
-            renderSkip(popover, skip, base + (opts.index ?? 0));
+            renderSkip(popover, skip, 2 + (opts.index ?? 0));
           },
           onDoneClick: (_element, _step, opts) => {
             remember(run, 'done');
-            run.advancing = true;
+            destroyQuietly();
             opts.driver.destroy();
+            router.push('/factures');
           },
           onDestroyStarted: (_element, _step, opts) => {
             if (!run.advancing) remember(run, 'skip');
             opts.driver.destroy();
           },
-          steps,
+          steps: companySteps,
         });
 
         if (run.cancelled) {
-          run.tour.destroy();
-          run.tour = null;
+          destroyQuietly();
           return;
         }
-        run.tour.drive();
+        run.tour.drive(startIndex);
       } catch (error) {
         console.warn('[activation-tour] failed to start', error instanceof Error ? error.message : error);
         run.tour?.destroy();
