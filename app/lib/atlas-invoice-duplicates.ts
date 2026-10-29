@@ -9,7 +9,7 @@ export type InvoiceIdentity = {
 };
 
 export function normalizeInvoiceNumber(value: string | null | undefined): string {
-  return String(value ?? '').replace(/\s/g, '').toLowerCase();
+  return String(value ?? '').replace(/[^\p{L}\p{N}]/gu, '').toLowerCase();
 }
 
 function normalizeParty(value: string | null | undefined): string {

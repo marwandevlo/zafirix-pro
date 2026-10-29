@@ -134,6 +134,7 @@ describe('RC2 re-uploaded invoices', () => {
 
   it('recognises the same invoice despite spacing, case and accents', () => {
     assert.equal(isSameInvoice(base, { ...base, number: 'fa2026-014', counterparty: 'SOCIETE ATLAS sarl', ttc: 1200.01 }), true);
+    assert.equal(isSameInvoice(base, { ...base, number: 'FA-2026/014' }), true);
   });
 
   it('prefers the ICE when both records have one', () => {
