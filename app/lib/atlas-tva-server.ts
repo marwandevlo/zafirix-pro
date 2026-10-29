@@ -126,15 +126,52 @@ function roundMad(n: number): number {
   return Math.round(n * 100) / 100;
 }
 
+export function journalVatAlreadyInInvoice(
+  row: { source_invoice_id?: string | null; source_document_id?: string | null },
+  countedInvoiceIds: Set<string>,
+  countedDocumentIds: Set<string>,
+): boolean {
+  if (row.source_invoice_id && countedInvoiceIds.has(String(row.source_invoice_id))) return true;
+  if (row.source_document_id && countedDocumentIds.has(String(row.source_document_id))) return true;
+  return false;
+}
+
+/**
+ * A TVA suggestion is a derived copy of an invoice or journal VAT line.
+ * It is skipped when that source is already counted, or when an identical
+ * suggestion (same source and VAT type) was already counted.
+ */
+export function tvaSuggestionAlreadyCounted(
+  row: { source_invoice_id?: string | null; source_document_id?: string | null; tva_type?: string | null },
+  counted: {
+    invoiceIds: Set<string>;
+    documentIds: Set<string>;
+    journalVatInvoiceIds: Set<string>;
+    journalVatDocumentIds: Set<string>;
+    seenSuggestionKeys: Set<string>;
+  },
+): boolean {
+  const invoiceId = row.source_invoice_id ? String(row.source_invoice_id) : '';
+  const documentId = row.source_document_id ? String(row.source_document_id) : '';
+  if (invoiceId && counted.invoiceIds.has(invoiceId)) return true;
+  if (invoiceId && counted.journalVatInvoiceIds.has(invoiceId)) return true;
+  if (!invoiceId && documentId && counted.journalVatDocumentIds.has(documentId)) return true;
+  const key = `${invoiceId || 'doc:' + documentId}:${String(row.tva_type ?? '').toLowerCase()}`;
+  if ((invoiceId || documentId) && counted.seenSuggestionKeys.has(key)) return true;
+  if (invoiceId || documentId) counted.seenSuggestionKeys.add(key);
+  return false;
+}
+
 function isTvaCollecteeAccount(compte: string): boolean {
   const c = compte.replace(/\s/g, '');
-  return c.startsWith('4455') || c.startsWith('4457');
+  // 4455 TVA facturée. 4456 is TVA due (settlement), 4457 is not output VAT.
+  return c.startsWith('4455');
 }
 
 function isTvaDeductibleAccount(compte: string): boolean {
   const c = compte.replace(/\s/g, '');
-  // PCGE: 4456 (TVA récupérable), 3455x (TVA déductible — used by Documents IA journal lines)
-  return c.startsWith('4456') || c.startsWith('3455') || c.startsWith('3456');
+  // 3455 charges, 3456 immobilisations. A debit on 4456 is a payment of TVA due.
+  return c.startsWith('3455') || c.startsWith('3456');
 }
 
 function isPcge3455Account(compte: string): boolean {
@@ -189,13 +226,13 @@ function resolveAccountingEntryDateYmd(
   );
 }
 
-function isIncludedClientInvoiceStatus(status: string | null | undefined): boolean {
+export function isIncludedClientInvoiceStatus(status: string | null | undefined): boolean {
   const s = String(status ?? 'sent').toLowerCase();
   return s !== 'cancelled';
 }
 
 /** Supplier invoices: include draft/validated/null; exclude only explicit rejections. */
-function isIncludedSupplierValidationStatus(status: string | null | undefined): boolean {
+export function isIncludedSupplierValidationStatus(status: string | null | undefined): boolean {
   if (status == null || String(status).trim() === '') return true;
   const s = String(status).toLowerCase();
   if (['rejected', 'archived', 'cancelled', 'refused', 'refuse'].includes(s)) return false;
@@ -225,6 +262,7 @@ type InvoiceRow = {
   vat_amount: number | string | null;
   total_ttc: number | string | null;
   vat_rate: number | string | null;
+  source_document_id?: string | null;
   created_at?: string | null;
   updated_at?: string | null;
 };
@@ -256,6 +294,7 @@ type AccountingRow = {
   entry_json: unknown;
   entry_date: string | null;
   source_invoice_id?: string | null;
+  source_document_id?: string | null;
   validation_status?: string | null;
   created_at?: string | null;
   updated_at?: string | null;
@@ -535,7 +574,7 @@ export async function computeTvaPeriod(
     fetchCompanyScopedRows<InvoiceRow>(
       db,
       'atlas_invoices',
-      'id, number, client_name, issue_date, status, amount_ht, vat_amount, total_ttc, vat_rate, created_at, updated_at',
+      'id, number, client_name, issue_date, status, amount_ht, vat_amount, total_ttc, vat_rate, source_document_id, created_at, updated_at',
       companyId,
       userId,
     ),
@@ -549,7 +588,7 @@ export async function computeTvaPeriod(
     fetchCompanyScopedRows<AccountingRow>(
       db,
       'atlas_accounting_entries',
-      'id, entry_json, entry_date, source_invoice_id, validation_status, created_at, updated_at',
+      'id, entry_json, entry_date, source_invoice_id, source_document_id, validation_status, created_at, updated_at',
       companyId,
       userId,
     ),
@@ -592,6 +631,7 @@ export async function computeTvaPeriod(
   let salesCount = 0;
   let purchasesCount = 0;
   const countedInvoiceIds = new Set<string>();
+  const countedDocumentIds = new Set<string>();
 
   for (const row of clientInvoices) {
     if (!isIncludedClientInvoiceStatus(row.status)) continue;
@@ -608,6 +648,7 @@ export async function computeTvaPeriod(
     caHT += amountHT;
     salesCount += 1;
     countedInvoiceIds.add(String(row.id));
+    if (row.source_document_id) countedDocumentIds.add(String(row.source_document_id));
     lines.push({
       id: String(row.id),
       kind: 'sale',
@@ -642,8 +683,8 @@ export async function computeTvaPeriod(
     achatsHT += purchaseAmounts.mht;
     purchasesCount += 1;
     countedInvoiceIds.add(String(row.id));
-
     const linkedDocId = row.document_id ?? row.source_document_id ?? null;
+    if (linkedDocId) countedDocumentIds.add(String(linkedDocId));
     const identity = resolveSupplierIdentityFromSources(
       {
         supplierIce: row.supplier_ice,
@@ -676,12 +717,28 @@ export async function computeTvaPeriod(
     });
   }
 
+  const journalVatInvoiceIds = new Set<string>();
+  const journalVatDocumentIds = new Set<string>();
+  for (const row of accountingEntries) {
+    const entry = asRecord(row.entry_json);
+    if (!entry) continue;
+    if (journalVatAlreadyInInvoice(row, countedInvoiceIds, countedDocumentIds)) continue;
+    const compte = resolveEntryAccountCode(entry);
+    if (!isPcge3455Account(compte) && !isTvaDeductibleAccount(compte) && !isTvaCollecteeAccount(compte)) continue;
+    if (row.source_invoice_id) journalVatInvoiceIds.add(String(row.source_invoice_id));
+    if (row.source_document_id) journalVatDocumentIds.add(String(row.source_document_id));
+  }
+  const suggestionCounted = {
+    invoiceIds: countedInvoiceIds,
+    documentIds: countedDocumentIds,
+    journalVatInvoiceIds,
+    journalVatDocumentIds,
+    seenSuggestionKeys: new Set<string>(),
+  };
+
   let suggestionDeductible = 0;
   for (const row of suggestions) {
     if (!isIncludedTvaSuggestionStatus(row.validation_status)) continue;
-
-    const linkedId = row.source_invoice_id ? String(row.source_invoice_id) : '';
-    if (linkedId && countedInvoiceIds.has(linkedId)) continue;
 
     const issueDate = resolveInvoicePeriodDateYmd(row.invoice_date, row.created_at);
     if (!issueDate || !inPeriod(issueDate, periodStart, periodEnd)) continue;
@@ -690,6 +747,7 @@ export async function computeTvaPeriod(
     const amountHT = Number(row.base_ht ?? 0);
     const suggestionAmounts = normalizeDgiReleveAmounts(amountHT, vatAmount, amountHT + vatAmount);
     if (suggestionAmounts.tva <= 0) continue;
+    if (tvaSuggestionAlreadyCounted(row, suggestionCounted)) continue;
 
     const isDeductible = String(row.tva_type).toLowerCase() === 'deductible';
     if (isDeductible) {
@@ -744,6 +802,7 @@ export async function computeTvaPeriod(
       row.created_at,
     );
     if (!date || !inPeriod(date, periodStart, periodEnd)) continue;
+    if (journalVatAlreadyInInvoice(row, countedInvoiceIds, countedDocumentIds)) continue;
 
     const compte = resolveEntryAccountCode(entry);
     const debit = Number(entry.debit ?? 0);
@@ -784,9 +843,10 @@ export async function computeTvaPeriod(
       continue;
     }
 
-    if (isTvaCollecteeAccount(compte) && credit > 0) {
-      tvaCollectee += credit;
-      accountingAdjust += credit;
+    if (isTvaCollecteeAccount(compte) && (credit > 0 || debit > 0)) {
+      const net = credit - debit;
+      tvaCollectee += net;
+      accountingAdjust += net;
       lines.push({
         id: `acc-${row.id}`,
         kind: 'sale',
@@ -794,14 +854,14 @@ export async function computeTvaPeriod(
         counterparty: libelle,
         issueDate: date,
         amountHT: 0,
-        vatAmount: credit,
-        totalTTC: credit,
+        vatAmount: net,
+        totalTTC: net,
         source: 'accounting_entry',
       });
     }
   }
 
-  const journalOrSupplierDeductible = Math.max(supplierTvaSum, accounting3455TvaSum);
+  const journalOrSupplierDeductible = supplierTvaSum + accounting3455TvaSum;
   let tvaDeductible = journalOrSupplierDeductible + suggestionDeductible;
 
   console.log('[TVA Server]', {
