@@ -286,7 +286,14 @@ export async function deleteAtlasInvoice(
   const query = supabase.from('atlas_invoices').delete().eq('id', id).eq('company_id', scopedCompanyId);
 
   const { error } = await query;
-  if (error) return { ok: false, error: error.message };
+  if (error) {
+    return {
+      ok: false,
+      error: error.message.includes('invoice_has_validated_journal_entries')
+        ? 'invoice_has_validated_journal_entries'
+        : error.message,
+    };
+  }
   return { ok: true };
 }
 
@@ -306,6 +313,8 @@ export function atlasInvoiceErrorMessage(code: string): string {
       return 'Cette facture n’appartient pas à la société active.';
     case 'invalid_id':
       return 'Identifiant de facture invalide.';
+    case 'invoice_has_validated_journal_entries':
+      return 'Cette facture est comptabilisée dans des écritures validées : annulez-la par un avoir. Rien n’a été supprimé.';
     case 'list_failed':
       return 'Impossible de charger les factures. Vérifiez votre connexion ou réessayez.';
     default:

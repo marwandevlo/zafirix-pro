@@ -49,6 +49,11 @@ export async function runLiasseEngine(
     if (!companyId) return rows ?? [];
     return (rows ?? []).filter((r) => !r.company_id || r.company_id === companyId);
   };
+  /** Ledger, invoices and TVA: rows without a company belong to no liasse (e.g. lines of a deleted company). */
+  const ownCompanyOnly = <T extends { company_id?: string | null }>(rows: T[] | null | undefined): T[] => {
+    if (!companyId) return rows ?? [];
+    return (rows ?? []).filter((r) => r.company_id === companyId);
+  };
 
   const [
     entriesRes,
@@ -82,9 +87,9 @@ export async function runLiasseEngine(
     db.from('atlas_invoices').select('id, number, client_name, total_ttc, status, company_id').eq('user_id', userId).eq('status', 'paid'),
   ]);
 
-  entriesRes.data = filterCo(entriesRes.data);
-  invoicesRes.data = filterCo(invoicesRes.data);
-  supplierRes.data = filterCo(supplierRes.data);
+  entriesRes.data = ownCompanyOnly(entriesRes.data);
+  invoicesRes.data = ownCompanyOnly(invoicesRes.data);
+  supplierRes.data = ownCompanyOnly(supplierRes.data);
   statementsRes.data = filterCo(statementsRes.data);
   transactionsRes.data = filterCo(transactionsRes.data);
   reconRes.data = filterCo(reconRes.data);
@@ -92,9 +97,9 @@ export async function runLiasseEngine(
   payrollRunsRes.data = filterCo(payrollRunsRes.data);
   salariesRes.data = filterCo(salariesRes.data);
   irSnapshotsRes.data = filterCo(irSnapshotsRes.data);
-  tvaSuggestionsRes.data = filterCo(tvaSuggestionsRes.data);
+  tvaSuggestionsRes.data = ownCompanyOnly(tvaSuggestionsRes.data);
   legalRes.data = filterCo(legalRes.data);
-  paidInvoicesRes.data = filterCo(paidInvoicesRes.data);
+  paidInvoicesRes.data = ownCompanyOnly(paidInvoicesRes.data);
   if (companyId && liasseExistsRes.data && liasseExistsRes.data.company_id !== companyId) {
     liasseExistsRes.data = null;
   }

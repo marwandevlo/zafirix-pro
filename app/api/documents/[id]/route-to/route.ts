@@ -31,7 +31,12 @@ import {
   buildTvaSuggestion,
   persistJournalLines,
   persistTvaSuggestion,
+  UNBALANCED_JOURNAL_MESSAGE,
 } from '@/app/lib/atlas-documents-accounting-engine';
+import {
+  DUPLICATE_INVOICE_MESSAGE,
+  findSameInvoiceInOtherDocument,
+} from '@/app/lib/atlas-document-validation-server';
 import { syncBankStatementFromDocument } from '@/app/lib/atlas-bank-server';
 import { createPayslipExtractionFromDocument } from '@/app/lib/atlas-payslip-server';
 import { logAuditEvent } from '@/app/lib/atlas-audit-log';
@@ -146,6 +151,11 @@ async function routePurchaseToComptabilite(
   const amountHt = extractNumeric(extraction.subtotal_ht);
   const vatAmount = extractNumeric(extraction.tva_amount);
   const amountTtc = extractNumeric(extraction.total_ttc) ?? ((amountHt ?? 0) + (vatAmount ?? 0));
+  const isPurchase = documentType !== 'sales_invoice';
+
+  buildJournalLines(documentId, extraction, isPurchase, 'pending');
+  const duplicateOf = await findSameInvoiceInOtherDocument(admin, companyId, documentId, isPurchase, extraction, null);
+  if (duplicateOf) throw new Error(DUPLICATE_INVOICE_MESSAGE);
 
   // 1. Supplier invoice
   const { data: inv, error: invErr } = await admin
@@ -186,12 +196,15 @@ async function routePurchaseToComptabilite(
   const invoiceId = String(inv?.id);
 
   // 2. Journal lines
-  const isPurchase = documentType !== 'sales_invoice';
   const journalLines = buildJournalLines(documentId, extraction, isPurchase, invoiceId);
   let journalLineCount = 0;
   if (journalLines.length > 0) {
     const jr = await persistJournalLines(admin, userId, companyId, journalLines);
-    if (jr.ok) journalLineCount = jr.ids.length;
+    if (!jr.ok) {
+      await admin.from('atlas_supplier_invoices').delete().eq('id', invoiceId);
+      throw new Error(jr.error);
+    }
+    journalLineCount = jr.ids.length;
   }
 
   // 3. TVA suggestion
@@ -314,6 +327,7 @@ function routeToErrorResponse(
 }
 
 function routingFailureStatus(message: string): number {
+  if (message === DUPLICATE_INVOICE_MESSAGE || message === UNBALANCED_JOURNAL_MESSAGE) return 422;
   const lower = message.toLowerCase();
   if (
     lower.includes('required') ||

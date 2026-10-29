@@ -8,12 +8,14 @@ import { logAtlasServerEvent } from '@/app/lib/atlas-server-log';
 import { requireSupabaseUser } from '@/app/lib/atlas-supabase-guard';
 import { supabase } from '@/app/lib/supabase';
 
+const IMMUTABLE_LEDGER_STATUSES = ['validated', 'archived', 'posted'] as const;
+
 /** Core tables cleared by company_id (+ user_id when supported). Order: dependents first. */
 const CORE_COMPANY_TABLES = [
   'atlas_payments',
+  'atlas_accounting_entries',
   'atlas_invoices',
   'atlas_supplier_invoices',
-  'atlas_accounting_entries',
   'atlas_documents',
   'atlas_clients',
   'atlas_employees',
@@ -105,6 +107,34 @@ export async function clearAtlasCompanyDataServer(
 
   const owned = await requireOwnedCompany(companyId);
   if (!owned.ok) return { ok: false, error: owned.error };
+
+  const { count: lockedLines, error: lockedError } = await supabase
+    .from('atlas_accounting_entries')
+    .select('id', { count: 'exact', head: true })
+    .eq('company_id', companyId)
+    .in('validation_status', [...IMMUTABLE_LEDGER_STATUSES]);
+  if (lockedError) return { ok: false, error: `atlas_accounting_entries: ${lockedError.message}` };
+  if ((lockedLines ?? 0) > 0) {
+    logAtlasServerEvent('atlas_companies', 'warn', 'clear_data_blocked_immutable_ledger', {
+      companyId,
+      lockedLines,
+    });
+    return { ok: false, error: 'immutable_ledger_present' };
+  }
+
+  const { count: declaredPeriods, error: declaredError } = await supabase
+    .from('atlas_tva_periods')
+    .select('id', { count: 'exact', head: true })
+    .eq('company_id', companyId)
+    .eq('status', 'declared');
+  if (declaredError) return { ok: false, error: `atlas_tva_periods: ${declaredError.message}` };
+  if ((declaredPeriods ?? 0) > 0) {
+    logAtlasServerEvent('atlas_companies', 'warn', 'clear_data_blocked_declared_vat', {
+      companyId,
+      declaredPeriods,
+    });
+    return { ok: false, error: 'declared_vat_periods_present' };
+  }
 
   const clearedTables: string[] = [];
 

@@ -304,7 +304,12 @@ export async function deleteAtlasCompany(dbRowId: string): Promise<{ ok: true } 
     .maybeSingle();
 
   const { error } = await supabase.from('atlas_companies').delete().eq('id', dbRowId).eq('user_id', auth.userId);
-  if (error) return { ok: false, error: error.message };
+  if (error) {
+    return {
+      ok: false,
+      error: error.message.includes('company_has_accounting_history') ? 'company_has_accounting_history' : error.message,
+    };
+  }
 
   if (row?.is_active) {
     await ensureValidActiveCompany();
@@ -358,6 +363,12 @@ export function atlasCompanyErrorMessage(code: string): string {
       return 'La raison sociale est obligatoire.';
     case 'supabase_required':
       return 'La persistance cloud est requise pour cette action.';
+    case 'immutable_ledger_present':
+      return 'Cette société a des écritures validées. Elles ne peuvent pas être supprimées ; aucune donnée n’a été effacée.';
+    case 'declared_vat_periods_present':
+      return 'Cette société a des déclarations de TVA déposées. Elles doivent être conservées ; aucune donnée n’a été effacée.';
+    case 'company_has_accounting_history':
+      return 'Cette société contient des écritures, des factures ou des déclarations de TVA. Elle ne peut pas être supprimée afin de conserver l’historique comptable ; aucune donnée n’a été effacée.';
     default:
       return code || 'Une erreur est survenue. Réessayez.';
   }

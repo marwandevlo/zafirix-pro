@@ -586,12 +586,21 @@ export async function deleteSupplierInvoice(
     .eq('id', id)
     .eq('company_id', scopedCompanyId);
 
-  if (error) return { ok: false, error: error.message };
+  if (error) {
+    return {
+      ok: false,
+      error: error.message.includes('invoice_has_validated_journal_entries')
+        ? 'invoice_has_validated_journal_entries'
+        : error.message,
+    };
+  }
   return { ok: true };
 }
 
 export function atlasSupplierInvoiceErrorMessage(code: string): string {
   switch (code) {
+    case 'invoice_has_validated_journal_entries':
+      return 'Cette facture est comptabilisée dans des écritures validées : annulez-la par un avoir. Rien n’a été supprimé.';
     case 'auth_required':
       return 'Connectez-vous pour gérer vos factures fournisseur.';
     case 'company_required':

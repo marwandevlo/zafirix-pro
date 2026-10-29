@@ -16,9 +16,11 @@ import { logDocumentEvent } from '@/app/lib/atlas-document-events';
 import {
   buildJournalLines,
   buildTvaSuggestion,
+  MONEY_TOLERANCE,
   persistJournalLines,
   persistTvaSuggestion,
 } from '@/app/lib/atlas-documents-accounting-engine';
+import { isSameInvoice, normalizeInvoiceNumber } from '@/app/lib/atlas-invoice-duplicates';
 import { ocrInvoicesFromDocument } from '@/app/lib/atlas-documents-repository';
 import {
   creatableOcrInvoices,
@@ -237,6 +239,67 @@ async function findExistingClientInvoice(
   return data?.id ? String(data.id) : null;
 }
 
+export const DUPLICATE_INVOICE_MESSAGE =
+  'Cette facture est déjà enregistrée depuis un autre document (même numéro, date, montant TTC et tiers). Rien n’a été créé.';
+
+/** The same invoice already registered for this company from another document (a re-uploaded file). */
+export async function findSameInvoiceInOtherDocument(
+  admin: SupabaseClient,
+  companyId: string,
+  documentId: string,
+  isPurchase: boolean,
+  extraction: AtlasStructuredExtraction,
+  uploadDateYmd: string | null,
+): Promise<string | null> {
+  const number = extractStr(extraction.invoice_number);
+  const date = resolvePersistedInvoiceDate(extraction, uploadDateYmd);
+  const ttc = extractNum(extraction.total_ttc) || extractNum(extraction.subtotal_ht) + extractNum(extraction.tva_amount);
+  if (!normalizeInvoiceNumber(number) || !date || !(ttc > 0)) return null;
+  const wanted = {
+    number,
+    date,
+    ttc,
+    counterparty: isPurchase ? extractStr(extraction.supplier_name) : extractStr(extraction.customer_name),
+    ice: isPurchase ? extractStr(extraction.supplier_ice) || extraction.morocco_supplier_ids?.ice || null : null,
+  };
+
+  if (isPurchase) {
+    const { data } = await admin
+      .from('atlas_supplier_invoices')
+      .select('id, invoice_number, invoice_date, amount_ttc, supplier_name, supplier_ice')
+      .eq('company_id', companyId)
+      .eq('invoice_date', date)
+      .gte('amount_ttc', ttc - MONEY_TOLERANCE)
+      .lte('amount_ttc', ttc + MONEY_TOLERANCE)
+      .or(`document_id.is.null,document_id.neq.${documentId}`)
+      .limit(50);
+    const match = (data ?? []).find((row) =>
+      isSameInvoice(wanted, {
+        number: row.invoice_number,
+        date: row.invoice_date,
+        ttc: row.amount_ttc,
+        counterparty: row.supplier_name,
+        ice: row.supplier_ice,
+      }),
+    );
+    return match ? String(match.id) : null;
+  }
+
+  const { data } = await admin
+    .from('atlas_invoices')
+    .select('id, number, issue_date, total_ttc, client_name')
+    .eq('company_id', companyId)
+    .eq('issue_date', date)
+    .gte('total_ttc', ttc - MONEY_TOLERANCE)
+    .lte('total_ttc', ttc + MONEY_TOLERANCE)
+    .or(`source_document_id.is.null,source_document_id.neq.${documentId}`)
+    .limit(50);
+  const match = (data ?? []).find((row) =>
+    isSameInvoice(wanted, { number: row.number, date: row.issue_date, ttc: row.total_ttc, counterparty: row.client_name }),
+  );
+  return match ? String(match.id) : null;
+}
+
 function isPurchaseDocument(
   docType: AtlasDocumentType | null,
   extraction: AtlasStructuredExtraction,
@@ -267,6 +330,9 @@ async function registerSinglePurchaseInvoice(
   const amountHt = extractNum(extraction.subtotal_ht);
   const vatAmount = extractNum(extraction.tva_amount);
   const amountTtc = extractNum(extraction.total_ttc) || amountHt + vatAmount;
+
+  const isPurchase = documentType !== 'sales_invoice';
+  buildJournalLines(documentId, extraction, isPurchase, 'pending', uploadDateYmd);
 
   const { data: inv, error: invErr } = await admin
     .from('atlas_supplier_invoices')
@@ -313,12 +379,15 @@ async function registerSinglePurchaseInvoice(
   if (invErr) throw new Error(`Supplier invoice creation failed: ${invErr.message}`);
   const invoiceId = String(inv?.id);
 
-  const isPurchase = documentType !== 'sales_invoice';
   const journalLines = buildJournalLines(documentId, extraction, isPurchase, invoiceId, uploadDateYmd);
   let journalLineCount = 0;
   if (journalLines.length > 0) {
     const jr = await persistJournalLines(admin, userId, companyId, journalLines);
-    if (jr.ok) journalLineCount = jr.ids.length;
+    if (!jr.ok) {
+      await admin.from('atlas_supplier_invoices').delete().eq('id', invoiceId);
+      throw new Error(jr.error);
+    }
+    journalLineCount = jr.ids.length;
   }
 
   const tvaSuggestion = buildTvaSuggestion(
@@ -360,6 +429,8 @@ async function registerSingleSalesInvoice(
     extractStr(extraction.customer_name) || extractStr(extraction.supplier_name) || 'Client';
   const invoiceNumber = extractStr(extraction.invoice_number) || `AI-${documentId.slice(0, 8)}`;
 
+  buildJournalLines(documentId, extraction, false, 'pending', uploadDateYmd);
+
   const { data: inv, error } = await admin
     .from('atlas_invoices')
     .insert({
@@ -397,7 +468,11 @@ async function registerSingleSalesInvoice(
   let journalLineCount = 0;
   if (journalLines.length > 0) {
     const jr = await persistJournalLines(admin, userId, companyId, journalLines);
-    if (jr.ok) journalLineCount = jr.ids.length;
+    if (!jr.ok) {
+      await admin.from('atlas_invoices').delete().eq('id', invoiceId);
+      throw new Error(jr.error);
+    }
+    journalLineCount = jr.ids.length;
   }
 
   const tvaSuggestion = buildTvaSuggestion(
@@ -600,6 +675,22 @@ export async function registerValidatedDocumentRecords(
         invoiceIds.push(existing);
         invoicesSkipped += 1;
       } else {
+        const duplicateOf = await findSameInvoiceInOtherDocument(
+          admin,
+          companyId,
+          documentId,
+          isPurchase,
+          extraction,
+          uploadDateYmd,
+        );
+        if (duplicateOf) {
+          return {
+            ok: false,
+            error: 'duplicate_invoice',
+            message: DUPLICATE_INVOICE_MESSAGE,
+            details: [{ page: 1, invoice_number: extractStr(extraction.invoice_number), error: 'duplicate_invoice' }],
+          };
+        }
         const r = await registerInvoiceFromExtraction(
           admin,
           userId,
@@ -665,6 +756,20 @@ export async function registerValidatedDocumentRecords(
           if (existing) {
             return { kind: 'skipped_existing', invoiceId: existing };
           }
+          const duplicateOf = await findSameInvoiceInOtherDocument(
+            admin,
+            companyId,
+            documentId,
+            isPurchase,
+            extraction,
+            uploadDateYmd,
+          );
+          if (duplicateOf) {
+            return {
+              kind: 'invalid',
+              detail: { page: sourcePage, invoice_number: detected.invoice_number, error: 'duplicate_invoice' },
+            };
+          }
 
           const r = await registerInvoiceFromExtraction(
             admin,
@@ -713,10 +818,13 @@ export async function registerValidatedDocumentRecords(
     }
 
     if (invoicesCreated === 0 && invoiceIds.length === 0) {
+      const allDuplicates = details.length > 0 && details.every((d) => d.error === 'duplicate_invoice');
       return {
         ok: false,
-        error: 'validation_failed',
-        message: 'Aucune facture enregistrée. Vérifiez les montants et le fournisseur sur chaque page.',
+        error: allDuplicates ? 'duplicate_invoice' : 'validation_failed',
+        message: allDuplicates
+          ? 'Toutes les factures de ce document sont déjà enregistrées depuis un autre document. Rien n’a été créé.'
+          : 'Aucune facture enregistrée. Vérifiez les montants et le fournisseur sur chaque page.',
         details,
       };
     }

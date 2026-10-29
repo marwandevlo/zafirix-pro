@@ -44,6 +44,15 @@ export async function DELETE(_request: NextRequest, { params }: RouteParams) {
     .eq('id', id)
     .eq('company_id', companyId ?? '');
 
+  if (error?.message.includes('invoice_has_validated_journal_entries')) {
+    return NextResponse.json(
+      {
+        error: 'invoice_has_validated_journal_entries',
+        message: 'Cette facture est comptabilisée dans des écritures validées : annulez-la par un avoir. Rien n’a été supprimé.',
+      },
+      { status: 409, headers: NO_STORE_HEADERS },
+    );
+  }
   if (error) {
     return NextResponse.json({ error: error.message }, { status: 500, headers: NO_STORE_HEADERS });
   }

@@ -81,6 +81,34 @@ function periodKey(dateYmd: string, regime: string): string {
   return currentPeriodKey(regime, new Date(`${dateYmd}T12:00:00`));
 }
 
+/** Largest gap (MAD) treated as rounding between TTC and HT + TVA. */
+export const MONEY_TOLERANCE = 0.01;
+
+export const UNBALANCED_JOURNAL_MESSAGE =
+  'Écriture déséquilibrée : le total TTC ne correspond pas au HT + TVA (ou le HT et la TVA sont absents). Corrigez les montants du document. Rien n’a été enregistré.';
+
+function roundMad(value: number): number {
+  return Math.round(value * 100) / 100;
+}
+
+/** TTC to post: HT + TVA when the extracted TTC differs from it by at most one centime. */
+function postedTtc(ht: number, tva: number, ttc: number): number {
+  const parts = roundMad(roundMad(ht) + roundMad(tva));
+  const extracted = roundMad(ttc);
+  if (parts <= 0) return extracted;
+  return Math.abs(extracted - parts) <= MONEY_TOLERANCE + 1e-9 ? parts : extracted;
+}
+
+/** Loi 9-88 art. 2: every entry debits and credits the same amount. Throws before anything is written. */
+export function assertBalancedJournal(lines: Array<{ debit: number; credit: number }>): void {
+  if (!lines.length) return;
+  const debit = lines.reduce((sum, line) => sum + (Number(line.debit) || 0), 0);
+  const credit = lines.reduce((sum, line) => sum + (Number(line.credit) || 0), 0);
+  if (!(debit > 0) || !(credit > 0) || Math.abs(roundMad(debit) - roundMad(credit)) > 0.001) {
+    throw new Error(UNBALANCED_JOURNAL_MESSAGE);
+  }
+}
+
 // ── Types ─────────────────────────────────────────────────────────────────────
 
 export type AccountingJournalLine = {
@@ -138,7 +166,7 @@ export function buildJournalLines(
   if (!entryDate) return [];
   const ht = extractNum(extraction.subtotal_ht);
   const tva = extractNum(extraction.tva_amount);
-  const ttc = extractNum(extraction.total_ttc) || (ht + tva);
+  const ttc = postedTtc(ht, tva, extractNum(extraction.total_ttc) || (ht + tva));
   const category = extractStr(extraction.category_suggestion);
   const accountingAccount = extractStr(extraction.accounting_account);
 
@@ -180,6 +208,7 @@ export function buildJournalLines(
         credit: Math.round(ttc * 100) / 100,
       });
     }
+    assertBalancedJournal(lines);
     return lines;
   } else {
     // Sales invoice
@@ -212,6 +241,7 @@ export function buildJournalLines(
         credit: Math.round(tva * 100) / 100,
       });
     }
+    assertBalancedJournal(lines);
     return lines;
   }
 }
@@ -256,6 +286,11 @@ export async function persistJournalLines(
   lines: AccountingJournalLine[],
 ): Promise<{ ok: true; ids: string[] } | { ok: false; error: string }> {
   if (!lines.length) return { ok: true, ids: [] };
+  try {
+    assertBalancedJournal(lines);
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : String(err) };
+  }
 
   const rows = lines.map(line => ({
     user_id: userId,

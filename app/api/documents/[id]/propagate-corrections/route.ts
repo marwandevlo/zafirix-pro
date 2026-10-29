@@ -23,22 +23,20 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { documentUploadSessionUserId } from '@/app/lib/atlas-document-upload-auth';
 import { getSupabaseServiceRoleClient } from '@/app/lib/supabase-admin';
+import { requireApiCompanyAccess } from '@/app/lib/atlas-api-company-guard';
+import {
+  type CorrectionDelta,
+  linkedInvoiceIds,
+  numericOrNull,
+  planDraftEntryCorrection,
+} from '@/app/lib/atlas-correction-propagation';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
 type PropagateBody = {
-  corrections: Record<string, { field: string; old_value: unknown; new_value: unknown }>;
+  corrections: Record<string, CorrectionDelta>;
 };
-
-function numericOrNull(v: unknown): number | null {
-  if (typeof v === 'number' && isFinite(v)) return v;
-  if (typeof v === 'string') {
-    const n = parseFloat(v.replace(/\s/g, '').replace(',', '.'));
-    if (isFinite(n)) return n;
-  }
-  return null;
-}
 
 export async function PATCH(
   request: NextRequest,
@@ -65,6 +63,9 @@ export async function PATCH(
     .eq('id', documentId).eq('user_id', userId).maybeSingle();
 
   if (docErr || !doc) return NextResponse.json({ error: 'document_not_found' }, { status: 404 });
+  const access = await requireApiCompanyAccess(admin, userId, doc.company_id);
+  if (!access.ok) return NextResponse.json({ error: 'company_forbidden' }, { status: 403 });
+  const companyId = access.companyId;
 
   const corrections = body.corrections;
   const correctionKeys = Object.keys(corrections);
@@ -90,12 +91,39 @@ export async function PATCH(
     return update;
   }
 
-  // ── 1. Supplier invoices (draft) ──────────────────────────────────────────
+  const [{ data: supplierInvoices }, { data: salesInvoices }, { data: accountingEntries }] = await Promise.all([
+    admin
+      .from('atlas_supplier_invoices')
+      .select('id, validation_status')
+      .eq('company_id', companyId)
+      .eq('source_document_id', documentId),
+    admin
+      .from('atlas_invoices')
+      .select('id, validation_status')
+      .eq('company_id', companyId)
+      .eq('source_document_id', documentId),
+    admin
+      .from('atlas_accounting_entries')
+      .select('id, validation_status, entry_json, source_invoice_id')
+      .eq('company_id', companyId)
+      .eq('source_document_id', documentId),
+  ]);
 
-  const { data: supplierInvoices } = await admin
-    .from('atlas_supplier_invoices')
-    .select('id, validation_status')
-    .eq('source_document_id', documentId);
+  const invoiceIds = linkedInvoiceIds(
+    [...(supplierInvoices ?? []), ...(salesInvoices ?? [])].map((inv) => String(inv.id)),
+    accountingEntries ?? [],
+  );
+  if (invoiceIds.size > 1) {
+    return NextResponse.json(
+      {
+        error: 'multi_invoice_document',
+        message: 'Ce document contient plusieurs factures : corrigez chaque facture individuellement. Rien n’a été modifié.',
+      },
+      { status: 409 },
+    );
+  }
+
+  // ── 1. Supplier invoices (draft) ──────────────────────────────────────────
 
   if (supplierInvoices && supplierInvoices.length > 0) {
     const supplierFieldMap: Record<string, string> = {
@@ -123,28 +151,29 @@ export async function PATCH(
 
   // ── 2. Accounting entries (draft) ─────────────────────────────────────────
 
-  const { data: accountingEntries } = await admin
-    .from('atlas_accounting_entries')
-    .select('id, validation_status, debit, credit, description')
-    .eq('source_document_id', documentId);
-
   if (accountingEntries && accountingEntries.length > 0) {
-    for (const entry of accountingEntries) {
-      if (['validated', 'archived'].includes(entry.validation_status ?? '')) {
-        blocked.push({ table: 'atlas_accounting_entries', entityId: String(entry.id), reason: 'already_validated' });
-        continue;
-      }
-      // Update amounts if TTC or HT changed
-      const ttcCorrection = corrections.total_ttc ?? corrections.subtotal_ht;
-      if (ttcCorrection) {
-        const newAmount = numericOrNull(ttcCorrection.new_value);
-        if (newAmount != null) {
-          const isDebit = entry.debit > 0;
-          await admin.from('atlas_accounting_entries')
-            .update({ [isDebit ? 'debit' : 'credit']: newAmount, updated_at: now })
-            .eq('id', entry.id);
-          propagated.accounting_entries++;
-        }
+    const plan = planDraftEntryCorrection(
+      accountingEntries.map((entry) => ({
+        id: String(entry.id),
+        validation_status: entry.validation_status ?? null,
+        entry_json: (entry.entry_json ?? {}) as Record<string, unknown>,
+        source_invoice_id: entry.source_invoice_id ?? null,
+      })),
+      corrections,
+    );
+    for (const id of plan.immutableIds) {
+      blocked.push({ table: 'atlas_accounting_entries', entityId: id, reason: 'already_validated' });
+    }
+    const planned = plan.planned;
+    if (planned.length > 0 && !plan.balanced) {
+      blocked.push({ table: 'atlas_accounting_entries', entityId: documentId, reason: 'unbalanced_correction' });
+    } else {
+      for (const row of planned) {
+        await admin.from('atlas_accounting_entries').update({
+          entry_json: row.entry_json,
+          updated_at: now,
+        }).eq('id', row.id);
+        propagated.accounting_entries++;
       }
     }
   }
@@ -153,7 +182,8 @@ export async function PATCH(
 
   const { data: tvaSuggestions } = await admin
     .from('zafirix_tva_suggestions')
-    .select('id, status')
+    .select('id, validation_status')
+    .eq('company_id', companyId)
     .eq('source_document_id', documentId);
 
   if (tvaSuggestions && tvaSuggestions.length > 0) {
@@ -161,7 +191,7 @@ export async function PATCH(
     const vatRateCorrection = corrections.tva_rate;
 
     for (const tva of tvaSuggestions) {
-      if (['validated', 'archived'].includes(tva.status ?? '')) {
+      if (['validated', 'archived', 'included_in_declaration'].includes(tva.validation_status ?? '')) {
         blocked.push({ table: 'zafirix_tva_suggestions', entityId: String(tva.id), reason: 'already_validated' });
         continue;
       }
@@ -172,7 +202,7 @@ export async function PATCH(
       }
       if (vatRateCorrection) {
         const newRate = numericOrNull(vatRateCorrection.new_value);
-        if (newRate != null) upd['vat_rate'] = newRate;
+        if (newRate != null) upd['rate'] = newRate;
       }
       if (Object.keys(upd).length > 0) {
         await admin.from('zafirix_tva_suggestions').update({ ...upd, updated_at: now }).eq('id', tva.id);
@@ -182,11 +212,6 @@ export async function PATCH(
   }
 
   // ── 4. Sales invoices (draft) from atlas_invoices ─────────────────────────
-
-  const { data: salesInvoices } = await admin
-    .from('atlas_invoices')
-    .select('id, validation_status')
-    .eq('source_document_id', documentId);
 
   if (salesInvoices && salesInvoices.length > 0) {
     const salesFieldMap: Record<string, string> = {
@@ -210,21 +235,18 @@ export async function PATCH(
 
   // ── Audit log ─────────────────────────────────────────────────────────────
 
-  const companyId = doc.company_id;
-  if (companyId) {
-    void admin.from('atlas_entity_events').insert({
-      user_id: userId,
-      company_id: companyId,
-      entity_type: 'document',
-      entity_id: documentId,
-      event_type: 'correction_propagated',
-      payload: {
-        corrected_fields: correctionKeys,
-        propagated,
-        blocked_count: blocked.length,
-      },
-    });
-  }
+  void admin.from('atlas_entity_events').insert({
+    user_id: userId,
+    company_id: companyId,
+    entity_type: 'document',
+    entity_id: documentId,
+    event_type: 'correction_propagated',
+    payload: {
+      corrected_fields: correctionKeys,
+      propagated,
+      blocked_count: blocked.length,
+    },
+  });
 
   return NextResponse.json({
     ok: true,
