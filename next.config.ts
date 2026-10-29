@@ -14,6 +14,44 @@ function resolveBuildId(): string {
   );
 }
 
+const PRODUCTION_SUPABASE_REF = 'kwylivmhlcuflubyubdv';
+
+function jwtProjectRef(token: string): string {
+  try {
+    const payload = JSON.parse(Buffer.from(token.split('.')[1] ?? '', 'base64url').toString('utf8'));
+    return typeof payload?.ref === 'string' ? payload.ref : '';
+  } catch {
+    return '';
+  }
+}
+
+/**
+ * Vercel Preview deployments must never reach the production database.
+ * A Preview build fails unless ATLAS_PREVIEW_ISOLATED_DB=1 is set for the Preview scope and
+ * no Supabase/Postgres variable (URL or key) belongs to the production project. Values are never printed.
+ */
+function assertPreviewUsesIsolatedDatabase(): void {
+  if (process.env.VERCEL_ENV !== 'preview') return;
+  const offending = Object.entries(process.env)
+    .filter(([name]) => /SUPABASE|DATABASE|POSTGRES/i.test(name))
+    .filter(([, value]) => {
+      const v = String(value ?? '');
+      return v.includes(PRODUCTION_SUPABASE_REF) || jwtProjectRef(v) === PRODUCTION_SUPABASE_REF;
+    })
+    .map(([name]) => name);
+  if (offending.length || process.env.ATLAS_PREVIEW_ISOLATED_DB !== '1') {
+    throw new Error(
+      `[atlas:preview-guard] Preview build refused: it must use an isolated Supabase project. ` +
+        (offending.length
+          ? `These variables point to production: ${offending.join(', ')}. `
+          : 'ATLAS_PREVIEW_ISOLATED_DB=1 is not set for Preview. ') +
+        'Set Preview-scoped Supabase variables to a non-production project, then set ATLAS_PREVIEW_ISOLATED_DB=1.',
+    );
+  }
+}
+
+assertPreviewUsesIsolatedDatabase();
+
 const appBuildId = resolveBuildId();
 const PRODUCTION_SITE_URL = 'https://zafirixpro.com';
 
