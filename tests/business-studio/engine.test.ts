@@ -30,10 +30,23 @@ test('calendar: fiscal years, partial years, quarters', () => {
 
 test('rich model reconciles exactly for every horizon 1..30 years', () => {
   for (const years of [1, 2, 3, 5, 7, 10, 15, 20, 30]) {
-    const r = computeStudy(richModel(years));
+    const m = richModel(years);
+    assert.equal(validateStudyModel(m).ok, true, `${years}y validates`);
+    const r = computeStudy(m);
     assert.equal(r.calendar.months, years * 12);
     assertReconciled(r, `${years}y`);
   }
+});
+
+test('items dated after a shortened horizon stay valid and are ignored', () => {
+  const m = richModel(5);
+  m.horizon.years = 1;
+  const v = validateStudyModel(m);
+  assert.equal(v.ok, true, JSON.stringify(v.issues.slice(0, 3)));
+  const r = computeStudy(v.model);
+  assertReconciled(r, 'shortened');
+  for (const s of Object.values(r.monthly)) assert.equal(s.length, 12);
+  assert.equal(total(r.monthly.cashInLoans), r.loans.filter((l) => l.disbursementMonth >= 0 && l.disbursementMonth < 12).reduce((a, l) => a + l.principal, 0));
 });
 
 test('all default scenarios reconcile and differ', () => {

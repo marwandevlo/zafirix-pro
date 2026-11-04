@@ -439,8 +439,9 @@ function id(v: unknown, prefix: string): string {
   return s || newId(prefix);
 }
 
-function monthOffset(ctx: Ctx, v: unknown, path: string, horizonMonths: number): number {
-  return num(ctx, v, path, { min: 0, max: Math.max(0, horizonMonths - 1), int: true });
+/** Months beyond the current horizon are kept (the engine ignores them) so shortening a horizon never invalidates a study. */
+function monthOffset(ctx: Ctx, v: unknown, path: string): number {
+  return num(ctx, v, path, { min: 0, max: MAX_YEARS * 12 - 1, int: true });
 }
 
 function levers(ctx: Ctx, v: unknown, path: string): Levers {
@@ -486,13 +487,15 @@ export function validateStudyModel(input: unknown): ValidationResult {
     fiscalYearStartMonth: num(ctx, h.fiscalYearStartMonth, 'horizon.fiscalYearStartMonth', { min: 1, max: 12, int: true, fallback: 1 }),
   };
   const N = years * 12;
-  const mo = (v: unknown, p: string) => monthOffset(ctx, v, p, N);
+  const mo = (v: unknown, p: string) => monthOffset(ctx, v, p);
   const endMo = (v: unknown, p: string) => (v === '' || v == null ? null : mo(v, p));
 
   const p = rec(r.profile);
   const c = rec(p.company);
   const pr = rec(p.project);
-  const logo = str(c.logoDataUrl, 400_000);
+  const rawLogo = typeof c.logoDataUrl === 'string' ? c.logoDataUrl : '';
+  if (rawLogo.length > 400_000) ctx.issues.push({ path: 'profile.company.logoDataUrl', message: 'Logo trop volumineux (300 Ko maximum).', severity: 'error' });
+  const logo = rawLogo.length > 400_000 ? '' : rawLogo;
   const profile: StudyProfile = {
     company: {
       name: str(c.name, 200), tradingName: str(c.tradingName, 200),

@@ -127,7 +127,7 @@ export type ProductDetail = {
 };
 
 export type LoanRow = { month: number; opening: Cents; interest: Cents; capitalized: Cents; principal: Cents; payment: Cents; closing: Cents };
-export type LoanDetail = { id: string; name: string; kind: 'bank' | 'shareholder' | 'opening'; principal: Cents; fees: Cents; rows: LoanRow[] };
+export type LoanDetail = { id: string; name: string; kind: 'bank' | 'shareholder' | 'opening'; principal: Cents; fees: Cents; disbursementMonth: number; rows: LoanRow[] };
 export type AssetDetail = { id: string; name: string; kind: string; cost: Cents; month: number; depreciation: Series; method: string; coefficient: number | null };
 export type StaffDetail = { id: string; role: string; costCenter: string; headcount: number[]; gross: Series; employer: Series; ir: Series; net: Series };
 export type ExpenseDetail = { id: string; name: string; category: string; costCenter: string; amount: Series };
@@ -648,7 +648,7 @@ export function computeStudy(input: StudyModel, scenarioId?: string): StudyResul
         M.cashOutPrincipal[m] += principal;
       }
     }
-    loans.push({ id: l.id, name: l.name, kind: l.kind, principal: P, fees, rows });
+    loans.push({ id: l.id, name: l.name, kind: l.kind, principal: P, fees, disbursementMonth: l.month, rows });
   };
   for (const l of model.financing.loans) buildLoan(l, l.month + 1, true);
   if (ob && ob.debtBalance > 0 && ob.debtRemainingMonths > 0) {
@@ -661,9 +661,7 @@ export function computeStudy(input: StudyModel, scenarioId?: string): StudyResul
     let bal = 0;
     let nextYear = 0;
     for (const ln of loans) {
-      const isOpening = ln.kind === 'opening';
-      const disb = isOpening ? -1 : (model.financing.loans.find((x) => x.id === ln.id)?.month ?? 0);
-      if (disb > m) continue;
+      if (ln.disbursementMonth > m) continue;
       let b = ln.principal;
       for (const row of ln.rows) {
         if (row.month > m) {
