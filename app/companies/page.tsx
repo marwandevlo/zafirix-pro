@@ -226,9 +226,11 @@ export default function CompaniesPage() {
     const companyName = c.raisonSociale || c.tradeName || 'هذه الشركة';
     const confirmed = window.confirm(
       `⚠️ تحذير خطير:\n\nهل أنت متأكد من رغبتك في إفراغ جميع بيانات، فواتير وحسابات شركة (${companyName})؟\n\n` +
-      `سيتم مسح كافة الأعمال المرتبطة بها مع الاحتفاظ بملف الشركة ومعلوماتها الأساسية.\n\n` +
+      `سيتم مسح كافة الأعمال المرتبطة بها مع الاحتفاظ بملف الشركة ومعلوماتها الأساسية.\n` +
+      `دراسات المشاريع لا تُحذف: تُفصل عن الشركة وتبقى متاحة في «دراسة المشروع».\n\n` +
       `⚠️ Avertissement : vider toutes les données transactionnelles de « ${companyName} » ?\n` +
-      `Le profil société (ICE, IF, etc.) sera conservé.`,
+      `Le profil société (ICE, IF, etc.) sera conservé.\n` +
+      `Les études de projet ne sont pas supprimées : elles sont détachées de la société et restent dans « Étude de projet ».`,
     );
     if (!confirmed) return;
 

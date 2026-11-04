@@ -6,6 +6,8 @@ import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } f
 import { buildCalendar, computeStudy, type StudyResult } from '@/app/lib/business-studio/engine';
 import { computeMetrics, type StudyMetrics } from '@/app/lib/business-studio/metrics';
 import { validateStudyModel, type StudyModel, type ValidationIssue } from '@/app/lib/business-studio/model';
+import { STR } from '@/app/lib/business-studio/i18n';
+import { SHARING_MODES, type Sharing } from '@/app/lib/business-studio/model';
 import type { StatusAction, StudyRecord } from '@/app/lib/business-studio/server-store';
 import { Actuals } from './Actuals';
 import { Assumptions } from './Assumptions';
@@ -147,7 +149,9 @@ export function Workspace({ studyId }: { studyId: string }) {
   }, []);
 
   const status = study?.meta.studyStatus ?? 'draft';
-  const locked = status === 'approved' || status === 'archived';
+  const access = study?.access.level ?? 'owner';
+  const readOnly = access === 'read';
+  const locked = status === 'approved' || status === 'archived' || readOnly;
   const disabled = locked || save === 'conflict';
   const scenarioId = (locked ? viewScenario : null) ?? model?.activeScenarioId ?? 'base';
   const deferredValid = useDeferredValue(validModel);
@@ -165,14 +169,22 @@ export function Workspace({ studyId }: { studyId: string }) {
       if (dirty.current) { setActionError(t(bi('Enregistrez d’abord les modifications (corrigez les erreurs éventuelles).', 'احفظ التعديلات أولاً (صحح الأخطاء إن وجدت).'))); return; }
       await fn();
     } catch (e) {
-      setActionError(e instanceof ApiError ? e.code : 'network_error');
+      setActionError(errorText(e));
     } finally {
       setBusy(false);
     }
   };
+  const errorText = (e: unknown) => {
+    if (!(e instanceof ApiError)) return 'network_error';
+    const key = `err_${e.code}`;
+    return key in STR ? t(key as keyof typeof STR) : e.code;
+  };
   const changeStatus = (action: StatusAction) => runAction(async () => {
     accept(await studioApi.status(studyId, action, revision.current));
     setViewScenario(null);
+  });
+  const changeSharing = (sharing: Sharing) => runAction(async () => {
+    accept(await studioApi.share(studyId, sharing, revision.current));
   });
   const duplicate = () => runAction(async () => {
     const s = await studioApi.duplicate(studyId, `${name} — ${t(bi('copie', 'نسخة'))}`);
@@ -187,8 +199,11 @@ export function Workspace({ studyId }: { studyId: string }) {
   const runActionUnsafe = async (fn: () => Promise<void>) => {
     setBusy(true);
     setActionError('');
-    try { await fn(); } catch (e) { setActionError(e instanceof ApiError ? e.code : 'network_error'); } finally { setBusy(false); }
+    try { await fn(); } catch (e) { setActionError(errorText(e)); } finally { setBusy(false); }
   };
+  const statusText = study?.meta.studyStatus === 'approved'
+    ? t(study.meta.approval?.independent ? 'st_approved_independent' : 'st_approved_self')
+    : t(`st_${status}` as const);
 
   if (loadError) {
     return (
@@ -219,7 +234,7 @@ export function Workspace({ studyId }: { studyId: string }) {
           <Link href="/etude-projet" className="text-xs text-gray-500 hover:text-gray-800">← {t('studies')}</Link>
           <input aria-label={t('name')} value={name} disabled={disabled} maxLength={200} onChange={(e) => rename(e.target.value)}
             className="flex-1 min-w-[180px] text-lg font-bold text-gray-800 bg-transparent border-b border-transparent focus:border-amber-500 focus:outline-none disabled:text-gray-600" />
-          <Badge tone={STATUS_TONE[status]}>{t(`st_${status}` as const)}</Badge>
+          <Badge tone={STATUS_TONE[status]}>{statusText}</Badge>
           <span role="status" aria-live="polite" className={`text-xs ${save === 'saved' ? 'text-green-700' : save === 'conflict' || save === 'invalid' || save === 'error' ? 'text-red-700' : 'text-gray-500'}`}>
             {saveLabel[save]} · {t('revision')} {study.meta.revision}
           </span>
@@ -233,12 +248,23 @@ export function Workspace({ studyId }: { studyId: string }) {
               {model.scenarios.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
             </select>
           </label>
+          {access === 'owner' && study.companyId && (
+            <label className="text-xs text-gray-600 flex items-center gap-1.5">
+              {t('sharing')}
+              <select value={study.meta.sharing} disabled={busy} className="rounded-lg border border-gray-300 px-2 py-1 text-xs"
+                onChange={(e) => void changeSharing(e.target.value as Sharing)}>
+                {SHARING_MODES.map((s) => <option key={s} value={s}>{t(`share_${s}` as const)}</option>)}
+              </select>
+            </label>
+          )}
           <span className="flex-1" />
-          {status === 'draft' && <Button size="sm" disabled={busy} onClick={() => void changeStatus('submit')}>{t('submit')}</Button>}
-          {status === 'under_review' && <Button size="sm" variant="primary" disabled={busy} onClick={() => void changeStatus('approve')}>{t('approve')}</Button>}
-          {(status === 'under_review' || status === 'approved') && <Button size="sm" disabled={busy} onClick={() => void changeStatus('reopen')}>{t('reopen')}</Button>}
-          {status !== 'archived' && <Button size="sm" variant="ghost" disabled={busy} onClick={() => void changeStatus('archive')}>{t('archive')}</Button>}
-          {status === 'archived' && <Button size="sm" disabled={busy} onClick={() => void changeStatus('restore')}>{t('restore')}</Button>}
+          {status === 'draft' && !readOnly && <Button size="sm" disabled={busy} onClick={() => void changeStatus('submit')}>{t('submit')}</Button>}
+          {status === 'under_review' && (access === 'owner' || study.access.canApprove) && (
+            <Button size="sm" variant="primary" disabled={busy} onClick={() => void changeStatus('approve')}>{access === 'owner' ? t('approveSelf') : t('approve')}</Button>
+          )}
+          {(status === 'under_review' || status === 'approved') && !readOnly && <Button size="sm" disabled={busy} onClick={() => void changeStatus('reopen')}>{t('reopen')}</Button>}
+          {status !== 'archived' && access === 'owner' && <Button size="sm" variant="ghost" disabled={busy} onClick={() => void changeStatus('archive')}>{t('archive')}</Button>}
+          {status === 'archived' && access === 'owner' && <Button size="sm" disabled={busy} onClick={() => void changeStatus('restore')}>{t('restore')}</Button>}
           <Button size="sm" variant="ghost" disabled={busy} onClick={() => void duplicate()}>{t('duplicate')}</Button>
         </div>
       </header>
@@ -255,7 +281,10 @@ export function Workspace({ studyId }: { studyId: string }) {
             </div>
           </Notice>
         )}
-        {locked && <Notice tone="info">{t('locked')}</Notice>}
+        {readOnly && <Notice tone="info">{t('sharedReadOnly')}</Notice>}
+        {access === 'edit' && <Notice tone="info">{t('sharedEdit')}</Notice>}
+        {locked && !readOnly && <Notice tone="info">{t('locked')}</Notice>}
+        {status === 'approved' && !study.meta.approval?.independent && <Notice tone="warning">{t('selfApprovalWarning')}</Notice>}
         {actionError && <Notice tone="critical">{actionError}</Notice>}
         {errors.length > 0 && (
           <Notice tone="warning">
@@ -278,7 +307,7 @@ export function Workspace({ studyId }: { studyId: string }) {
             {tab === 'actuals' && computed && <Actuals studyId={studyId} r={computed.r} hasCompany={Boolean(study.companyId)} />}
             {tab === 'reports' && computed && (
               <Reports studyId={studyId} studyName={name} model={deferredValid!} r={computed.r} x={computed.x} revision={study.meta.revision}
-                status={t(`st_${status}` as const)} hasCompany={Boolean(study.companyId)} unsaved={save !== 'saved'} />
+                status={status === 'approved' ? (study.meta.approval?.independent ? 'approved_independent' : 'approved_self') : status} hasCompany={Boolean(study.companyId)} unsaved={save !== 'saved'} />
             )}
             {tab === 'versions' && computed && (
               <Versions study={study} model={model} x={computed.x} unsaved={save !== 'saved'} locked={disabled} onRestored={accept} />

@@ -17,6 +17,9 @@ const ALLOWED = [
   /^public\/fonts\/amiri\//,
   /^docs\/business-studio\//,
   /^scripts\/business-studio-preflight\.mjs$/,
+  // Company "clear data" keeps project studies (detached from the company) instead of deleting them.
+  /^app\/lib\/atlas-company-clear-server\.ts$/,
+  /^app\/companies\/page\.tsx$/,
 ];
 
 const args = process.argv.slice(2);

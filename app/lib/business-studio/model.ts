@@ -8,6 +8,9 @@ export const STUDY_SCHEMA_VERSION = 1;
 export const STUDY_KIND = 'business_study_v2';
 export const STUDY_VERSION_KIND = 'business_study_version';
 export const LEGACY_STUDY_KIND = 'etude_faisabilite';
+/** Who besides the owner may open a study linked to a company. */
+export const SHARING_MODES = ['private', 'company_read', 'company_edit'] as const;
+export type Sharing = (typeof SHARING_MODES)[number];
 
 export const MIN_YEARS = 1;
 export const MAX_YEARS = 30;

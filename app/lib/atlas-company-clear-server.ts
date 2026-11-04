@@ -7,6 +7,7 @@ import { requireOwnedCompany } from '@/app/lib/atlas-entity-ownership';
 import { logAtlasServerEvent } from '@/app/lib/atlas-server-log';
 import { requireSupabaseUser } from '@/app/lib/atlas-supabase-guard';
 import { supabase } from '@/app/lib/supabase';
+import { detachCompanyStudies } from '@/app/lib/business-studio/company-clear';
 
 const IMMUTABLE_LEDGER_STATUSES = ['validated', 'archived', 'posted'] as const;
 
@@ -97,7 +98,7 @@ async function resetCompanyBalance(companyId: string, userId: string): Promise<v
 
 export async function clearAtlasCompanyDataServer(
   companyId: string,
-): Promise<{ ok: true; clearedTables: string[] } | { ok: false; error: string }> {
+): Promise<{ ok: true; clearedTables: string[]; detachedStudies: number } | { ok: false; error: string }> {
   if (!isAtlasSupabaseDataEnabled()) {
     return { ok: false, error: 'supabase_required' };
   }
@@ -136,6 +137,13 @@ export async function clearAtlasCompanyDataServer(
     return { ok: false, error: 'declared_vat_periods_present' };
   }
 
+  // Project studies are kept (unlinked from the company) rather than deleted with the transactional data.
+  const detached = await detachCompanyStudies(supabase, companyId, auth.userId);
+  if (!detached.ok) {
+    logAtlasServerEvent('atlas_companies', 'error', 'clear_data_failed', { companyId, table: 'atlas_projects', message: detached.error });
+    return { ok: false, error: detached.error };
+  }
+
   const clearedTables: string[] = [];
 
   for (const table of CORE_COMPANY_TABLES) {
@@ -161,7 +169,8 @@ export async function clearAtlasCompanyDataServer(
   logAtlasServerEvent('atlas_companies', 'info', 'company_data_cleared', {
     companyId,
     tables: clearedTables.length,
+    detachedStudies: detached.detached,
   });
 
-  return { ok: true, clearedTables };
+  return { ok: true, clearedTables, detachedStudies: detached.detached };
 }

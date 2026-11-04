@@ -4,19 +4,23 @@
  *   metadata.kind = 'business_study_version'  immutable snapshots of a study
  *   metadata.kind = 'etude_faisabilite'       legacy studies, read for import only, never modified
  *
- * Every query is scoped to the caller's user id; a study linked to a company also requires current access
- * to that company. Forecasts never touch accounting tables except the read-only select used for actuals.
+ * A study belongs to the user who created it; a study linked to a company also requires current access to that
+ * company. The owner may share it with the company's members (metadata.sharing): every member with a company role
+ * may then read it, members with at least the accountant role may edit it when sharing is "company_edit", and
+ * members with at least the auditor role who are not its author may approve it. An approval by the owner is
+ * recorded as a self-approval (not independent). Forecasts never touch accounting tables except the read-only
+ * select used for actuals.
  */
 
 import type { SupabaseClient } from '@supabase/supabase-js';
-import { canAccessCompany } from '@/app/lib/atlas-permissions';
+import { canAccessCompany, resolveCompanyRole, roleMeetsMinimum } from '@/app/lib/atlas-permissions';
 import { isPostgresUuid } from '@/app/lib/atlas-id-validation';
 import { ACTUAL_STATUSES_DEFAULT, ACTUAL_STATUSES_WITH_UNVALIDATED, type ActualLine } from './actuals';
 import { computeStudy, ENGINE_VERSION } from './engine';
 import { importLegacyStudy, isLegacyStudy } from './legacy-import';
 import { computeMetrics } from './metrics';
 import {
-  LEGACY_STUDY_KIND, STUDY_KIND, STUDY_SCHEMA_VERSION, STUDY_VERSION_KIND, type StudyModel, type StudyStatus, validateStudyModel,
+  LEGACY_STUDY_KIND, SHARING_MODES, STUDY_KIND, STUDY_SCHEMA_VERSION, STUDY_VERSION_KIND, type Sharing, type StudyModel, type StudyStatus, validateStudyModel,
   type ValidationIssue,
 } from './model';
 import { modelFromTemplate } from './sectors';
@@ -29,6 +33,10 @@ const VERSION_LIMIT = 100;
 export type AuditEvent = { at: string; userId: string; action: string; revision: number; detail?: string };
 export type ComputeStamp = { at: string; revision: number; engineVersion: string; rulesVersion: string; checksOk: boolean };
 
+export { SHARING_MODES, type Sharing };
+/** `independent` is false when the study's own author approved it. */
+export type Approval = { by: string; at: string; revision: number; independent: boolean; role: string | null };
+
 export type StudyMeta = {
   kind: typeof STUDY_KIND;
   schemaVersion: typeof STUDY_SCHEMA_VERSION;
@@ -39,14 +47,27 @@ export type StudyMeta = {
   audit: AuditEvent[];
   lastComputed: ComputeStamp | null;
   importedFrom: string | null;
+  sharing: Sharing;
+  submittedBy: string | null;
+  approval: Approval | null;
 };
 
-export type StudyRecord = { id: string; companyId: string | null; name: string; createdAt: string; updatedAt: string; meta: StudyMeta; issues: ValidationIssue[] };
+export type AccessLevel = 'owner' | 'edit' | 'read';
+export type StudyAccess = { level: AccessLevel; companyRole: string | null; canApprove: boolean };
+
+export type StudyRecord = {
+  id: string; companyId: string | null; name: string; createdAt: string; updatedAt: string; meta: StudyMeta; issues: ValidationIssue[];
+  ownerId: string; access: StudyAccess;
+};
 
 export type StudySummary = {
   id: string; companyId: string | null; name: string; kind: 'v2' | 'legacy'; status: string; revision: number | null;
   sector: string | null; years: number | null; startMonth: string | null; createdAt: string; updatedAt: string;
+  access: AccessLevel; sharing: Sharing; selfApproved: boolean;
 };
+
+const EDIT_MIN_ROLE = 'accountant';
+const APPROVE_MIN_ROLE = 'auditor';
 
 export type VersionSummary = { id: string; label: string; revision: number; createdAt: string; createdBy: string; engineVersion: string; rulesVersion: string; checksOk: boolean; revenue: number; netIncome: number };
 
@@ -91,9 +112,19 @@ function readMeta(raw: unknown): { meta: StudyMeta; issues: ValidationIssue[] } 
       audit: Array.isArray(m.audit) ? (m.audit as AuditEvent[]).slice(-AUDIT_LIMIT) : [],
       lastComputed: (m.lastComputed as ComputeStamp | null) ?? null,
       importedFrom: typeof m.importedFrom === 'string' ? m.importedFrom : null,
+      sharing: SHARING_MODES.find((s) => s === m.sharing) ?? 'private',
+      submittedBy: typeof m.submittedBy === 'string' ? m.submittedBy : null,
+      approval: readApproval(m.approval),
     },
     issues: v.issues,
   };
+}
+
+function readApproval(raw: unknown): Approval | null {
+  if (!raw || typeof raw !== 'object') return null;
+  const a = raw as Record<string, unknown>;
+  if (typeof a.by !== 'string' || typeof a.at !== 'string') return null;
+  return { by: a.by, at: a.at, revision: Number(a.revision) || 0, independent: a.independent === true, role: typeof a.role === 'string' ? a.role : null };
 }
 
 function cleanName(raw: unknown, fallback: string): string {
@@ -103,11 +134,33 @@ function cleanName(raw: unknown, fallback: string): string {
 
 // ─── Queries ─────────────────────────────────────────────────────────────────────────────────────
 
+const SUMMARY_COLUMNS = 'id, user_id, company_id, name, status, created_at, updated_at, kind:metadata->>kind, revision:metadata->>revision, study_status:metadata->>studyStatus, sharing:metadata->>sharing, approval_independent:metadata->approval->>independent, sector:metadata->model->>sector, years:metadata->model->horizon->>years, start:metadata->model->horizon->>startMonth, legacy_sector:metadata->wizardData->>secteur';
+
+/** Companies the user owns or holds a role in (directly or through a workspace). */
+async function memberCompanyIds(db: Db, userId: string): Promise<string[]> {
+  const ids = new Set<string>();
+  const { data: owned } = await db.from('atlas_companies').select('id').eq('user_id', userId).limit(500);
+  for (const c of owned ?? []) ids.add(String(c.id));
+  const { data: roles } = await db.from('atlas_user_roles').select('workspace_id, company_id').eq('user_id', userId).limit(500);
+  const workspaces = new Set<string>();
+  for (const r of roles ?? []) {
+    if (r.company_id) ids.add(String(r.company_id));
+    else if (r.workspace_id) workspaces.add(String(r.workspace_id));
+  }
+  const { data: ownedWs } = await db.from('atlas_workspaces').select('id').eq('owner_user_id', userId).limit(500);
+  for (const w of ownedWs ?? []) workspaces.add(String(w.id));
+  if (workspaces.size) {
+    const { data: wsCompanies } = await db.from('atlas_companies').select('id').in('workspace_id', [...workspaces]).limit(1000);
+    for (const c of wsCompanies ?? []) ids.add(String(c.id));
+  }
+  return [...ids];
+}
+
 export async function listStudies(db: Db, userId: string, opts: { companyId?: string | null; includeArchived?: boolean } = {}): Promise<StudySummary[]> {
   if (opts.companyId) await assertCompany(db, userId, opts.companyId);
   let q = db
     .from(TABLE)
-    .select('id, company_id, name, status, created_at, updated_at, kind:metadata->>kind, revision:metadata->>revision, study_status:metadata->>studyStatus, sector:metadata->model->>sector, years:metadata->model->horizon->>years, start:metadata->model->horizon->>startMonth, legacy_sector:metadata->wizardData->>secteur')
+    .select(SUMMARY_COLUMNS)
     .eq('user_id', userId)
     .in('metadata->>kind', [STUDY_KIND, LEGACY_STUDY_KIND])
     .order('updated_at', { ascending: false })
@@ -116,13 +169,35 @@ export async function listStudies(db: Db, userId: string, opts: { companyId?: st
   const { data, error } = await q;
   if (error) throw new StoreError(500, 'list_failed');
   const rows = (data ?? []) as unknown as Array<Record<string, string | null>>;
-  const allowed = new Map<string, boolean>();
+
+  const companies = opts.companyId ? [opts.companyId] : await memberCompanyIds(db, userId);
+  if (companies.length) {
+    const { data: shared, error: sharedError } = await db
+      .from(TABLE)
+      .select(SUMMARY_COLUMNS)
+      .neq('user_id', userId)
+      .eq('metadata->>kind', STUDY_KIND)
+      .in('metadata->>sharing', ['company_read', 'company_edit'])
+      .in('company_id', companies)
+      .order('updated_at', { ascending: false })
+      .limit(500);
+    if (sharedError) throw new StoreError(500, 'list_failed');
+    rows.push(...((shared ?? []) as unknown as Array<Record<string, string | null>>));
+  }
+
+  const roles = new Map<string, Awaited<ReturnType<typeof resolveCompanyRole>>>();
   const out: StudySummary[] = [];
   for (const r of rows) {
     const companyId = r.company_id ?? null;
+    const own = r.user_id === userId;
+    let access: AccessLevel = 'owner';
     if (companyId) {
-      if (!allowed.has(companyId)) allowed.set(companyId, await canAccessCompany(db, userId, companyId));
-      if (!allowed.get(companyId)) continue;
+      if (!roles.has(companyId)) roles.set(companyId, await resolveCompanyRole(db, userId, companyId));
+      const ctx = roles.get(companyId)!;
+      if (!ctx.owned && !ctx.role) continue;
+      if (!own) access = r.sharing === 'company_edit' && roleMeetsMinimum(ctx.role, EDIT_MIN_ROLE) ? 'edit' : 'read';
+    } else if (!own) {
+      continue;
     }
     const v2 = r.kind === STUDY_KIND;
     const status = v2 ? (r.study_status ?? 'draft') : 'legacy';
@@ -132,6 +207,7 @@ export async function listStudies(db: Db, userId: string, opts: { companyId?: st
       revision: v2 ? Number(r.revision ?? 1) : null, sector: v2 ? r.sector ?? null : r.legacy_sector ?? null,
       years: v2 && r.years ? Number(r.years) : null, startMonth: v2 ? r.start ?? null : null,
       createdAt: String(r.created_at), updatedAt: String(r.updated_at),
+      access, sharing: SHARING_MODES.find((s) => s === r.sharing) ?? 'private', selfApproved: status === 'approved' && r.approval_independent !== 'true',
     });
   }
   return out;
@@ -153,11 +229,44 @@ async function loadRow(db: Db, userId: string, id: string, kind: string) {
   return { ...data, companyId };
 }
 
+/** Studies the user may not see are reported as missing, so their existence is not disclosed. */
 export async function getStudy(db: Db, userId: string, id: string): Promise<StudyRecord> {
-  const row = await loadRow(db, userId, id, STUDY_KIND);
-  const parsed = readMeta(row.metadata);
+  if (!isPostgresUuid(id)) throw new StoreError(400, 'invalid_id');
+  const { data, error } = await db
+    .from(TABLE)
+    .select('id, user_id, company_id, name, metadata, created_at, updated_at')
+    .eq('id', id)
+    .eq('metadata->>kind', STUDY_KIND)
+    .maybeSingle();
+  if (error) throw new StoreError(500, 'load_failed');
+  if (!data) throw new StoreError(404, 'not_found');
+  const parsed = readMeta(data.metadata);
   if (!parsed) throw new StoreError(404, 'not_found');
-  return { id: String(row.id), companyId: row.companyId, name: String(row.name), createdAt: String(row.created_at), updatedAt: String(row.updated_at), meta: parsed.meta, issues: parsed.issues };
+  const ownerId = String(data.user_id);
+  const companyId = (data.company_id as string | null) ?? null;
+  let access: StudyAccess;
+  if (ownerId === userId) {
+    await assertCompany(db, userId, companyId);
+    access = { level: 'owner', companyRole: null, canApprove: true };
+  } else {
+    if (!companyId || parsed.meta.sharing === 'private') throw new StoreError(404, 'not_found');
+    const ctx = await resolveCompanyRole(db, userId, companyId);
+    if (!ctx.owned && !ctx.role) throw new StoreError(404, 'not_found');
+    const level: AccessLevel = parsed.meta.sharing === 'company_edit' && roleMeetsMinimum(ctx.role, EDIT_MIN_ROLE) ? 'edit' : 'read';
+    access = { level, companyRole: ctx.role, canApprove: roleMeetsMinimum(ctx.role, APPROVE_MIN_ROLE) };
+  }
+  return {
+    id: String(data.id), companyId, name: String(data.name), createdAt: String(data.created_at), updatedAt: String(data.updated_at),
+    meta: parsed.meta, issues: parsed.issues, ownerId, access,
+  };
+}
+
+function requireEdit(s: StudyRecord) {
+  if (s.access.level === 'read') throw new StoreError(403, 'read_only');
+}
+
+function requireOwner(s: StudyRecord) {
+  if (s.access.level !== 'owner') throw new StoreError(403, 'owner_only');
 }
 
 // ─── Mutations ───────────────────────────────────────────────────────────────────────────────────
@@ -195,6 +304,7 @@ export async function createStudy(
     kind: STUDY_KIND, schemaVersion: STUDY_SCHEMA_VERSION, revision: 1, studyStatus: 'draft', statusBeforeArchive: null, model,
     audit: [{ at: now, userId, action: input.importedFrom ? 'imported' : 'created', revision: 1, detail: input.auditDetail }],
     lastComputed: stamp(model, 1), importedFrom: input.importedFrom ?? null,
+    sharing: 'private', submittedBy: null, approval: null,
   };
   const name = cleanName(input.name, model.profile.company.tradingName || model.profile.company.name || 'Nouvelle étude');
   const { data, error } = await db
@@ -203,21 +313,25 @@ export async function createStudy(
     .select('id, created_at, updated_at')
     .single();
   if (error || !data) throw new StoreError(500, 'create_failed');
-  return { id: String(data.id), companyId, name, createdAt: String(data.created_at), updatedAt: String(data.updated_at), meta, issues: [] };
+  return {
+    id: String(data.id), companyId, name, createdAt: String(data.created_at), updatedAt: String(data.updated_at), meta, issues: [],
+    ownerId: userId, access: { level: 'owner', companyRole: null, canApprove: true },
+  };
 }
 
-async function conditionalWrite(db: Db, userId: string, id: string, expectedRevision: number, patch: { name?: string; status?: string; metadata: StudyMeta }) {
+/** Writes are scoped to the study's owner row and to the revision the caller read. */
+async function conditionalWrite(db: Db, userId: string, study: StudyRecord, expectedRevision: number, patch: { name?: string; status?: string; metadata: StudyMeta }) {
   const { data, error } = await db
     .from(TABLE)
     .update({ ...patch, updated_at: nowIso() })
-    .eq('id', id)
-    .eq('user_id', userId)
+    .eq('id', study.id)
+    .eq('user_id', study.ownerId)
     .eq('metadata->>kind', STUDY_KIND)
     .eq('metadata->>revision', String(expectedRevision))
     .select('id, updated_at');
   if (error) throw new StoreError(500, 'update_failed');
   if (!data || data.length === 0) {
-    const current = await getStudy(db, userId, id);
+    const current = await getStudy(db, userId, study.id);
     throw new StoreError(409, 'revision_conflict', { currentRevision: current.meta.revision });
   }
   return String((data[0] as { updated_at: string }).updated_at);
@@ -226,6 +340,7 @@ async function conditionalWrite(db: Db, userId: string, id: string, expectedRevi
 export async function saveStudy(db: Db, userId: string, id: string, input: { name?: unknown; model?: unknown; revision?: unknown }): Promise<StudyRecord> {
   if (!Number.isInteger(input.revision)) throw new StoreError(400, 'revision_required');
   const current = await getStudy(db, userId, id);
+  requireEdit(current);
   if (current.meta.revision !== input.revision) throw new StoreError(409, 'revision_conflict', { currentRevision: current.meta.revision });
   if (current.meta.studyStatus === 'approved' || current.meta.studyStatus === 'archived') throw new StoreError(409, 'study_locked', { status: current.meta.studyStatus });
   const model = input.model != null ? requireValid(input.model) : current.meta.model;
@@ -235,7 +350,7 @@ export async function saveStudy(db: Db, userId: string, id: string, input: { nam
     ...current.meta, model, revision, lastComputed: stamp(model, revision),
     audit: pushAudit(current.meta, { userId, action: input.model != null ? 'saved' : 'renamed', revision }),
   };
-  const updatedAt = await conditionalWrite(db, userId, id, current.meta.revision, { name, metadata: meta });
+  const updatedAt = await conditionalWrite(db, userId, current, current.meta.revision, { name, metadata: meta });
   return { ...current, name, updatedAt, meta, issues: validateStudyModel(model).issues };
 }
 
@@ -254,17 +369,47 @@ export async function changeStatus(db: Db, userId: string, id: string, input: { 
   if (!t) throw new StoreError(400, 'invalid_action');
   if (!Number.isInteger(input.revision)) throw new StoreError(400, 'revision_required');
   const current = await getStudy(db, userId, id);
+  if (action === 'archive' || action === 'restore') requireOwner(current);
+  else if (action === 'approve') {
+    if (current.access.level !== 'owner') {
+      if (!current.access.canApprove) throw new StoreError(403, 'approval_forbidden');
+      if (current.meta.submittedBy === userId) throw new StoreError(403, 'approver_must_differ');
+    }
+  } else requireEdit(current);
   if (current.meta.revision !== input.revision) throw new StoreError(409, 'revision_conflict', { currentRevision: current.meta.revision });
   if (!t.from.includes(current.meta.studyStatus)) throw new StoreError(409, 'invalid_transition', { status: current.meta.studyStatus });
   if (action === 'approve' && !stamp(current.meta.model, current.meta.revision).checksOk) throw new StoreError(409, 'reconciliation_failed');
   const to = t.to(current.meta);
   const revision = current.meta.revision + 1;
+  const independent = action === 'approve' && current.access.level !== 'owner';
+  const approval: Approval | null = action === 'approve'
+    ? { by: userId, at: nowIso(), revision, independent, role: current.access.companyRole }
+    : action === 'reopen' || action === 'submit' ? null : current.meta.approval;
   const meta: StudyMeta = {
     ...current.meta, revision, studyStatus: to,
     statusBeforeArchive: action === 'archive' ? current.meta.studyStatus : action === 'restore' ? null : current.meta.statusBeforeArchive,
-    audit: pushAudit(current.meta, { userId, action, revision, detail: `${current.meta.studyStatus} → ${to}` }),
+    submittedBy: action === 'submit' ? userId : action === 'reopen' ? null : current.meta.submittedBy,
+    approval,
+    audit: pushAudit(current.meta, { userId, action, revision, detail: `${current.meta.studyStatus} → ${to}${action === 'approve' ? (independent ? ' (independent)' : ' (self-approval)') : ''}` }),
   };
-  const updatedAt = await conditionalWrite(db, userId, id, current.meta.revision, { status: to, metadata: meta });
+  const updatedAt = await conditionalWrite(db, userId, current, current.meta.revision, { status: to, metadata: meta });
+  return { ...current, updatedAt, meta };
+}
+
+export async function setSharing(db: Db, userId: string, id: string, input: { sharing?: unknown; revision?: unknown }): Promise<StudyRecord> {
+  const sharing = SHARING_MODES.find((s) => s === input.sharing);
+  if (!sharing) throw new StoreError(400, 'invalid_sharing');
+  if (!Number.isInteger(input.revision)) throw new StoreError(400, 'revision_required');
+  const current = await getStudy(db, userId, id);
+  requireOwner(current);
+  if (current.meta.revision !== input.revision) throw new StoreError(409, 'revision_conflict', { currentRevision: current.meta.revision });
+  if (sharing !== 'private' && !current.companyId) throw new StoreError(409, 'study_without_company');
+  const revision = current.meta.revision + 1;
+  const meta: StudyMeta = {
+    ...current.meta, revision, sharing,
+    audit: pushAudit(current.meta, { userId, action: 'sharing_changed', revision, detail: `${current.meta.sharing} → ${sharing}` }),
+  };
+  const updatedAt = await conditionalWrite(db, userId, current, current.meta.revision, { metadata: meta });
   return { ...current, updatedAt, meta };
 }
 
@@ -280,7 +425,8 @@ export async function duplicateStudy(db: Db, userId: string, id: string, input: 
 
 export async function createVersion(db: Db, userId: string, id: string, input: { label?: unknown }): Promise<VersionSummary> {
   const study = await getStudy(db, userId, id);
-  const { count } = await db.from(TABLE).select('id', { count: 'exact', head: true }).eq('user_id', userId).eq('metadata->>kind', STUDY_VERSION_KIND).eq('metadata->>studyId', id);
+  requireEdit(study);
+  const { count } = await db.from(TABLE).select('id', { count: 'exact', head: true }).eq('user_id', study.ownerId).eq('metadata->>kind', STUDY_VERSION_KIND).eq('metadata->>studyId', id);
   if ((count ?? 0) >= VERSION_LIMIT) throw new StoreError(409, 'version_limit', { limit: VERSION_LIMIT });
   const result = computeStudy(study.meta.model);
   const metrics = computeMetrics(study.meta.model, result);
@@ -293,22 +439,22 @@ export async function createVersion(db: Db, userId: string, id: string, input: {
   };
   const { data, error } = await db
     .from(TABLE)
-    .insert({ user_id: userId, company_id: study.companyId, name: `${study.name} — ${label}`.slice(0, 250), status: 'version', metadata: meta })
+    .insert({ user_id: study.ownerId, company_id: study.companyId, name: `${study.name} — ${label}`.slice(0, 250), status: 'version', metadata: meta })
     .select('id, created_at')
     .single();
   if (error || !data) throw new StoreError(500, 'version_failed');
   // The audit entry keeps the revision so an open editor does not get a conflict; the version row is the record.
   const updated = { ...study.meta, audit: pushAudit(study.meta, { userId, action: 'version_created', revision: study.meta.revision, detail: String(data.id) }) };
-  await conditionalWrite(db, userId, id, study.meta.revision, { metadata: updated }).catch(() => undefined);
+  await conditionalWrite(db, userId, study, study.meta.revision, { metadata: updated }).catch(() => undefined);
   return { id: String(data.id), label, revision: meta.revision, createdAt: String(data.created_at ?? createdAt), createdBy: userId, engineVersion: ENGINE_VERSION, rulesVersion: TAX_RULES_VERSION, checksOk: meta.checksOk, revenue: meta.revenue, netIncome: meta.netIncome };
 }
 
 export async function listVersions(db: Db, userId: string, id: string): Promise<VersionSummary[]> {
-  await getStudy(db, userId, id);
+  const study = await getStudy(db, userId, id);
   const { data, error } = await db
     .from(TABLE)
     .select('id, created_at, label:metadata->>label, revision:metadata->>revision, created_by:metadata->>createdBy, engine:metadata->>engineVersion, rules:metadata->>rulesVersion, checks:metadata->>checksOk, revenue:metadata->>revenue, net:metadata->>netIncome')
-    .eq('user_id', userId)
+    .eq('user_id', study.ownerId)
     .eq('metadata->>kind', STUDY_VERSION_KIND)
     .eq('metadata->>studyId', id)
     .order('created_at', { ascending: false })
@@ -321,8 +467,8 @@ export async function listVersions(db: Db, userId: string, id: string): Promise<
 }
 
 export async function getVersion(db: Db, userId: string, id: string, versionId: string): Promise<{ summary: VersionSummary; model: StudyModel }> {
-  await getStudy(db, userId, id);
-  const row = await loadRow(db, userId, versionId, STUDY_VERSION_KIND);
+  const study = await getStudy(db, userId, id);
+  const row = await loadRow(db, study.ownerId, versionId, STUDY_VERSION_KIND);
   const m = row.metadata as Record<string, unknown>;
   if (m.studyId !== id) throw new StoreError(404, 'not_found');
   return {
@@ -338,6 +484,7 @@ export async function getVersion(db: Db, userId: string, id: string, versionId: 
 export async function restoreVersion(db: Db, userId: string, id: string, versionId: string, input: { revision?: unknown }): Promise<StudyRecord> {
   const v = await getVersion(db, userId, id, versionId);
   const current = await getStudy(db, userId, id);
+  requireEdit(current);
   if (!Number.isInteger(input.revision) || current.meta.revision !== input.revision) throw new StoreError(409, 'revision_conflict', { currentRevision: current.meta.revision });
   if (current.meta.studyStatus === 'approved' || current.meta.studyStatus === 'archived') throw new StoreError(409, 'study_locked', { status: current.meta.studyStatus });
   const revision = current.meta.revision + 1;
@@ -345,7 +492,7 @@ export async function restoreVersion(db: Db, userId: string, id: string, version
     ...current.meta, model: v.model, revision, lastComputed: stamp(v.model, revision),
     audit: pushAudit(current.meta, { userId, action: 'version_restored', revision, detail: `${versionId}@${v.summary.revision}` }),
   };
-  const updatedAt = await conditionalWrite(db, userId, id, current.meta.revision, { metadata: meta });
+  const updatedAt = await conditionalWrite(db, userId, current, current.meta.revision, { metadata: meta });
   return { ...current, updatedAt, meta, issues: validateStudyModel(v.model).issues };
 }
 

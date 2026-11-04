@@ -8,9 +8,10 @@ import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 
+import { detachCompanyStudies } from '../../../app/lib/business-studio/company-clear';
 import {
-  changeStatus, createStudy, createVersion, duplicateStudy, getStudy, importLegacy, listStudies, listVersions, readActualLines,
-  restoreVersion, saveStudy, StoreError,
+  changeStatus, createStudy, createVersion, duplicateStudy, getStudy, getVersion, importLegacy, listStudies, listVersions, readActualLines,
+  restoreVersion, saveStudy, setSharing, StoreError,
 } from '../../../app/lib/business-studio/server-store';
 import { richModel } from '../fixtures';
 import { ANON_KEY, SERVICE_KEY, createUser, startDatabase, startGateway, startPostgrest, toolsAvailable, userToken } from './stack.mjs';
@@ -22,6 +23,8 @@ let admin: SupabaseClient;
 const A = randomUUID();
 const B = randomUUID();
 const C = randomUUID();
+const D = randomUUID();
+const E = randomUUID();
 const companyA = randomUUID();
 const companyB = randomUUID();
 
@@ -44,13 +47,17 @@ before(async () => {
   const pgrst = await startPostgrest({ dbPort: 55532, port: 55533 });
   const gw = await startGateway({ admin: db.admin, postgrestPort: 55533, port: 55521 });
   stack = { db, pgrst, gw };
-  for (const u of [A, B, C]) await createUser(db.admin, u);
+  for (const u of [A, B, C, D, E]) await createUser(db.admin, u);
   const ws = randomUUID();
   await db.admin.query('insert into public.atlas_workspaces (id, owner_user_id, name) values ($1, $2, $3)', [ws, A, 'WS A']);
   await db.admin.query('insert into public.atlas_companies (id, user_id, company_json, workspace_id) values ($1, $2, $3, $4)', [companyA, A, '{"name":"A"}', ws]);
   await db.admin.query('insert into public.atlas_companies (id, user_id, company_json) values ($1, $2, $3)', [companyB, B, '{"name":"B"}']);
-  const { rows } = await db.admin.query("select slug from public.atlas_roles order by case when slug = 'viewer' then 0 else 1 end limit 1");
-  await db.admin.query('insert into public.atlas_user_roles (user_id, workspace_id, company_id, role_slug) values ($1, $2, $3, $4)', [C, ws, companyA, rows[0].slug]);
+  const { rows } = await db.admin.query("select slug from public.atlas_roles where slug in ('viewer', 'accountant', 'auditor') order by slug");
+  assert.deepEqual(rows.map((r: { slug: string }) => r.slug), ['accountant', 'auditor', 'viewer']);
+  const role = 'insert into public.atlas_user_roles (user_id, workspace_id, company_id, role_slug) values ($1, $2, $3, $4)';
+  await db.admin.query(role, [C, ws, companyA, 'viewer']);
+  await db.admin.query(role, [D, ws, companyA, 'accountant']);
+  await db.admin.query(role, [E, ws, companyA, 'auditor']);
   admin = createClient(gw.url, SERVICE_KEY, { auth: { autoRefreshToken: false, persistSession: false } });
 });
 
@@ -204,4 +211,101 @@ test('actuals are read-only and company-scoped', { skip: !enabled }, async () =>
   const solo = await createStudy(admin, A, { model: richModel(2, '2026-01') });
   await expectError(readActualLines(admin, A, solo.id), 409, 'study_without_company');
   assert.deepEqual(await snapshot(), beforeRows, 'accounting rows untouched');
+});
+
+test('sharing with company members, edit and approval roles, independent approval', { skip: !enabled }, async () => {
+  const s = await createStudy(admin, A, { name: 'Partagée', companyId: companyA, model: richModel(5) });
+  assert.equal(s.meta.sharing, 'private');
+  await expectError(getStudy(admin, C, s.id), 404);
+
+  // Read-only sharing: every company member reads, nobody but the owner writes.
+  let cur = await setSharing(admin, A, s.id, { sharing: 'company_read', revision: 1 });
+  assert.equal(cur.meta.sharing, 'company_read');
+  const asViewer = await getStudy(admin, C, s.id);
+  assert.equal(asViewer.access.level, 'read');
+  assert.equal(asViewer.access.canApprove, false);
+  assert.equal((await getStudy(admin, D, s.id)).access.level, 'read');
+  await expectError(saveStudy(admin, D, s.id, { model: richModel(5), revision: cur.meta.revision }), 403, 'read_only');
+  await expectError(setSharing(admin, C, s.id, { sharing: 'company_edit', revision: cur.meta.revision }), 403, 'owner_only');
+  await expectError(getStudy(admin, B, s.id), 404);
+  const listed = (await listStudies(admin, C)).find((x) => x.id === s.id);
+  assert.equal(listed?.access, 'read');
+  assert.ok(!(await listStudies(admin, B)).some((x) => x.id === s.id));
+  await expectError(setSharing(admin, A, s.id, { sharing: 'public', revision: cur.meta.revision }), 400, 'invalid_sharing');
+
+  // Editable sharing: accountants and above edit, viewers still read only.
+  cur = await setSharing(admin, A, s.id, { sharing: 'company_edit', revision: cur.meta.revision });
+  const asAccountant = await getStudy(admin, D, s.id);
+  assert.equal(asAccountant.access.level, 'edit');
+  const m = richModel(5); m.general.inflationPct = 3;
+  cur = await saveStudy(admin, D, s.id, { model: m, revision: cur.meta.revision });
+  assert.equal(cur.meta.model.general.inflationPct, 3);
+  assert.equal(cur.meta.audit.at(-1)?.userId, D);
+  assert.equal((await getStudy(admin, A, s.id)).meta.revision, cur.meta.revision, 'owner sees the member edit');
+  await expectError(saveStudy(admin, C, s.id, { model: m, revision: cur.meta.revision }), 403, 'read_only');
+  await expectError(changeStatus(admin, D, s.id, { action: 'archive', revision: cur.meta.revision }), 403, 'owner_only');
+
+  // Versions: editors create, readers list and open.
+  const v = await createVersion(admin, D, s.id, { label: 'Avant revue' });
+  await expectError(createVersion(admin, C, s.id, {}), 403, 'read_only');
+  assert.ok((await listVersions(admin, C, s.id)).some((x) => x.id === v.id));
+  assert.equal((await getVersion(admin, C, s.id, v.id)).summary.label, 'Avant revue');
+  cur = await getStudy(admin, A, s.id);
+
+  // Approval: not by the submitter, not by a viewer; an auditor's approval is independent.
+  cur = await changeStatus(admin, D, s.id, { action: 'submit', revision: cur.meta.revision });
+  assert.equal(cur.meta.submittedBy, D);
+  await expectError(changeStatus(admin, D, s.id, { action: 'approve', revision: cur.meta.revision }), 403, 'approver_must_differ');
+  await expectError(changeStatus(admin, C, s.id, { action: 'approve', revision: cur.meta.revision }), 403, 'approval_forbidden');
+  cur = await changeStatus(admin, E, s.id, { action: 'approve', revision: cur.meta.revision });
+  assert.equal(cur.meta.studyStatus, 'approved');
+  assert.deepEqual({ by: cur.meta.approval?.by, independent: cur.meta.approval?.independent, role: cur.meta.approval?.role }, { by: E, independent: true, role: 'auditor' });
+  assert.equal((await listStudies(admin, A)).find((x) => x.id === s.id)?.selfApproved, false);
+
+  // The owner's own approval is recorded as a self-approval.
+  cur = await changeStatus(admin, A, s.id, { action: 'reopen', revision: cur.meta.revision });
+  assert.equal(cur.meta.approval, null);
+  cur = await changeStatus(admin, A, s.id, { action: 'submit', revision: cur.meta.revision });
+  cur = await changeStatus(admin, A, s.id, { action: 'approve', revision: cur.meta.revision });
+  assert.equal(cur.meta.approval?.independent, false);
+  assert.ok(cur.meta.audit.at(-1)?.detail?.includes('self-approval'));
+  assert.equal((await listStudies(admin, A)).find((x) => x.id === s.id)?.selfApproved, true);
+
+  // Sharing needs a company; database row-level security is unchanged (owner only).
+  const solo = await createStudy(admin, A, { template: 'startup' });
+  await expectError(setSharing(admin, A, solo.id, { sharing: 'company_read', revision: 1 }), 409, 'study_without_company');
+  const asC = createClient(stack!.gw.url, ANON_KEY, { global: { headers: { Authorization: `Bearer ${userToken(C)}` } }, auth: { persistSession: false } });
+  const { data } = await asC.from('atlas_projects').select('id').eq('id', s.id);
+  assert.deepEqual(data, []);
+});
+
+test('clearing company data keeps studies, versions and legacy studies (detached)', { skip: !enabled }, async () => {
+  const q = stack!.db.admin;
+  const s = await createStudy(admin, A, { name: 'À conserver', companyId: companyA, model: richModel(3) });
+  const v = await createVersion(admin, A, s.id, { label: 'v1' });
+  const legacyId = randomUUID();
+  await q.query('insert into public.atlas_projects (id, user_id, company_id, name, status, metadata) values ($1, $2, $3, $4, $5, $6)', [legacyId, A, companyA, 'Ancienne', 'completed', { kind: 'etude_faisabilite', wizardData: {} }]);
+  const otherId = randomUUID();
+  await q.query('insert into public.atlas_projects (id, user_id, company_id, name, status, metadata) values ($1, $2, $3, $4, $5, $6)', [otherId, A, companyA, 'Chantier', 'active', { kind: 'other' }]);
+  const memberStudy = await createStudy(admin, D, { name: 'Étude membre', companyId: companyA, model: richModel(3) });
+
+  // Same order and client rights as the clear routine: the owner's own session under row-level security.
+  const asA = createClient(stack!.gw.url, ANON_KEY, { global: { headers: { Authorization: `Bearer ${userToken(A)}` } }, auth: { persistSession: false } });
+  const detached = await detachCompanyStudies(asA, companyA, A);
+  assert.ok(detached.ok);
+  const { error } = await asA.from('atlas_projects').delete().eq('company_id', companyA).eq('user_id', A);
+  assert.equal(error, null);
+
+  const left = await q.query('select id, company_id from public.atlas_projects where id = any($1)', [[s.id, v.id, legacyId, otherId, memberStudy.id]]);
+  const byId = new Map(left.rows.map((r: { id: string; company_id: string | null }) => [r.id, r.company_id]));
+  assert.ok(!byId.has(otherId), 'non-study project deleted');
+  for (const id of [s.id, v.id, legacyId]) {
+    assert.ok(byId.has(id), `${id} kept`);
+    assert.equal(byId.get(id), null, `${id} detached`);
+  }
+  assert.equal(byId.get(memberStudy.id), companyA, 'another member’s study is not touched');
+  const kept = await getStudy(admin, A, s.id);
+  assert.equal(kept.companyId, null);
+  assert.equal(kept.meta.model.horizon.years, 3);
+  assert.ok((await listVersions(admin, A, s.id)).some((x) => x.id === v.id));
 });

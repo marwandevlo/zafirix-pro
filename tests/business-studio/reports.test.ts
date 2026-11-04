@@ -44,6 +44,16 @@ test('every report type builds in French and Arabic with content', () => {
   }
 });
 
+test('a self-approved study is never labelled as independently validated in reports', () => {
+  const { model, result, metrics } = setup();
+  const cover = (status: string, lang: 'fr' | 'ar') => buildReport({ type: 'bank', lang, model, result, metrics, studyName: 'x', status }).cover;
+  const statusRow = (rows: Array<[string, string]>) => rows.find(([k]) => k === 'Statut' || k === 'الحالة')?.[1] ?? '';
+  assert.match(statusRow(cover('approved_self', 'fr')), /auto-validation, non indépendante/);
+  assert.match(statusRow(cover('approved_self', 'ar')), /غير مستقل/);
+  assert.match(statusRow(cover('approved_independent', 'fr')), /validation indépendante/);
+  assert.doesNotMatch(statusRow(cover('approved_self', 'fr')), /\(validation indépendante\)/);
+});
+
 test('dashboard structure charts are the same blocks as the full report charts', () => {
   const { model, result, metrics } = setup();
   for (const lang of ['fr', 'ar'] as const) {

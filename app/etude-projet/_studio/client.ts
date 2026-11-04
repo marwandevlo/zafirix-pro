@@ -3,7 +3,7 @@
 import { supabase } from '@/app/lib/supabase';
 import type { ActualsByMonth } from '@/app/lib/business-studio/actuals';
 import type { StudyModel, ValidationIssue } from '@/app/lib/business-studio/model';
-import type { StatusAction, StudyRecord, StudySummary, VersionSummary } from '@/app/lib/business-studio/server-store';
+import type { Sharing, StatusAction, StudyRecord, StudySummary, VersionSummary } from '@/app/lib/business-studio/server-store';
 
 export class ApiError extends Error {
   constructor(public status: number, public code: string, public body: Record<string, unknown>) {
@@ -38,6 +38,8 @@ export const studioApi = {
     call<{ study: StudyRecord }>(`/studies/${encodeURIComponent(id)}`, json('PUT', input)).then((r) => r.study),
   status: (id: string, action: StatusAction, revision: number) =>
     call<{ study: StudyRecord }>(`/studies/${encodeURIComponent(id)}`, json('PATCH', { action, revision })).then((r) => r.study),
+  share: (id: string, sharing: Sharing, revision: number) =>
+    call<{ study: StudyRecord }>(`/studies/${encodeURIComponent(id)}`, json('PATCH', { action: 'share', sharing, revision })).then((r) => r.study),
   duplicate: (id: string, name?: string) =>
     call<{ study: StudyRecord }>(`/studies/${encodeURIComponent(id)}/duplicate`, json('POST', { name })).then((r) => r.study),
   versions: (id: string) => call<{ versions: VersionSummary[] }>(`/studies/${encodeURIComponent(id)}/versions`).then((r) => r.versions),

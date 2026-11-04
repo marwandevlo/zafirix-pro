@@ -162,17 +162,21 @@ export function StudioHome() {
                 </tr></thead>
                 <tbody>{v2.map((s) => (
                   <tr key={s.id} className="border-t border-gray-100">
-                    <td className="py-2 pe-3"><Link href={`/etude-projet/${s.id}`} className="font-medium text-gray-800 hover:underline">{s.name}</Link></td>
-                    <td className="px-2"><Badge tone={STATUS_TONE[s.status] ?? 'gray'}>{t(`st_${s.status as 'draft'}`)}</Badge></td>
+                    <td className="py-2 pe-3">
+                      <Link href={`/etude-projet/${s.id}`} className="font-medium text-gray-800 hover:underline">{s.name}</Link>
+                      {s.access !== 'owner' && <span className="ms-2"><Badge tone="blue">{t(s.access === 'edit' ? bi('Partagée (modification)', 'مشاركة (تعديل)') : bi('Partagée (lecture)', 'مشاركة (قراءة)'))}</Badge></span>}
+                      {s.access === 'owner' && s.sharing !== 'private' && <span className="ms-2"><Badge tone="blue">{t(`share_${s.sharing}` as const)}</Badge></span>}
+                    </td>
+                    <td className="px-2"><Badge tone={STATUS_TONE[s.status] ?? 'gray'}>{s.status === 'approved' ? t(s.selfApproved ? 'st_approved_self' : 'st_approved_independent') : t(`st_${s.status as 'draft'}`)}</Badge></td>
                     <td className="px-2 text-xs">{s.sector ? t(SECTOR_LABEL[s.sector] ?? { fr: s.sector, ar: s.sector }) : '—'}</td>
                     <td className="px-2 text-xs" dir="ltr">{s.startMonth ?? '—'} · {s.years ?? '—'} {t('years')}</td>
                     <td className="px-2 text-xs">{date(s.updatedAt)}</td>
                     <td className="px-2 text-end whitespace-nowrap">
                       <Link href={`/etude-projet/${s.id}`} className="text-xs text-blue-700 underline me-2">{t('open')}</Link>
                       <Button size="sm" variant="ghost" disabled={busy} onClick={() => void duplicate(s)}>{t('duplicate')}</Button>
-                      {s.status === 'archived'
+                      {s.access === 'owner' && (s.status === 'archived'
                         ? <Button size="sm" variant="ghost" disabled={busy} onClick={() => void setStatus(s, 'restore')}>{t('restore')}</Button>
-                        : <Button size="sm" variant="ghost" disabled={busy} onClick={() => void setStatus(s, 'archive')}>{t('archive')}</Button>}
+                        : <Button size="sm" variant="ghost" disabled={busy} onClick={() => void setStatus(s, 'archive')}>{t('archive')}</Button>)}
                     </td>
                   </tr>
                 ))}</tbody>
