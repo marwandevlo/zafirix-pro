@@ -815,7 +815,6 @@ export function computeStudy(input: StudyModel, scenarioId?: string): StudyResul
   let periodDeductible = 0;
   let periodStart = 0;
   let ebtFy = 0;
-  let revenueFy = 0;
   let cmBaseFy = 0;
   let isCredit = 0;
   const losses: { fy: number; remaining: Cents }[] = [];
@@ -879,7 +878,6 @@ export function computeStudy(input: StudyModel, scenarioId?: string): StudyResul
     M.nonCurrentResult[m] = M.grantRelease[m] - M.badDebts[m];
     M.ebt[m] = M.ebit[m] + M.financialResult[m] + M.nonCurrentResult[m];
     ebtFy += M.ebt[m];
-    revenueFy += M.revenue[m];
     cmBaseFy += M.revenue[m] + M.operatingGrants[m] + M.grantRelease[m];
 
     // Auto-entrepreneur: tax on turnover, accrued monthly, paid the month after each quarter.
@@ -995,7 +993,6 @@ export function computeStudy(input: StudyModel, scenarioId?: string): StudyResul
         }
       }
       ebtFy = 0;
-      revenueFy = 0;
       cmBaseFy = 0;
     }
 
