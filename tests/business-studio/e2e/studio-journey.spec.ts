@@ -325,6 +325,8 @@ test('mobile AR: RTL layout without overflow, reports downloadable', async ({ pa
   await expect(link).toBeVisible();
   await link.click();
   await page.waitForURL(/\/etude-projet\/[0-9a-f-]{36}$/);
+  await expect(page.locator('header select').first().locator('option').first()).toHaveText('السيناريو الأساسي');
+  await expect(page.getByRole('textbox', { name: 'الاسم' }).first()).toHaveAttribute('dir', 'auto');
   const overflow: Record<string, number> = {};
   const tabs = page.getByRole('tablist').first().getByRole('tab');
   await expect(tabs.first()).toBeVisible();

@@ -6,7 +6,7 @@ import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } f
 import { buildCalendar, computeStudy, type StudyResult } from '@/app/lib/business-studio/engine';
 import { computeMetrics, type StudyMetrics } from '@/app/lib/business-studio/metrics';
 import { validateStudyModel, type StudyModel, type ValidationIssue } from '@/app/lib/business-studio/model';
-import { STR } from '@/app/lib/business-studio/i18n';
+import { scenarioText, STR } from '@/app/lib/business-studio/i18n';
 import { SHARING_MODES, type Sharing } from '@/app/lib/business-studio/model';
 import type { StatusAction, StudyRecord } from '@/app/lib/business-studio/server-store';
 import { Actuals } from './Actuals';
@@ -232,7 +232,7 @@ export function Workspace({ studyId }: { studyId: string }) {
       <header className="bg-white border-b border-gray-200 px-4 sm:px-6 py-3 space-y-2 shrink-0">
         <div className="flex flex-wrap items-center gap-3">
           <Link href="/etude-projet" className="text-xs text-gray-500 hover:text-gray-800">← {t('studies')}</Link>
-          <input aria-label={t('name')} value={name} disabled={disabled} maxLength={200} onChange={(e) => rename(e.target.value)}
+          <input aria-label={t('name')} dir="auto" value={name} disabled={disabled} maxLength={200} onChange={(e) => rename(e.target.value)}
             className="flex-1 min-w-[180px] text-lg font-bold text-gray-800 bg-transparent border-b border-transparent focus:border-amber-500 focus:outline-none disabled:text-gray-600" />
           <Badge tone={STATUS_TONE[status]}>{statusText}</Badge>
           <span role="status" aria-live="polite" className={`text-xs ${save === 'saved' ? 'text-green-700' : save === 'conflict' || save === 'invalid' || save === 'error' ? 'text-red-700' : 'text-gray-500'}`}>
@@ -245,7 +245,7 @@ export function Workspace({ studyId }: { studyId: string }) {
             {t('scenario')}
             <select value={scenarioId} className="rounded-lg border border-gray-300 px-2 py-1 text-xs"
               onChange={(e) => (locked ? setViewScenario(e.target.value) : edit({ ...model, activeScenarioId: e.target.value }))}>
-              {model.scenarios.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+              {model.scenarios.map((s) => <option key={s.id} value={s.id}>{scenarioText(s.name, lang)}</option>)}
             </select>
           </label>
           {access === 'owner' && study.companyId && (
