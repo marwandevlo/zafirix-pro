@@ -457,7 +457,7 @@ function Sector({ model, set, disabled }: P) {
           ))}
         </div>
       )}
-      <p className="mt-3 text-[11px] text-gray-400">{t(bi('Les indicateurs sectoriels du tableau de bord sont calculés à partir de ces données et de la projection ; aucune statistique de marché externe n’est utilisée.', 'تحسب المؤشرات القطاعية من هذه المعطيات ومن الإسقاط؛ لا تستعمل أي إحصائيات خارجية.'))}</p>
+      <p className="mt-3 text-[11px] text-gray-500">{t(bi('Les indicateurs sectoriels du tableau de bord sont calculés à partir de ces données et de la projection ; aucune statistique de marché externe n’est utilisée.', 'تحسب المؤشرات القطاعية من هذه المعطيات ومن الإسقاط؛ لا تستعمل أي إحصائيات خارجية.'))}</p>
     </Card>
   );
 }

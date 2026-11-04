@@ -47,7 +47,7 @@ export function Dashboard({ model, r, x }: { model: StudyModel; r: StudyResult; 
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-6 gap-3">
         {cards.map((c) => <KpiCard key={c.label} {...c} />)}
       </div>
-      <p className="text-[11px] text-gray-400">{t(bi('Survolez un indicateur pour voir sa formule. « n.d. » : indicateur non calculable (raison indiquée dans l’infobulle).', 'مرر المؤشر لرؤية صيغته. «غ.م.»: مؤشر غير قابل للحساب (السبب في التلميح).'))}</p>
+      <p className="text-[11px] text-gray-500">{t(bi('Survolez un indicateur pour voir sa formule. « n.d. » : indicateur non calculable (raison indiquée dans l’infobulle).', 'مرر المؤشر لرؤية صيغته. «غ.م.»: مؤشر غير قابل للحساب (السبب في التلميح).'))}</p>
       {r.warnings.length > 0 && (
         <Card title={t(bi('Avertissements du moteur', 'تنبيهات المحرك'))}>
           <ul className="space-y-1 text-xs">
@@ -64,7 +64,7 @@ export function Dashboard({ model, r, x }: { model: StudyModel; r: StudyResult; 
       </div>
       {kpis.length > 0 && (
         <Card title={t(bi('Indicateurs sectoriels', 'المؤشرات القطاعية'))}>
-          <div className="overflow-x-auto">
+          <div className="overflow-x-auto rounded focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-400" tabIndex={0}>
             <table className="min-w-full text-xs">
               <thead><tr className="text-gray-500"><th className="text-start py-1 pe-3">{t(bi('Indicateur', 'المؤشر'))}</th>{x.years.map((y) => <th key={y.index} className="text-end px-2">{y.label}</th>)}</tr></thead>
               <tbody>

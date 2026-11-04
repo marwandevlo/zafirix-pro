@@ -57,7 +57,7 @@ export function Statements({ r }: { r: StudyResult }) {
         <Notice>{t(bi('* Période partielle (exercice ou trimestre incomplet dans l’horizon).', '* فترة جزئية (سنة مالية أو فصل غير مكتمل داخل الأفق).'))}</Notice>
       )}
       <Card title={`${table.title[lang]} — ${t('mad')}`}>
-        <div className="overflow-x-auto max-h-[70vh]">
+        <div className="overflow-x-auto max-h-[70vh] rounded focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-400" tabIndex={0}>
           <table className="min-w-full text-xs border-separate border-spacing-0">
             <thead className="sticky top-0 z-10 bg-white">
               <tr>
@@ -78,7 +78,7 @@ export function Statements({ r }: { r: StudyResult }) {
                     <th scope="row" title={row.formula || undefined}
                       className={`sticky start-0 bg-inherit text-start px-2 py-1.5 border-b font-[inherit] ${s === 'detail' ? 'ps-6' : ''} ${s === 'section' ? '' : 'bg-white'}`}>
                       {row.def.label[lang]}
-                      {row.def.note && <span className="block text-[10px] font-normal text-gray-400">{row.def.note[lang]}</span>}
+                      {row.def.note && <span className="block text-[10px] font-normal text-gray-500">{row.def.note[lang]}</span>}
                     </th>
                     {showFormula && <td className="px-2 py-1.5 border-b text-[10px] text-gray-500">{row.formula}</td>}
                     {visible.map(({ p, i }) => {

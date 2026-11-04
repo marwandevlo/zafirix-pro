@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { computeStudy } from '@/app/lib/business-studio/engine';
+import { STR, type Lang } from '@/app/lib/business-studio/i18n';
 import { computeMetrics, type StudyMetrics } from '@/app/lib/business-studio/metrics';
 import type { StudyModel } from '@/app/lib/business-studio/model';
 import type { AuditEvent, StudyRecord, VersionSummary } from '@/app/lib/business-studio/server-store';
@@ -14,7 +15,19 @@ const ACTION_LABEL: Record<string, { fr: string; ar: string }> = {
   submit: { fr: 'Soumise pour revue', ar: 'أرسلت للمراجعة' }, approve: { fr: 'Approuvée', ar: 'تمت الموافقة' },
   reopen: { fr: 'Réouverte', ar: 'أعيد فتحها' }, archive: { fr: 'Archivée', ar: 'أرشفت' }, restore: { fr: 'Désarchivée', ar: 'استرجعت من الأرشيف' },
   version_created: { fr: 'Version créée', ar: 'إنشاء نسخة' }, version_restored: { fr: 'Version restaurée', ar: 'استرجاع نسخة' },
+  sharing_changed: { fr: 'Partage modifié', ar: 'تغيير المشاركة' },
 };
+
+/** Audit details are stored as codes (`draft → approved (self-approval)`); only known codes are translated. */
+const DETAIL_CODE: Record<string, { fr: string; ar: string }> = {
+  draft: STR.st_draft, under_review: STR.st_under_review, approved: STR.st_approved, archived: STR.st_archived,
+  private: STR.share_private, company_read: STR.share_company_read, company_edit: STR.share_company_edit,
+  '(independent)': { fr: '(validation indépendante)', ar: '(اعتماد مستقل)' }, '(self-approval)': { fr: '(auto-validation)', ar: '(اعتماد ذاتي)' },
+};
+const auditDetail = (action: string, detail: string, lang: Lang) =>
+  action === 'submit' || action === 'approve' || action === 'reopen' || action === 'archive' || action === 'restore' || action === 'sharing_changed'
+    ? detail.split(' ').map((w) => DETAIL_CODE[w]?.[lang] ?? w).join(' ')
+    : detail;
 
 const SECTION_LABEL: Record<string, { fr: string; ar: string }> = {
   profile: { fr: 'Profil', ar: 'الملف' }, horizon: { fr: 'Horizon', ar: 'الأفق' }, general: { fr: 'Hypothèses générales', ar: 'الفرضيات العامة' },
@@ -87,7 +100,7 @@ export function Versions({ study, model, x, unsaved, locked, onRestored }: {
 
       <Card title={t(bi('Historique des versions', 'سجل النسخ'))}>
         {versions == null ? <p className="text-xs text-gray-500">{t('loading')}</p> : versions.length === 0 ? <p className="text-xs text-gray-500">{t('none')}</p> : (
-          <div className="overflow-x-auto">
+          <div className="overflow-x-auto rounded focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-400" tabIndex={0}>
             <table className="min-w-full text-xs">
               <thead><tr className="text-gray-500">
                 <th className="text-start py-1.5 pe-3">{t(bi('Libellé', 'التسمية'))}</th>
@@ -155,13 +168,13 @@ export function Versions({ study, model, x, unsaved, locked, onRestored }: {
       )}
 
       <Card title={t(bi('Journal d’audit de l’étude', 'سجل تتبع الدراسة'))}>
-        <ul className="divide-y divide-gray-100 text-xs max-h-80 overflow-y-auto">
+        <ul className="divide-y divide-gray-100 text-xs max-h-80 overflow-y-auto" tabIndex={0} aria-label={t(bi('Journal d’audit de l’étude', 'سجل تدقيق الدراسة'))}>
           {audit.map((e, i) => (
             <li key={`${e.at}-${i}`} className="py-1.5 flex flex-wrap gap-x-3">
               <span className="text-gray-500 tabular-nums" dir="ltr">{when(e.at)}</span>
               <span className="font-medium">{t(ACTION_LABEL[e.action] ?? { fr: e.action, ar: e.action })}</span>
               <span className="text-gray-500">{t('revision')} {e.revision}</span>
-              {e.detail && <span className="text-gray-400" dir="ltr">{e.detail}</span>}
+              {e.detail && <span className="text-gray-500" dir="auto">{auditDetail(e.action, e.detail, lang)}</span>}
             </li>
           ))}
         </ul>

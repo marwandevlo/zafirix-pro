@@ -3,6 +3,7 @@
  *
  *   npx tsx tests/business-studio/e2e/inspect-documents.ts generate <outDir>        writes reports for the test cases, then inspects them
  *   npx tsx tests/business-studio/e2e/inspect-documents.ts inspect <outDir> <file…>  inspects existing files (e.g. browser downloads)
+ *     options: --company=<name> --status=<French status> --status-ar=<Arabic status> --years=<fy,fy,…>
  *
  * For each PDF: page count, text of every page, rendered page images (<outDir>/png), pages without text or ink,
  * placeholder or broken values. For each workbook: sheets, rows, numeric cells, formulas, broken values.
@@ -164,7 +165,11 @@ const expectations = new Map<string, Expect>();
 
 async function generate(outDir: string): Promise<string[]> {
   const files: string[] = [];
-  const cases: Array<[string, StudyModel]> = [['Boulangerie Al Baraka', bakeryCase(7)], ['Atelier Métal — extension', workshopCase(10)]];
+  const cases: Array<[string, StudyModel]> = [
+    ['Boulangerie Al Baraka', bakeryCase(7)], ['Atelier Métal — extension', workshopCase(10)],
+    ['Boulangerie Al Baraka 3 ans', bakeryCase(3, '2026-12')], ['Boulangerie Al Baraka 30 ans', bakeryCase(30, '2026-12')],
+    ['Atelier Métal 15 ans', workshopCase(15, '2026-07')], ['Atelier Métal 20 ans', workshopCase(20)],
+  ];
   for (const [name, raw] of cases) {
     const v = validateStudyModel(raw);
     if (!v.ok) throw new Error(`${name}: ${JSON.stringify(v.issues.filter((i) => i.severity === 'error'))}`);
@@ -195,7 +200,10 @@ async function main() {
   const files = mode === 'generate' ? await generate(outDir) : rest.filter((a) => !a.startsWith('--'));
   if (mode === 'inspect' && opt('company')) {
     const e: Expect = { company: opt('company')!, status: opt('status') ?? '', fiscalYears: (opt('years') ?? '').split(',').filter(Boolean) };
-    for (const f of files) expectations.set(f, /-(scenarios|actuals)-/.test(f) ? { ...e, fiscalYears: [] } : e);
+    for (const f of files) {
+      const lang = /-ar\.(pdf|xlsx)$/.test(f) ? { ...e, status: opt('status-ar') ?? '' } : e;
+      expectations.set(f, /-(scenarios|actuals)-/.test(f) ? { ...lang, fiscalYears: [] } : lang);
+    }
   }
   const pdfs: PdfReport[] = [];
   const xlsxs: XlsxReport[] = [];

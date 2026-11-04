@@ -151,7 +151,7 @@ export function StudioHome() {
           {studies == null ? <p className="text-xs text-gray-500">{t('loading')}</p> : v2.length === 0 ? (
             <p className="text-sm text-gray-500">{t(bi('Aucune étude pour le moment. Créez votre première étude.', 'لا توجد دراسات حالياً. أنشئ دراستك الأولى.'))}</p>
           ) : (
-            <div className="overflow-x-auto">
+            <div className="overflow-x-auto rounded focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-400" tabIndex={0}>
               <table className="min-w-full text-sm">
                 <thead><tr className="text-xs text-gray-500">
                   <th className="text-start py-2 pe-3">{t('name')}</th>

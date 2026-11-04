@@ -242,7 +242,7 @@ export function AppSidebar({
           <>
             <div className="min-w-0">
               <BrandWordmark size="md" />
-              <p className="text-white/40 text-xs">ZAFIRIX GROUP</p>
+              <p className="text-white/70 text-xs">ZAFIRIX GROUP</p>
             </div>
             <button type="button" onClick={() => setMenuOpen?.(false)} className="lg:hidden min-h-11 min-w-11 inline-flex items-center justify-center text-white/50 hover:text-white" aria-label="Fermer le menu">
               <X size={20} />
@@ -254,7 +254,7 @@ export function AppSidebar({
       <nav className="flex-1 px-3 py-4 overflow-y-auto space-y-4">
         {navGroups.map(({ group, items }) => (
           <div key={group.id} className="space-y-0.5">
-            <p className="px-3 pb-1 text-[10px] font-semibold uppercase tracking-wider text-cyan-300/50 select-none">
+            <p className="px-3 pb-1 text-[10px] font-semibold uppercase tracking-wider text-cyan-300/80 select-none">
               {t ? t(group.labelFr, group.labelAr) : group.labelFr}
             </p>
             {items.map(renderNavItem)}

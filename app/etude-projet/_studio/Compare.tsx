@@ -93,7 +93,7 @@ export function Compare() {
       {cmp && a && b && (<>
         {cmp.notes.map((n, i) => <Notice key={i} tone="warning">{t(n)}</Notice>)}
         <Card title={t(bi('Indicateurs', 'المؤشرات'))}>
-          <div className="overflow-x-auto">
+          <div className="overflow-x-auto rounded focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-400" tabIndex={0}>
             <table className="min-w-full text-xs">
               <caption className="sr-only">{t(bi('Comparaison des indicateurs des deux études', 'مقارنة مؤشرات الدراستين'))}</caption>
               <thead><tr className="text-gray-500">

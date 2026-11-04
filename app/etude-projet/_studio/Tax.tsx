@@ -45,7 +45,7 @@ export function Tax({ r }: { r: StudyResult }) {
       </Notice>
 
       <Card title={t(bi('Impôt sur le résultat par exercice', 'الضريبة على النتيجة حسب السنة المالية'))}>
-        <div className="overflow-x-auto">
+        <div className="overflow-x-auto rounded focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-400" tabIndex={0}>
           <table className="min-w-full text-xs">
             <thead><tr>
               <th className={th}>{t('year')}</th>
@@ -86,7 +86,7 @@ export function Tax({ r }: { r: StudyResult }) {
         actions={<SelectField label={t(bi('Exercice', 'السنة المالية'))} value={String(fy)} onChange={(v) => setFy(Number(v))}
           options={fiscalYears.map((x, i) => ({ value: String(i), label: x.label }))} />}>
         <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
-          <div className="overflow-x-auto">
+          <div className="overflow-x-auto rounded focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-400" tabIndex={0}>
             <h4 className="text-sm font-semibold mb-2">{t(bi('Déclarations de TVA', 'تصاريح الضريبة على القيمة المضافة'))}</h4>
             {vat.length === 0 ? <p className="text-xs text-gray-500">{t('emptyData')}</p> : (
               <table className="min-w-full text-xs">
@@ -117,7 +117,7 @@ export function Tax({ r }: { r: StudyResult }) {
               </table>
             )}
           </div>
-          <div className="overflow-x-auto">
+          <div className="overflow-x-auto rounded focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-400" tabIndex={0}>
             <h4 className="text-sm font-semibold mb-2">{t(bi('Décaissements fiscaux et sociaux', 'المدفوعات الجبائية والاجتماعية'))}</h4>
             {payments.length === 0 ? <p className="text-xs text-gray-500">{t(bi('Aucun décaissement fiscal ou social dans cet exercice.', 'لا توجد مدفوعات جبائية أو اجتماعية في هذه السنة المالية.'))}</p> : (
               <table className="min-w-full text-xs">
@@ -147,7 +147,7 @@ export function Tax({ r }: { r: StudyResult }) {
         actions={<SelectField label={t(bi('Impôt', 'الضريبة'))} value={taxFilter} onChange={setTaxFilter}
           options={[{ value: 'all', label: t(bi('Tous', 'الكل')) }, ...taxes.map((x) => ({ value: x, label: x }))]} />}>
         {lang === 'ar' && <p className="mb-2 text-[11px] text-gray-500">البيانات والمراجع معروضة بالفرنسية كما وردت في النصوص الرسمية.</p>}
-        <div className="overflow-x-auto">
+        <div className="overflow-x-auto rounded focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-400" tabIndex={0}>
           <table className="min-w-full text-xs">
             <thead><tr>
               <th className={th}>{t(bi('Impôt', 'الضريبة'))}</th>

@@ -142,10 +142,17 @@ export function renderReportPdf(report: Report, fonts?: PdfFonts): ArrayBuffer {
     doc.line(MARGIN, y + 2, PAGE_W - MARGIN, y + 2);
     doc.setTextColor(30, 41, 59);
     y += 10;
-    for (const b of section.blocks) renderBlock(b);
+    section.blocks.forEach((b, i) => renderBlock(b, section.blocks[i + 1]));
   }
 
-  function renderBlock(b: Block) {
+  /** Height kept free under a table so that a short footnote right after it never lands alone on a new page. */
+  function footnoteReserve(next: Block | undefined): number {
+    if (next?.kind !== 'notice' || next.text.length > 240) return 0;
+    setFont('normal', 8.5);
+    return (doc.splitTextToSize(T(next.text), CONTENT_W) as string[]).length * 8.5 * 0.42 + 5;
+  }
+
+  function renderBlock(b: Block, next?: Block) {
     switch (b.kind) {
       case 'paragraph':
         writeLines(b.text, 9.5);
@@ -206,7 +213,7 @@ export function renderReportPdf(report: Report, fonts?: PdfFonts): ArrayBuffer {
           const share = long ? Math.max(0.12, (1 - label - fixed.reduce((s, w) => s + w, 0)) / long) : 0;
           const head = b.head.map(T);
           const body = b.rows.map((r) => [T(r.label), ...b.head.slice(1).map((_, i) => T(r.cells[i] ? formatCell(r.cells[i], report.lang) : ''))]);
-          table(head, body, [label, ...fixed.map((w) => w || share)], b.rows.map((r) => r.style ?? 'line'), undefined, [true, ...textCols]);
+          table(head, body, [label, ...fixed.map((w) => w || share)], b.rows.map((r) => r.style ?? 'line'), undefined, [true, ...textCols], footnoteReserve(next));
           return;
         }
         const chunks = periodCols > MAX_PERIOD_COLUMNS + 1 ? Math.ceil(periodCols / MAX_PERIOD_COLUMNS) : 1;
@@ -215,7 +222,7 @@ export function renderReportPdf(report: Report, fonts?: PdfFonts): ArrayBuffer {
           const to = chunks === 1 ? periodCols : Math.min(periodCols, from + MAX_PERIOD_COLUMNS);
           const head = [b.head[0], ...b.head.slice(1 + from, 1 + to)].map(T);
           const body = b.rows.map((r) => [T(r.label), ...r.cells.slice(from, to).map((cell) => T(formatCell(cell, report.lang)))]);
-          table(head, body, null, b.rows.map((r) => r.style ?? 'line'));
+          table(head, body, null, b.rows.map((r) => r.style ?? 'line'), undefined, undefined, c === chunks - 1 ? footnoteReserve(next) : 0);
         }
         return;
       }
@@ -225,7 +232,7 @@ export function renderReportPdf(report: Report, fonts?: PdfFonts): ArrayBuffer {
     }
   }
 
-  function table(head: string[], body: string[][], widths: number[] | null, styles?: string[], textRows?: boolean[], startAligned?: boolean[]) {
+  function table(head: string[], body: string[][], widths: number[] | null, styles?: string[], textRows?: boolean[], startAligned?: boolean[], reserveBelow = 0) {
     const order = (row: string[]) => (rtl ? [...row].reverse() : row);
     const labelIndex = rtl ? (head.length || body[0]?.length || 1) - 1 : 0;
     const valueIndex = rtl ? labelIndex - 1 : 1;
@@ -239,7 +246,7 @@ export function renderReportPdf(report: Report, fonts?: PdfFonts): ArrayBuffer {
       startY: y,
       head: head.length ? [order(head)] : undefined,
       body: body.map(order),
-      margin: { left: MARGIN, right: MARGIN, top: MARGIN + 4, bottom: 18 },
+      margin: { left: MARGIN, right: MARGIN, top: MARGIN + 4, bottom: 18 + reserveBelow },
       styles: { font, fontSize: 7.5, cellPadding: 1.2, overflow: 'linebreak', textColor: [30, 41, 59] },
       headStyles: { font, fontStyle: 'bold', fillColor: NAVY, textColor: 255, halign: 'center' },
       columnStyles,

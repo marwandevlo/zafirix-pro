@@ -315,7 +315,7 @@ export function Workspace({ studyId }: { studyId: string }) {
             {tab === 'versions' && !computed && <Notice tone="warning">{t('validationErrors')}</Notice>}
           </>)}
         </div>
-        <p className="text-[10px] text-gray-400 pt-4" dir="ltr">
+        <p className="text-[10px] text-gray-500 pt-4" dir="ltr">
           {computed ? `${computed.r.engineVersion} · ${computed.r.rulesVersion}` : ''} · {lang.toUpperCase()}
         </p>
       </div>

@@ -103,7 +103,7 @@ export function Simulator({ model, r, x, onChange, disabled }: {
               <div key={l.id} className="flex flex-col gap-1">
                 <label htmlFor={id} className="flex justify-between text-xs text-gray-600">
                   <span>{t(l.label)}</span>
-                  <span className={`tabular-nums font-medium ${v === 0 ? 'text-gray-400' : 'text-gray-900'}`} dir="ltr">{v > 0 ? '+' : ''}{f.num(v, l.step < 1 ? 2 : 0)} {t(UNIT_LABEL[l.unit])}</span>
+                  <span className={`tabular-nums font-medium ${v === 0 ? 'text-gray-500' : 'text-gray-900'}`} dir="ltr">{v > 0 ? '+' : ''}{f.num(v, l.step < 1 ? 2 : 0)} {t(UNIT_LABEL[l.unit])}</span>
                 </label>
                 <input id={id} type="range" min={l.min} max={l.max} step={l.step} value={v}
                   onChange={(e) => setLever(l.id, Number(e.target.value))} className="w-full accent-[#1B2A4A]" />
@@ -118,7 +118,7 @@ export function Simulator({ model, r, x, onChange, disabled }: {
       {!sim ? <Notice tone="critical">{t(bi('Simulation impossible avec ces valeurs.', 'المحاكاة غير ممكنة بهذه القيم.'))}</Notice> : (<>
         {!sim.result.checks.ok && <Notice tone="critical">{t('checksKo')}</Notice>}
         <Card title={t(bi('Comparaison', 'المقارنة'))}>
-          <div className="overflow-x-auto">
+          <div className="overflow-x-auto rounded focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-400" tabIndex={0}>
             <table className="min-w-full text-xs">
               <thead><tr className="text-gray-500">
                 <th className="text-start py-1.5 pe-3">{t(bi('Indicateur', 'المؤشر'))}</th>

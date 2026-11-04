@@ -81,7 +81,7 @@ export function Actuals({ studyId, r, hasCompany }: { studyId: string; r: StudyR
             {t(bi(`${aligned.lineCount} lignes prises en compte, ${aligned.ignoredLines} ignorées (hors horizon ou statut exclu).`, `${aligned.lineCount} سطر محتسب، و${aligned.ignoredLines} مُهمل خارج الأفق أو بوضعية مستبعدة.`))}
             {months.length > 0 && ` ${labels[0]} → ${labels[labels.length - 1]}`}
           </p>
-          <div className="overflow-x-auto">
+          <div className="overflow-x-auto rounded focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-400" tabIndex={0}>
             <table className="min-w-full text-xs">
               <thead><tr className="text-gray-500">
                 <th className="text-start py-1.5 pe-3">{t(bi('Poste', 'البند'))}</th>

@@ -20,6 +20,8 @@ const ALLOWED = [
   // Company "clear data" keeps project studies (detached from the company) instead of deleting them.
   /^app\/lib\/atlas-company-clear-server\.ts$/,
   /^app\/companies\/page\.tsx$/,
+  // Sidebar subtitle and group headings raised to WCAG AA contrast (two class changes).
+  /^app\/components\/shell\/AppSidebar\.tsx$/,
 ];
 
 const args = process.argv.slice(2);

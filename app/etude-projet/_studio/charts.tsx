@@ -34,7 +34,7 @@ export function ChartBox({ spec, height = 260 }: { spec: ChartSpec; height?: num
     <figure className="rounded-xl border border-gray-200 bg-white p-3 shadow-sm">
       <figcaption className="mb-2 text-xs font-semibold text-gray-700">{spec.title}</figcaption>
       {spec.empty ? (
-        <div className="flex items-center justify-center rounded-lg bg-gray-50 text-center text-xs text-gray-400 px-4" style={{ height }}>{t('emptyData')}</div>
+        <div className="flex items-center justify-center rounded-lg bg-gray-50 text-center text-xs text-gray-500 px-4" style={{ height }}>{t('emptyData')}</div>
       ) : (
         <div style={{ height }} className="relative" dir="ltr">
           <canvas ref={ref} role="img" aria-label={`${spec.title}. ${spec.summary}`} />

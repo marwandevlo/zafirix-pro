@@ -54,7 +54,7 @@ export function Scenarios({ model, r, onChange, disabled }: { model: StudyModel;
   return (
     <div className="space-y-4">
       <Card title={t(bi('Scénarios', 'السيناريوهات'))} actions={<Button size="sm" disabled={disabled} onClick={() => addScenario()}>{t('add')}</Button>}>
-        <div className="overflow-x-auto">
+        <div className="overflow-x-auto rounded focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-400" tabIndex={0}>
           <table className="min-w-full text-xs">
             <thead><tr className="text-gray-500">
               <th className="text-start py-1.5 pe-3">{t('name')}</th>
@@ -107,7 +107,7 @@ export function Scenarios({ model, r, onChange, disabled }: { model: StudyModel;
 
       <Card title={t(bi('Comparaison des scénarios', 'مقارنة السيناريوهات'))}>
         {summaries.length === 0 ? <p className="text-xs text-gray-500">{t('emptyData')}</p> : (<>
-          <div className="overflow-x-auto">
+          <div className="overflow-x-auto rounded focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-400" tabIndex={0}>
             <table className="min-w-full text-xs">
               <thead><tr className="text-gray-500">
                 <th className="text-start py-1.5 pe-3">{t(bi('Indicateur', 'المؤشر'))}</th>
@@ -212,7 +212,7 @@ function SensitivityPanel({ model }: { model: StudyModel }) {
             </table>
           </div>
           {m && (
-            <div className="overflow-x-auto">
+            <div className="overflow-x-auto rounded focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-400" tabIndex={0}>
               <h4 className="text-sm font-semibold mb-2">{t(METRIC_LABEL[m.metric])} — {t(LEVER_LABEL[m.rowLever.id as keyof typeof LEVER_LABEL])} × {t(LEVER_LABEL[m.colLever.id as keyof typeof LEVER_LABEL])}</h4>
               <table className="text-xs border-collapse">
                 <thead><tr>
@@ -258,7 +258,7 @@ function StressPanel({ model, r }: { model: StudyModel; r: StudyResult }) {
       )}
       {snap.stale && <Notice tone="warning">{t(bi('Les hypothèses ont changé depuis le dernier calcul : relancez-le.', 'تغيرت الفرضيات منذ آخر حساب: أعد الحساب.'))}</Notice>}
       {!snap.value ? <p className="text-xs text-gray-500">{STRESS_TESTS.map((s) => t(STRESS_LABEL[s.id] ?? { fr: s.label, ar: s.label })).join(' · ')}</p> : (
-        <div className="overflow-x-auto">
+        <div className="overflow-x-auto rounded focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-400" tabIndex={0}>
           <table className="min-w-full text-xs">
             <thead><tr className="text-gray-500">
               <th className="text-start py-1.5 pe-3">{t(bi('Choc', 'الصدمة'))}</th>

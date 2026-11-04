@@ -140,7 +140,7 @@ function FieldShell({ id, label, help, error, children, className = '' }: { id: 
     <div className={`flex flex-col gap-1 ${className}`}>
       <label htmlFor={id} className="text-xs font-medium text-gray-600">{label}</label>
       {children}
-      {error ? <p id={`${id}-err`} className="text-[11px] text-red-600">{error}</p> : help ? <p id={`${id}-help`} className="text-[11px] text-gray-400">{help}</p> : null}
+      {error ? <p id={`${id}-err`} className="text-[11px] text-red-600">{error}</p> : help ? <p id={`${id}-help`} className="text-[11px] text-gray-500">{help}</p> : null}
     </div>
   );
 }
@@ -175,7 +175,7 @@ export function NumField({ label, value, onChange, min, max, step, suffix, help,
           }}
           step={step}
           className={`${inputCls} ${suffix ? 'pe-12' : ''} tabular-nums`} />
-        {suffix && <span className="pointer-events-none absolute inset-y-0 end-2 flex items-center text-xs text-gray-400">{suffix}</span>}
+        {suffix && <span className="pointer-events-none absolute inset-y-0 end-2 flex items-center text-xs text-gray-500">{suffix}</span>}
       </div>
     </FieldShell>
   );
@@ -224,7 +224,7 @@ export function Toggle({ label, checked, onChange, disabled, help }: { label: st
         <input id={id} type="checkbox" checked={checked} disabled={disabled} onChange={(e) => onChange(e.target.checked)} className="h-4 w-4 rounded border-gray-300 text-amber-600 focus:ring-amber-500" />
         {label}
       </label>
-      {help && <p className="text-[11px] text-gray-400">{help}</p>}
+      {help && <p className="text-[11px] text-gray-500">{help}</p>}
     </div>
   );
 }
@@ -257,7 +257,7 @@ export function ListEditor<T extends { id: string }>({ items, onChange, create, 
   const { t } = useStudio();
   return (
     <Card title={title} actions={<Button size="sm" disabled={disabled} onClick={() => onChange([...items, create()])}><Plus size={14} aria-hidden /> {addLabel}</Button>}>
-      {items.length === 0 ? <p className="text-sm text-gray-400">{emptyLabel}</p> : (
+      {items.length === 0 ? <p className="text-sm text-gray-500">{emptyLabel}</p> : (
         <div className="space-y-3">
           {items.map((item, i) => (
             <div key={item.id} className="rounded-lg border border-gray-200 p-3">
@@ -287,14 +287,14 @@ export function StringListEditor({ label, items, onChange, disabled }: { label: 
         {items.map((s, i) => (
           <li key={`${i}-${s}`} className="flex items-start justify-between gap-2 rounded bg-gray-50 px-2 py-1 text-sm">
             <span>{s}</span>
-            <button type="button" disabled={disabled} onClick={() => onChange(items.filter((_, j) => j !== i))} className="text-gray-400 hover:text-red-600" aria-label={t('remove')}><Trash2 size={13} /></button>
+            <button type="button" disabled={disabled} onClick={() => onChange(items.filter((_, j) => j !== i))} className="text-gray-500 hover:text-red-600" aria-label={t('remove')}><Trash2 size={13} /></button>
           </li>
         ))}
       </ul>
       <div className="flex gap-2">
         <input value={draft} disabled={disabled} maxLength={300} onChange={(e) => setDraft(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); add(); } }}
           aria-label={label} className={inputCls} />
-        <Button size="sm" disabled={disabled || !draft.trim()} onClick={add}><Plus size={13} aria-hidden /></Button>
+        <Button size="sm" title={`${t('add')} — ${label}`} disabled={disabled || !draft.trim()} onClick={add}><Plus size={13} aria-hidden /></Button>
       </div>
     </div>
   );
@@ -306,7 +306,7 @@ export function KpiCard({ label, value, hint, tone = 'default', title }: { label
     <div className="rounded-xl border border-gray-200 bg-white p-3 shadow-sm" title={title}>
       <p className="text-[11px] font-medium text-gray-500 leading-tight">{label}</p>
       <p className={`mt-1 text-lg font-bold tabular-nums ${color}`} dir="ltr">{value}</p>
-      {hint && <p className="mt-0.5 text-[10px] text-gray-400 leading-tight">{hint}</p>}
+      {hint && <p className="mt-0.5 text-[10px] text-gray-500 leading-tight">{hint}</p>}
     </div>
   );
 }
