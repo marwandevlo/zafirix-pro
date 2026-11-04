@@ -41,6 +41,7 @@ export const STR = {
   reload: { fr: 'Recharger', ar: 'إعادة التحميل' },
   locked: { fr: 'Étude verrouillée (approuvée ou archivée) : lecture seule.', ar: 'دراسة مقفلة (معتمدة أو مؤرشفة): قراءة فقط.' },
   loading: { fr: 'Chargement…', ar: 'جارٍ التحميل…' },
+  preview: { fr: 'Aperçu', ar: 'معاينة' },
   none: { fr: 'Aucun élément.', ar: 'لا توجد عناصر.' },
   add: { fr: 'Ajouter', ar: 'إضافة' },
   remove: { fr: 'Supprimer', ar: 'حذف' },

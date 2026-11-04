@@ -379,6 +379,13 @@ function chartBlocks(ctx: Ctx): Block[] {
   return out;
 }
 
+/** Pie, donut and pyramid charts shared by the dashboard and the reports, so both show the same computed values. */
+export function structureCharts(model: StudyModel, r: StudyResult, x: StudyMetrics, lang: Lang): Array<Extract<Block, { kind: 'chart' }>> {
+  const ctx: Ctx = { model, r, x, lang, t: (b) => b[lang] };
+  const blocks = [financingDonut(ctx), investmentDonut(ctx), ...chartBlocks(ctx)];
+  return blocks.filter((b): b is Extract<Block, { kind: 'chart' }> => b != null && b.kind === 'chart' && (b.type === 'donut' || b.type === 'pyramid'));
+}
+
 function pctOf(part: number, whole: number): number | null {
   return whole > 0 ? (part / whole) * 100 : null;
 }

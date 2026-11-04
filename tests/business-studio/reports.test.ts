@@ -9,7 +9,7 @@ import { computeStudy } from '../../app/lib/business-studio/engine';
 import { formatCentsMad, formatNumber, monthLabel } from '../../app/lib/business-studio/i18n';
 import { computeMetrics } from '../../app/lib/business-studio/metrics';
 import { newRisk } from '../../app/lib/business-studio/model';
-import { buildReport, formatCell, REPORT_TYPES, type Block } from '../../app/lib/business-studio/report-model';
+import { buildReport, formatCell, REPORT_TYPES, structureCharts, type Block } from '../../app/lib/business-studio/report-model';
 import { niceTicks, renderReportPdf } from '../../app/lib/business-studio/report-pdf';
 import { renderReportXlsx } from '../../app/lib/business-studio/report-xlsx';
 import { richModel } from './fixtures';
@@ -40,6 +40,21 @@ test('every report type builds in French and Arabic with content', () => {
       assert.ok(r.title.length > 0);
       assert.ok(r.checksOk);
       for (const s of r.sections) assert.ok(s.blocks.length > 0, `${type}/${lang}/${s.id} has blocks`);
+    }
+  }
+});
+
+test('dashboard structure charts are the same blocks as the full report charts', () => {
+  const { model, result, metrics } = setup();
+  for (const lang of ['fr', 'ar'] as const) {
+    const report = buildReport({ type: 'full', lang, model, result, metrics, studyName: 'x' });
+    const inReport = report.sections.flatMap((s) => s.blocks).filter((b) => b.kind === 'chart' && (b.type === 'donut' || b.type === 'pyramid'));
+    const dashboard = structureCharts(model, result, metrics, lang);
+    assert.ok(dashboard.some((b) => b.type === 'pyramid') && dashboard.filter((b) => b.type === 'donut').length >= 3);
+    for (const b of dashboard) {
+      const match = inReport.find((c) => c.kind === 'chart' && c.title === b.title);
+      assert.ok(match, `${lang}: ${b.title} in report`);
+      assert.deepEqual(match.kind === 'chart' && match.series, b.series);
     }
   }
 });

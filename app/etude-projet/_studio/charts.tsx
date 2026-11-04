@@ -7,7 +7,8 @@ import type { LineKey } from '@/app/lib/business-studio/engine';
 import { aggregate } from '@/app/lib/business-studio/metrics';
 import type { StudyMetrics } from '@/app/lib/business-studio/metrics';
 import type { StudyModel } from '@/app/lib/business-studio/model';
-import { formatNumber, STR, type Bi, type Lang } from '@/app/lib/business-studio/i18n';
+import { formatNumber, formatPercent, STR, type Bi, type Lang } from '@/app/lib/business-studio/i18n';
+import { structureCharts } from '@/app/lib/business-studio/report-model';
 import { useStudio } from './ui';
 
 export const PALETTE = ['#1B2A4A', '#D97706', '#059669', '#BE185D', '#2563EB', '#7C3AED', '#0891B2', '#65A30D', '#DC2626', '#64748B'];
@@ -78,6 +79,46 @@ const L = (b: Bi, lang: Lang) => b[lang];
 const B = (fr: string, ar: string): Bi => ({ fr, ar });
 const fyLabels = (r: StudyResult) => r.calendar.fiscalYears.map((f) => (f.partial ? `${f.label}*` : f.label));
 
+/** Donuts (financing, investments, costs, product mix) and the SIG pyramid, from the same blocks as the reports. */
+function structureSpecs(model: StudyModel, r: StudyResult, x: StudyMetrics, lang: Lang): ChartSpec[] {
+  const mad = STR.mad[lang];
+  return structureCharts(model, r, x, lang).map((b) => {
+    const values = b.series[0].values.map((v) => (v ?? 0) / 100);
+    const title = b.note ? `${b.title} — ${b.note.replace(/\.$/, '')}` : b.title;
+    const summary = b.labels.map((l, i) => `${l} : ${formatNumber(values[i], lang)} ${mad}`).join(' ; ');
+    if (b.type === 'donut') {
+      const whole = values.reduce((a, v) => a + v, 0);
+      return {
+        title, summary, empty: allZero(values),
+        config: {
+          type: 'doughnut',
+          data: { labels: b.labels, datasets: [{ data: values, backgroundColor: PALETTE }] },
+          options: {
+            responsive: true, maintainAspectRatio: false, animation: false,
+            plugins: {
+              legend: { position: 'right', labels: { boxWidth: 10, font: { size: 11 } } },
+              tooltip: { callbacks: { label: (c) => `${c.label} : ${formatNumber(values[c.dataIndex], lang)} ${mad} (${formatPercent(whole ? (values[c.dataIndex] / whole) * 100 : null, lang)})` } },
+            },
+          },
+        } as ChartConfiguration,
+      };
+    }
+    const bars = values.map((v) => [-Math.abs(v) / 2, Math.abs(v) / 2]);
+    return {
+      title, summary, empty: allZero(values),
+      config: {
+        type: 'bar',
+        data: { labels: b.labels, datasets: [{ label: b.series[0].name, data: bars as unknown as number[], backgroundColor: values.map((v) => (v < 0 ? PALETTE[8] : PALETTE[0])) }] },
+        options: {
+          responsive: true, maintainAspectRatio: false, animation: false, indexAxis: 'y',
+          plugins: { legend: { display: false }, tooltip: { callbacks: { label: (c) => `${formatNumber(values[c.dataIndex], lang)} ${mad}` } } },
+          scales: { x: { display: false }, y: { grid: { display: false } } },
+        },
+      } as ChartConfiguration,
+    };
+  });
+}
+
 export function dashboardCharts({ r, x, model, lang }: Ctx): ChartSpec[] {
   const years = fyLabels(r);
   const months = r.calendar.labels;
@@ -112,18 +153,7 @@ export function dashboardCharts({ r, x, model, lang }: Ctx): ChartSpec[] {
     options: baseOptions(lang, { stacked: true }),
   }, prodSeries.length === 0 || allZero(...prodSeries));
 
-  const total = (k: LineKey) => r.monthly[k].reduce((a, v) => a + v, 0) / 100;
-  const costParts: Array<[Bi, number]> = [
-    [B('Achats consommés', 'المشتريات المستهلكة'), total('cogs')], [B('Charges externes', 'التكاليف الخارجية'), total('externalCharges')],
-    [B('Salaires', 'الأجور'), total('salaries')], [B('Charges sociales', 'التكاليف الاجتماعية'), total('employerCharges')],
-    [B('Impôts et taxes', 'الضرائب والرسوم'), total('localTaxes')], [B('Dotations', 'المخصصات'), total('depreciation')],
-    [B('Charges financières', 'التكاليف المالية'), total('financialCharges')], [B('Impôt sur le résultat', 'الضريبة على النتيجة'), total('incomeTax')],
-  ];
-  const costVals = costParts.map(([, v]) => Math.max(0, v));
-  push(B('Structure des charges sur l’horizon', 'بنية التكاليف على مدى الأفق'), {
-    type: 'doughnut', data: { labels: costParts.map(([b]) => L(b, lang)), datasets: [{ data: costVals, backgroundColor: PALETTE }] },
-    options: { responsive: true, maintainAspectRatio: false, animation: false, plugins: { legend: { position: 'right', labels: { boxWidth: 10, font: { size: 11 } } } } },
-  }, allZero(costVals));
+  specs.push(...structureSpecs(model, r, x, lang));
 
   const gm = x.years.map((y) => y.grossMarginPct.value); const em = x.years.map((y) => y.ebitdaMarginPct.value); const nm = x.years.map((y) => y.netMarginPct.value);
   push(B('Marges en % du CA', 'الهوامش كنسبة من رقم المعاملات'), {

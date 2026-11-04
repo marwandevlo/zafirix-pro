@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { alignActuals } from '@/app/lib/business-studio/actuals';
 import type { StudyResult } from '@/app/lib/business-studio/engine';
 import { STR, tr, type Lang } from '@/app/lib/business-studio/i18n';
@@ -42,9 +42,14 @@ export function Reports({ studyId, studyName, model, r, x, revision, status, has
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState('');
   const [includeUnvalidated, setIncludeUnvalidated] = useState(false);
+  const [preview, setPreview] = useState<{ url: string; name: string; data: ArrayBuffer; title: string } | null>(null);
+  const previewRef = useRef<HTMLDivElement>(null);
 
-  const generate = async (type: ReportType, lang: Lang, format: 'pdf' | 'xlsx') => {
-    const key = `${type}-${lang}-${format}`;
+  useEffect(() => () => { if (preview) URL.revokeObjectURL(preview.url); }, [preview]);
+  useEffect(() => { if (preview) previewRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }); }, [preview]);
+
+  const generate = async (type: ReportType, lang: Lang, format: 'pdf' | 'xlsx', mode: 'download' | 'preview' = 'download') => {
+    const key = `${type}-${lang}-${format}${mode === 'preview' ? '-preview' : ''}`;
     setBusy(key);
     setError('');
     try {
@@ -60,7 +65,13 @@ export function Reports({ studyId, studyName, model, r, x, revision, status, has
       if (format === 'pdf') {
         const { renderReportPdf } = await import('@/app/lib/business-studio/report-pdf');
         const fonts = lang === 'ar' ? await loadReportFonts() : undefined;
-        download(renderReportPdf(report, fonts), reportFileName(report, 'pdf'), 'application/pdf');
+        const data = renderReportPdf(report, fonts);
+        if (mode === 'preview') {
+          const url = URL.createObjectURL(new Blob([data], { type: 'application/pdf' }));
+          setPreview({ url, name: reportFileName(report, 'pdf'), data, title: `${tr(LABEL[type], lang)} — ${lang === 'fr' ? 'Français' : 'العربية'}` });
+        } else {
+          download(data, reportFileName(report, 'pdf'), 'application/pdf');
+        }
       } else {
         const { renderReportXlsx } = await import('@/app/lib/business-studio/report-xlsx');
         download(await renderReportXlsx(report), reportFileName(report, 'xlsx'), 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
@@ -96,10 +107,33 @@ export function Reports({ studyId, studyName, model, r, x, revision, status, has
                   </Button>
                 );
               }))}
+              {(['fr', 'ar'] as const).map((lang) => {
+                const key = `${type}-${lang}-pdf-preview`;
+                return (
+                  <Button key={key} size="sm" variant="ghost" disabled={busy != null} onClick={() => void generate(type, lang, 'pdf', 'preview')}>
+                    {busy === key ? tr('loading', lang) : `${tr('preview', lang)} · ${lang === 'fr' ? 'Français' : 'العربية'}`}
+                  </Button>
+                );
+              })}
             </div>
           </Card>
         ))}
       </div>
+      {preview && (
+        <div ref={previewRef}>
+          <Card title={`${t('preview')} — ${preview.title}`}>
+            <div className="mb-3 flex flex-wrap gap-2">
+              <Button size="sm" onClick={() => download(preview.data, preview.name, 'application/pdf')}>{t(bi('Télécharger le PDF', 'تحميل PDF'))}</Button>
+              <a href={preview.url} target="_blank" rel="noopener noreferrer" className="inline-flex items-center rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50">
+                {t(bi('Ouvrir dans un nouvel onglet', 'فتح في علامة تبويب جديدة'))}
+              </a>
+              <Button size="sm" variant="ghost" onClick={() => setPreview(null)}>{t(bi('Fermer l’aperçu', 'إغلاق المعاينة'))}</Button>
+            </div>
+            <p className="mb-2 text-[11px] text-gray-500 md:hidden">{t(bi('Sur mobile, certains navigateurs n’affichent pas les PDF intégrés : utilisez « Ouvrir dans un nouvel onglet » ou « Télécharger ».', 'على الهاتف، لا تعرض بعض المتصفحات ملفات PDF المدمجة: استعمل «فتح في علامة تبويب جديدة» أو «تحميل».'))}</p>
+            <iframe src={preview.url} title={`${t('preview')} — ${preview.title}`} className="h-[75vh] w-full rounded-lg border border-gray-200 bg-gray-50" />
+          </Card>
+        </div>
+      )}
     </div>
   );
 }
