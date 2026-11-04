@@ -84,7 +84,12 @@ function randomModel(seed: number): StudyModel {
     termMonths: int(6, 72), purchaseOptionHT: r() > 0.5 ? Math.round(between(0, 50000)) : 0, optionAssetLifeYears: int(1, 10),
   }));
   m.financing.overdraftRatePct = between(0, 15);
-  m.financing.dividends = { payoutPct: between(0, 100), fromFiscalYearIndex: int(1, 4), paymentMonthOfFiscalYear: int(1, 12), withholdingRatePct: pick([0, 10, 12.5, 15]) };
+  m.financing.dividends = {
+    payoutPct: between(0, 100), fromFiscalYearIndex: int(1, 4), paymentMonthOfFiscalYear: int(1, 12), withholdingRatePct: pick([0, 10, 12.5, 15]),
+    withholdingMode: pick(['legal', 'custom'] as const),
+  };
+  m.tax.vatInvestmentRefund = r() > 0.5;
+  for (const inv of m.investments) inv.vatRefundEligible = r() > 0.3;
   m.workingCapital = {
     cashSalesPct: between(0, 100), dsoDays: int(0, 180), dpoDays: int(0, 180), inventoryDays: int(0, 180),
     badDebtPct: between(0, 10), minimumCash: int(0, 100000),

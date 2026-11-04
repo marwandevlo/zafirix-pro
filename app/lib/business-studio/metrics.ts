@@ -240,7 +240,7 @@ function yearMetrics(r: StudyResult): YearMetrics[] {
     const cashInterest = S('cashOutInterest');
     const debtService = S('cashOutPrincipal') + cashInterest;
     const dscrV = debtService > 0 ? div(cfo + cashInterest, debtService) : null;
-    const currentAssets = E('inventory') + E('receivables') + E('vatDeductiblePending') + E('vatCreditAsset') + E('incomeTaxReceivable') + E('localTaxPrepaid') + E('cashAsset');
+    const currentAssets = E('inventory') + E('receivables') + E('vatDeductiblePending') + E('vatCreditAsset') + E('vatRefundReceivable') + E('incomeTaxReceivable') + E('localTaxPrepaid') + E('cashAsset');
     const currentLiabilities = E('payables') + E('vatCollectedPending') + E('vatPayable') + E('incomeTaxPayable') + E('socialPayable') + E('localTaxPayable') + E('overdraft') + E('currentDebtPortion');
     const equityEnd = E('equity');
     const loansEnd = E('loans');

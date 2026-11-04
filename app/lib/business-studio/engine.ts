@@ -14,8 +14,9 @@ import { allocate, applyRate, type Cents, mulCents, roundHalfAwayFromZero, toCen
 import type { Investment, Levers, Loan, StudyModel } from './model';
 import { NEUTRAL_LEVERS } from './model';
 import {
-  isLegalVatRate, irAnnual, legalDecliningCoefficient, minimumContributionRatePct, monthlyPayroll,
+  isLegalVatRate, irAnnual, legalDecliningCoefficient, legalDividendWithholdingPct, minimumContributionRatePct, monthlyPayroll,
   MINIMUM_CONTRIBUTION_FLOOR_IR, MINIMUM_CONTRIBUTION_FLOOR_IS, resolveIsRate, type RuleStatus, TAX_RULES_VERSION,
+  VAT_INVESTMENT_REFUND_LAG_MONTHS,
 } from './tax-rules';
 
 export const ENGINE_VERSION = 'studio-engine-1.0.0';
@@ -101,7 +102,7 @@ export const FLOW_KEYS = [
   'ebitda', 'depreciation', 'ebit', 'interest', 'loanFees', 'overdraftInterest', 'financialCharges', 'financialResult',
   'grantRelease', 'badDebts', 'nonCurrentResult', 'ebt', 'incomeTax', 'netIncome',
   'variableOpex', 'fixedOpex', 'capitalizedInterest',
-  'cashInSales', 'cashInEquity', 'cashInLoans', 'cashInGrants', 'cashInInvestmentGrants', 'cashOutSuppliers', 'cashOutOpex',
+  'cashInSales', 'cashInEquity', 'cashInLoans', 'cashInGrants', 'cashInInvestmentGrants', 'cashInVatRefund', 'cashOutSuppliers', 'cashOutOpex',
   'cashOutNetSalaries', 'cashOutSocial', 'cashOutIrSalarial', 'cashOutVat', 'cashOutIncomeTax', 'cashOutLocalTaxes',
   'cashOutCapex', 'cashOutPrincipal', 'cashOutInterest', 'cashOutDividends', 'cashOutDividendWithholding', 'netCashFlow',
   'vatCollectedDue', 'vatDeductible', 'vatInvoicedSales', 'irSalarial', 'employeeSocial', 'netSalaries',
@@ -111,7 +112,7 @@ export const FLOW_KEYS = [
 
 export const BALANCE_KEYS = [
   'fixedAssetsGross', 'accumulatedDepreciation', 'fixedAssetsNet', 'inventory', 'receivables', 'vatDeductiblePending',
-  'vatCreditAsset', 'incomeTaxReceivable', 'localTaxPrepaid', 'cashAsset', 'totalAssets',
+  'vatCreditAsset', 'vatRefundReceivable', 'incomeTaxReceivable', 'localTaxPrepaid', 'cashAsset', 'totalAssets',
   'capital', 'reserves', 'grantsNet', 'equity', 'loans', 'payables', 'vatCollectedPending', 'vatPayable',
   'incomeTaxPayable', 'socialPayable', 'localTaxPayable', 'overdraft', 'totalLiabilitiesAndEquity', 'balanceDiff',
   'cash', 'bfr', 'netDebt', 'currentDebtPortion', 'subscribers', 'headcount',
@@ -143,6 +144,8 @@ export type IsYear = {
 export type VatPeriod = {
   label: string; firstMonth: number; lastMonth: number; collected: Cents; deductible: Cents; creditBroughtForward: Cents;
   net: Cents; payable: Cents; creditCarriedForward: Cents; paymentMonth: number | null;
+  /** Art. 103 bis refund claimed on this declaration's credit, removed from the credit carried forward. */
+  refundClaimed: Cents; refundMonth: number | null;
 };
 
 export type TaxPayment = { month: number; tax: string; label: string; amount: Cents };
@@ -503,7 +506,7 @@ export function computeStudy(input: StudyModel, scenarioId?: string): StudyResul
     if (l.purchaseOptionHT > 0 && optionMonth < N) {
       leaseAssets.push({
         id: `${l.id}_option`, name: `${l.name} (levée d’option)`, kind: 'tangible', phase: 'initial', amountHT: l.purchaseOptionHT,
-        vatRatePct: l.vatRatePct, vatRecoverable: true, month: optionMonth, usefulLifeYears: l.optionAssetLifeYears, method: 'linear', decliningCoefficient: 2,
+        vatRatePct: l.vatRatePct, vatRecoverable: true, vatRefundEligible: false, month: optionMonth, usefulLifeYears: l.optionAssetLifeYears, method: 'linear', decliningCoefficient: 2,
       });
     }
   }
@@ -548,6 +551,7 @@ export function computeStudy(input: StudyModel, scenarioId?: string): StudyResul
   // ── Investments and depreciation ──
   const assets: AssetDetail[] = [];
   const capexVatDeductible = zeros(N);
+  const capexVatRefundable = zeros(N);
   const allInvestments = [...model.investments, ...leaseAssets];
   for (const inv of allInvestments) {
     if (inv.amountHT <= 0 || inv.month >= N) continue;
@@ -560,6 +564,7 @@ export function computeStudy(input: StudyModel, scenarioId?: string): StudyResul
     M.capexVat[inv.month] += vat;
     M.cashOutCapex[inv.month] += ht + vat;
     if (recoverable) capexVatDeductible[inv.month] += vat;
+    if (recoverable && tax.vatInvestmentRefund && inv.vatRefundEligible) capexVatRefundable[inv.month] += vat;
     const dep = zeros(N);
     let coefficient: number | null = null;
     const depreciable = inv.kind === 'tangible' || inv.kind === 'intangible';
@@ -788,6 +793,11 @@ export function computeStudy(input: StudyModel, scenarioId?: string): StudyResul
   const divPay = zeros(N);
   const divWh = zeros(N);
   const divGross = zeros(N);
+  const vatRefundClaimed = zeros(N);
+  const vatRefundCash = zeros(N);
+  let quarterRefundable = 0;
+  let vatRefundOutstanding = 0;
+  let dividendRateMissing = false;
   const isExpense = zeros(N);
 
   // Opening liabilities settled at the start.
@@ -1013,7 +1023,10 @@ export function computeStudy(input: StudyModel, scenarioId?: string): StudyResul
         const distributable = Math.max(0, reserves);
         const gross = Math.min(applyRate(base, model.financing.dividends.payoutPct), distributable);
         if (gross > 0) {
-          const wh = applyRate(gross, model.financing.dividends.withholdingRatePct);
+          const dv = model.financing.dividends;
+          const legal = dv.withholdingMode === 'legal' ? legalDividendWithholdingPct(`${cal.labels[m]}-01`) : null;
+          if (dv.withholdingMode === 'legal' && !legal) dividendRateMissing = true;
+          const wh = applyRate(gross, legal ? legal.ratePct : dv.withholdingRatePct);
           divGross[m] += gross;
           divWh[m] += wh;
           divPay[m] += gross - wh;
@@ -1025,6 +1038,7 @@ export function computeStudy(input: StudyModel, scenarioId?: string): StudyResul
     // VAT: accumulate, settle at period end, pay the following month.
     periodCollected += vatCollectedDue[m];
     periodDeductible += vatDeductible[m];
+    quarterRefundable += capexVatRefundable[m];
     if (m === 0 && vatOpeningDue > 0) {
       vatPay[0] += vatOpeningDue;
       taxPayments.push({ month: 0, tax: 'TVA', label: 'TVA due à l’ouverture', amount: vatOpeningDue });
@@ -1035,16 +1049,25 @@ export function computeStudy(input: StudyModel, scenarioId?: string): StudyResul
       const payable = Math.max(0, netV);
       const carry = Math.max(0, -netV);
       const payAt = m + 1 < N ? m + 1 : null;
+      // Art. 103 bis: the credit shown at a calendar quarter's end is refundable up to the eligible investment VAT paid in that quarter.
+      const refund = tax.vatInvestmentRefund && cal.calMonth[m] % 3 === 0 ? Math.min(carry, quarterRefundable) : 0;
+      const refundAt = refund > 0 && m + VAT_INVESTMENT_REFUND_LAG_MONTHS < N ? m + VAT_INVESTMENT_REFUND_LAG_MONTHS : null;
       vatPeriods.push({
         label: periodLabel[m], firstMonth: periodStart, lastMonth: m, collected: periodCollected, deductible: periodDeductible,
-        creditBroughtForward: vatCreditCarry, net: netV, payable, creditCarriedForward: carry, paymentMonth: payable > 0 ? payAt : null,
+        creditBroughtForward: vatCreditCarry, net: netV, payable, creditCarriedForward: carry - refund, paymentMonth: payable > 0 ? payAt : null,
+        refundClaimed: refund, refundMonth: refundAt,
       });
       if (payable > 0 && payAt != null) { vatPay[payAt] += payable; taxPayments.push({ month: payAt, tax: 'TVA', label: `TVA ${periodLabel[m]}`, amount: payable }); }
-      vatCreditCarry = carry;
+      if (refund > 0) {
+        vatRefundClaimed[m] += refund;
+        if (refundAt != null) vatRefundCash[refundAt] += refund;
+      }
+      vatCreditCarry = carry - refund;
       periodCollected = 0;
       periodDeductible = 0;
       periodStart = m + 1;
     }
+    if (cal.calMonth[m] % 3 === 0) quarterRefundable = 0;
 
     // Cash.
     M.cashInSales[m] = collections[m];
@@ -1058,7 +1081,8 @@ export function computeStudy(input: StudyModel, scenarioId?: string): StudyResul
     M.cashOutDividends[m] = divPay[m];
     M.cashOutDividendWithholding[m] = divWh[m];
     M.dividendsGross[m] = divGross[m];
-    const inflow = M.cashInSales[m] + M.cashInEquity[m] + M.cashInLoans[m] + M.cashInGrants[m];
+    M.cashInVatRefund[m] = vatRefundCash[m];
+    const inflow = M.cashInSales[m] + M.cashInEquity[m] + M.cashInLoans[m] + M.cashInGrants[m] + M.cashInVatRefund[m];
     const outflow = M.cashOutSuppliers[m] + M.cashOutOpex[m] + M.cashOutNetSalaries[m] + M.cashOutSocial[m] + M.cashOutIrSalarial[m]
       + M.cashOutVat[m] + M.cashOutIncomeTax[m] + M.cashOutLocalTaxes[m] + M.cashOutCapex[m] + M.cashOutPrincipal[m]
       + M.cashOutInterest[m] + M.cashOutDividends[m] + M.cashOutDividendWithholding[m];
@@ -1071,7 +1095,8 @@ export function computeStudy(input: StudyModel, scenarioId?: string): StudyResul
     payables += payablesInvoiced[m] - supplierPaid[m] - opexPaid[m];
     vatDedPending += vatDedInvoiced[m] - supplierVatPaid[m] - opexVatPaid[m];
     if (vatOn && tax.vatRegime === 'encaissement') vatCollPending += M.vatInvoicedSales[m] - vatOnCollections[m] - badDebtVat[m];
-    vatNet += vatCollectedDue[m] - vatDeductible[m] - vatPay[m];
+    vatNet += vatCollectedDue[m] - vatDeductible[m] - vatPay[m] + vatRefundClaimed[m];
+    vatRefundOutstanding += vatRefundClaimed[m] - vatRefundCash[m];
     isNet += M.incomeTax[m] - isPay[m];
     social += socialAccrued[m] + irAccrued[m] - socialPay[m] - irPay[m];
     localNet += M.localTaxes[m] - M.cashOutLocalTaxes[m];
@@ -1087,6 +1112,7 @@ export function computeStudy(input: StudyModel, scenarioId?: string): StudyResul
     M.receivables[m] = receivables;
     M.vatDeductiblePending[m] = vatDedPending;
     M.vatCreditAsset[m] = vatNet < 0 ? -vatNet : 0;
+    M.vatRefundReceivable[m] = vatRefundOutstanding;
     M.vatPayable[m] = vatNet > 0 ? vatNet : 0;
     M.incomeTaxReceivable[m] = isNet < 0 ? -isNet : 0;
     M.incomeTaxPayable[m] = isNet > 0 ? isNet : 0;
@@ -1102,11 +1128,11 @@ export function computeStudy(input: StudyModel, scenarioId?: string): StudyResul
     M.grantsNet[m] = grantsNet;
     M.equity[m] = capital + reserves + grantsNet;
     M.totalAssets[m] = M.fixedAssetsNet[m] + M.inventory[m] + M.receivables[m] + M.vatDeductiblePending[m] + M.vatCreditAsset[m]
-      + M.incomeTaxReceivable[m] + M.localTaxPrepaid[m] + M.cashAsset[m];
+      + M.vatRefundReceivable[m] + M.incomeTaxReceivable[m] + M.localTaxPrepaid[m] + M.cashAsset[m];
     M.totalLiabilitiesAndEquity[m] = M.equity[m] + M.loans[m] + M.payables[m] + M.vatCollectedPending[m] + M.vatPayable[m]
       + M.incomeTaxPayable[m] + M.socialPayable[m] + M.localTaxPayable[m] + M.overdraft[m];
     M.balanceDiff[m] = M.totalAssets[m] - M.totalLiabilitiesAndEquity[m];
-    M.bfr[m] = M.inventory[m] + M.receivables[m] + M.vatDeductiblePending[m] - M.payables[m] - M.vatCollectedPending[m]
+    M.bfr[m] = M.inventory[m] + M.receivables[m] + M.vatDeductiblePending[m] + vatRefundOutstanding - M.payables[m] - M.vatCollectedPending[m]
       - vatNet - isNet - social - localNet;
     M.netDebt[m] = M.loans[m] + M.overdraft[m] - M.cashAsset[m];
     M.subscribers[m] = Math.round(subscribersTotal[m]);
@@ -1134,7 +1160,7 @@ export function computeStudy(input: StudyModel, scenarioId?: string): StudyResul
     const dIsNet = (M.incomeTaxPayable[m] - M.incomeTaxReceivable[m]) - (prev('incomeTaxPayable') - prev('incomeTaxReceivable'));
     const dLocalNet = (M.localTaxPayable[m] - M.localTaxPrepaid[m]) - (prev('localTaxPayable') - prev('localTaxPrepaid'));
     M.caf[m] = M.netIncome[m] + M.depreciation[m] - M.grantRelease[m];
-    M.cfo[m] = M.caf[m] + M.capitalizedInterest[m] - d('inventory') - d('receivables') - d('vatDeductiblePending')
+    M.cfo[m] = M.caf[m] + M.capitalizedInterest[m] - d('inventory') - d('receivables') - d('vatDeductiblePending') - d('vatRefundReceivable')
       + d('payables') + d('vatCollectedPending') + dVatNet + dIsNet + d('socialPayable') + dLocalNet;
     M.cfi[m] = -M.capexCost[m];
     M.cff[m] = M.cashInEquity[m] + M.cashInLoans[m] + M.cashInInvestmentGrants[m] - M.cashOutPrincipal[m] - M.dividendsGross[m];
@@ -1169,6 +1195,9 @@ export function computeStudy(input: StudyModel, scenarioId?: string): StudyResul
     }
   }
 
+  if (dividendRateMissing) {
+    warnings.push({ code: 'dividend_withholding_not_covered', severity: 'warning', message: 'Retenue sur dividendes : aucun taux légal intégré pour les distributions antérieures à 2025 ; le taux saisi a été utilisé.' });
+  }
   const bsMax = M.balanceDiff.reduce((s, v) => Math.max(s, Math.abs(v)), 0);
   const checks: ChecksResult = {
     balanceSheetMaxAbsDiff: bsMax, cashFlowMaxAbsDiff: cfMax, planFinancementMaxAbsDiff: pfMax, pnlMaxAbsDiff: pnlMax,

@@ -47,6 +47,7 @@ export const KEY_LABELS: Record<LineKey, Bilingual> = {
   cashInLoans: { fr: 'Emprunts reçus', ar: 'القروض المحصلة' },
   cashInGrants: { fr: 'Subventions reçues', ar: 'الإعانات المحصلة' },
   cashInInvestmentGrants: { fr: 'Subventions d’investissement reçues', ar: 'إعانات الاستثمار المحصلة' },
+  cashInVatRefund: { fr: 'Remboursement de crédit de TVA (art. 103 bis)', ar: 'استرداد دين الضريبة على القيمة المضافة (المادة 103 مكرر)' },
   cashOutSuppliers: { fr: 'Paiements fournisseurs (achats)', ar: 'المدفوعات للموردين (المشتريات)' },
   cashOutOpex: { fr: 'Paiements des charges externes', ar: 'أداء التكاليف الخارجية' },
   cashOutNetSalaries: { fr: 'Salaires nets versés', ar: 'الأجور الصافية المدفوعة' },
@@ -84,6 +85,7 @@ export const KEY_LABELS: Record<LineKey, Bilingual> = {
   receivables: { fr: 'Clients et comptes rattachés', ar: 'العملاء والحسابات المرتبطة بهم' },
   vatDeductiblePending: { fr: 'TVA déductible en attente de paiement', ar: 'الضريبة القابلة للخصم في انتظار الأداء' },
   vatCreditAsset: { fr: 'Crédit de TVA', ar: 'دين الضريبة على القيمة المضافة' },
+  vatRefundReceivable: { fr: 'État – remboursement de TVA demandé', ar: 'الدولة – استرداد الضريبة على القيمة المضافة المطلوب' },
   incomeTaxReceivable: { fr: 'État – excédent d’IS/IR versé', ar: 'الدولة – فائض الضريبة المؤداة' },
   localTaxPrepaid: { fr: 'Impôts locaux payés d’avance', ar: 'ضرائب محلية مؤداة مسبقا' },
   cashAsset: { fr: 'Trésorerie – actif', ar: 'الخزينة – أصول' },
@@ -169,8 +171,8 @@ export const STATEMENTS: Record<StatementId, { title: Bilingual; lines: readonly
       L('fixedAssetsGross', 'detail'), L('accumulatedDepreciation', 'detail', -1), L('fixedAssetsNet'),
       H('h2', 'Actif circulant', 'الأصول المتداولة'),
       L('inventory'), L('receivables'),
-      S('stateVatAsset', 'État – TVA récupérable', 'الدولة – الضريبة على القيمة المضافة القابلة للاسترجاع', 'line', [['vatDeductiblePending', 1], ['vatCreditAsset', 1]]),
-      L('vatDeductiblePending', 'detail'), L('vatCreditAsset', 'detail'),
+      S('stateVatAsset', 'État – TVA récupérable', 'الدولة – الضريبة على القيمة المضافة القابلة للاسترجاع', 'line', [['vatDeductiblePending', 1], ['vatCreditAsset', 1], ['vatRefundReceivable', 1]]),
+      L('vatDeductiblePending', 'detail'), L('vatCreditAsset', 'detail'), L('vatRefundReceivable', 'detail'),
       L('incomeTaxReceivable'), L('localTaxPrepaid'),
       H('h3', 'Trésorerie', 'الخزينة'),
       L('cashAsset'),
@@ -214,8 +216,8 @@ export const STATEMENTS: Record<StatementId, { title: Bilingual; lines: readonly
     title: { fr: 'Plan de trésorerie', ar: 'مخطط الخزينة' },
     lines: [
       H('h1', 'Encaissements', 'المتحصلات'),
-      L('cashInSales'), L('cashInEquity'), L('cashInLoans'), L('cashInGrants'),
-      S('inflows', 'Total encaissements', 'مجموع المتحصلات', 'subtotal', [['cashInSales', 1], ['cashInEquity', 1], ['cashInLoans', 1], ['cashInGrants', 1]]),
+      L('cashInSales'), L('cashInEquity'), L('cashInLoans'), L('cashInGrants'), L('cashInVatRefund'),
+      S('inflows', 'Total encaissements', 'مجموع المتحصلات', 'subtotal', [['cashInSales', 1], ['cashInEquity', 1], ['cashInLoans', 1], ['cashInGrants', 1], ['cashInVatRefund', 1]]),
       H('h2', 'Décaissements', 'المدفوعات'),
       L('cashOutSuppliers'), L('cashOutOpex'), L('cashOutNetSalaries'), L('cashOutSocial'), L('cashOutIrSalarial'),
       L('cashOutVat'), L('cashOutIncomeTax'), L('cashOutLocalTaxes'), L('cashOutCapex'), L('cashOutPrincipal'),
@@ -252,9 +254,9 @@ export const STATEMENTS: Record<StatementId, { title: Bilingual; lines: readonly
   bfr: {
     title: { fr: 'Besoin en fonds de roulement', ar: 'الاحتياج من رأس المال العامل' },
     lines: [
-      L('inventory'), L('receivables'), L('vatDeductiblePending'), L('vatCreditAsset'), L('incomeTaxReceivable'), L('localTaxPrepaid'),
+      L('inventory'), L('receivables'), L('vatDeductiblePending'), L('vatCreditAsset'), L('vatRefundReceivable'), L('incomeTaxReceivable'), L('localTaxPrepaid'),
       S('wcAssets', 'Emplois d’exploitation', 'استعمالات الاستغلال', 'subtotal', [
-        ['inventory', 1], ['receivables', 1], ['vatDeductiblePending', 1], ['vatCreditAsset', 1], ['incomeTaxReceivable', 1], ['localTaxPrepaid', 1],
+        ['inventory', 1], ['receivables', 1], ['vatDeductiblePending', 1], ['vatCreditAsset', 1], ['vatRefundReceivable', 1], ['incomeTaxReceivable', 1], ['localTaxPrepaid', 1],
       ]),
       L('payables'), L('vatCollectedPending'), L('vatPayable'), L('incomeTaxPayable'), L('socialPayable'), L('localTaxPayable'),
       S('wcLiabilities', 'Ressources d’exploitation', 'موارد الاستغلال', 'subtotal', [
@@ -268,7 +270,8 @@ export const STATEMENTS: Record<StatementId, { title: Bilingual; lines: readonly
     lines: [
       L('vatInvoicedSales'), L('vatCollectedDue'), L('vatDeductible'), L('capexVat', 'detail'),
       S('vatNetPeriod', 'TVA nette du mois (collectée − déductible)', 'صافي الضريبة للشهر', 'subtotal', [['vatCollectedDue', 1], ['vatDeductible', -1]]),
-      L('cashOutVat'), L('vatPayable'), L('vatCreditAsset'), L('vatCollectedPending', 'detail'), L('vatDeductiblePending', 'detail'),
+      L('cashOutVat'), L('vatPayable'), L('vatCreditAsset'), L('cashInVatRefund'), L('vatRefundReceivable'),
+      L('vatCollectedPending', 'detail'), L('vatDeductiblePending', 'detail'),
     ],
   },
   is: {

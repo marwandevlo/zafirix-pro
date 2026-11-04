@@ -136,7 +136,7 @@ test('IS rate before 2023 is not invented', () => {
   assert.ok(r.warnings.some((w) => w.code.startsWith('is_rule')), 'expects a missing-rule warning');
 });
 
-test('VAT credit is carried forward, never refunded', () => {
+test('VAT credit is carried forward and not refunded unless the art. 103 bis option is on', () => {
   const m = emptyModel({ startMonth: '2026-01', years: 2 });
   m.financing.equity = [{ id: 'q', name: 'c', amount: 2000000, month: 0 }];
   m.investments = [newInvestment({ amountHT: 1000000, usefulLifeYears: 10 })];
@@ -149,6 +149,70 @@ test('VAT credit is carried forward, never refunded', () => {
   // The credit is consumed by later collected VAT, so total VAT paid ≤ collected − deductible.
   const paid = total(r.monthly.cashOutVat);
   assert.ok(paid <= total(r.monthly.vatCollectedDue) - total(r.monthly.vatDeductible) + r.monthly.vatCreditAsset[r.calendar.months - 1]);
+  assert.equal(total(r.monthly.cashInVatRefund), 0);
+  assert.equal(total(r.vatPeriods.map((p) => p.refundClaimed)), 0);
+});
+
+test('art. 103 bis refund: limited to eligible investment VAT of the quarter, cashed two months after the quarter', () => {
+  const base = () => {
+    const m = emptyModel({ startMonth: '2026-01', years: 2 });
+    m.tax.vatPeriodicity = 'monthly';
+    m.financing.equity = [{ id: 'q', name: 'c', amount: 3000000, month: 0 }];
+    m.investments = [
+      newInvestment({ id: 'machine', amountHT: 1000000, usefulLifeYears: 10, month: 1 }),
+      newInvestment({ id: 'bureau', amountHT: 100000, usefulLifeYears: 5, month: 1, vatRefundEligible: false }),
+    ];
+    m.products = [newProduct({ unitPrice: 100, volumeMonth1: 500, unitCost: 0 })];
+    return m;
+  };
+  const off = computeStudy(base());
+  const m = base();
+  m.tax.vatInvestmentRefund = true;
+  const on = computeStudy(m);
+  assertReconciled(on, 'refund');
+  const q1 = on.vatPeriods.find((p) => p.lastMonth === 2)!;
+  // Eligible VAT paid in Q1: 20 % × 1 000 000 MAD; the office equipment is excluded.
+  assert.equal(q1.refundClaimed, 200000 * 100);
+  assert.equal(q1.refundMonth, 4);
+  assert.equal(on.monthly.cashInVatRefund[4], 200000 * 100);
+  assert.equal(on.monthly.vatRefundReceivable[3], 200000 * 100);
+  assert.equal(on.monthly.vatRefundReceivable[4], 0);
+  // The claimed amount stops being deductible: credit after Q1 is lower by exactly the claim.
+  const offQ1 = off.vatPeriods.find((p) => p.lastMonth === 2)!;
+  assert.equal(offQ1.creditCarriedForward - q1.creditCarriedForward, q1.refundClaimed);
+  // Over the horizon the refund only changes timing: refund + VAT paid + closing credit are identical.
+  const N = on.calendar.months;
+  const net = (r: StudyResult) => total(r.monthly.cashOutVat) - total(r.monthly.cashInVatRefund) - r.monthly.vatCreditAsset[N - 1] - r.monthly.vatRefundReceivable[N - 1];
+  assert.equal(net(on), net(off));
+  assert.ok(on.monthly.cash[4] > off.monthly.cash[4]);
+});
+
+test('art. 103 bis refund never exceeds the credit at quarter end', () => {
+  const m = emptyModel({ startMonth: '2026-01', years: 1 });
+  m.tax.vatInvestmentRefund = true;
+  m.financing.equity = [{ id: 'q', name: 'c', amount: 3000000, month: 0 }];
+  m.investments = [newInvestment({ amountHT: 100000, usefulLifeYears: 10, month: 0 })];
+  m.products = [newProduct({ unitPrice: 100, volumeMonth1: 3000, unitCost: 0 })];
+  const r = computeStudy(m);
+  assertReconciled(r, 'refund-capped');
+  for (const p of r.vatPeriods) assert.ok(p.refundClaimed <= Math.max(0, -p.net));
+  assert.equal(total(r.monthly.cashInVatRefund), 0);
+});
+
+test('dividend withholding follows the legal rate of the payment date (art. 19-IV-B and 247-XXXVII-C)', () => {
+  const run = (startMonth: string) => {
+    const m = emptyModel({ startMonth, years: 3 });
+    m.financing.equity = [{ id: 'q', name: 'c', amount: 100000, month: 0 }];
+    m.products = [newProduct({ unitPrice: 100, volumeMonth1: 3000, unitCost: 10 })];
+    m.financing.dividends = { payoutPct: 50, fromFiscalYearIndex: 1, paymentMonthOfFiscalYear: 6, withholdingRatePct: 99, withholdingMode: 'legal' };
+    const r = computeStudy(m);
+    assertReconciled(r, startMonth);
+    return r.monthly.dividendsGross.flatMap((g, i) => (g > 0 ? [[r.calendar.labels[i], r.monthly.cashOutDividendWithholding[i] / g]] : []));
+  };
+  const rates = run('2025-01');
+  assert.deepEqual(rates.map(([l]) => l), ['2026-06', '2027-06']);
+  assert.ok(Math.abs((rates[0][1] as number) - 0.1125) < 1e-6);
+  assert.ok(Math.abs((rates[1][1] as number) - 0.10) < 1e-6);
 });
 
 test('loan with grace period: interest only, then full repayment', () => {

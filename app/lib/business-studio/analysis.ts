@@ -213,7 +213,7 @@ export function findings(model: StudyModel, r: StudyResult, x: StudyMetrics): Fi
   }
   const lastCredit = M.vatCreditAsset.slice(Math.max(0, N - 12));
   if (N >= 24 && lastCredit.every((v) => v > 0)) {
-    out.push({ id: 'vat-credit', kind: 'calculated', severity: 'warning', title: 'Crédit de TVA structurel', detail: 'Le crédit de TVA persiste sur les 12 derniers mois ; vérifier les taux et l’éligibilité au remboursement (non modélisé).', refs: [{ key: 'vatCreditAsset' }] });
+    out.push({ id: 'vat-credit', kind: 'calculated', severity: 'warning', title: 'Crédit de TVA structurel', detail: 'Le crédit de TVA persiste sur les 12 derniers mois ; vérifier les taux de TVA. Le crédit d’exploitation n’est pas remboursable dans le cas général ; seul le remboursement de l’art. 103 bis sur investissements est modélisé (option à activer dans Hypothèses fiscales).', refs: [{ key: 'vatCreditAsset' }] });
   }
   const revTotal = x.totals.revenue;
   if (revTotal > 0) {

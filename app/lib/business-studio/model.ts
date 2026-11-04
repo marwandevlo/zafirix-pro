@@ -123,6 +123,8 @@ export type InvestmentKind = 'tangible' | 'intangible' | 'land' | 'goodwill' | '
 export type Investment = {
   id: string; name: string; kind: InvestmentKind; phase: 'initial' | 'expansion';
   amountHT: number; vatRatePct: number; vatRecoverable: boolean; month: number;
+  /** CGI art. 103 bis excludes office furniture and equipment and passenger vehicles from the refund. */
+  vatRefundEligible: boolean;
   usefulLifeYears: number; method: 'linear' | 'declining'; decliningCoefficient: number;
 };
 
@@ -146,7 +148,11 @@ export type Financing = {
   grants: Grant[];
   leases: Lease[];
   overdraftRatePct: number;
-  dividends: { payoutPct: number; fromFiscalYearIndex: number; paymentMonthOfFiscalYear: number; withholdingRatePct: number };
+  dividends: {
+    payoutPct: number; fromFiscalYearIndex: number; paymentMonthOfFiscalYear: number; withholdingRatePct: number;
+    /** 'legal': CGI art. 19-IV-B and 247-XXXVII-C rate at the distribution date; 'custom': withholdingRatePct. */
+    withholdingMode: 'legal' | 'custom';
+  };
 };
 
 export type WorkingCapital = {
@@ -178,6 +184,8 @@ export type TaxSettings = {
   vatSubject: boolean;
   vatRegime: 'encaissement' | 'debit';
   vatPeriodicity: 'auto' | 'monthly' | 'quarterly';
+  /** CGI art. 103 bis refund of the non-imputable VAT credit on investment goods. */
+  vatInvestmentRefund: boolean;
   activityStartMonth: number;
   applyMinimumContributionExemption: boolean;
   minimumContributionRateOverridePct: number | null;
@@ -316,7 +324,7 @@ export function newStaff(partial: Partial<StaffLine> = {}): StaffLine {
 export function newInvestment(partial: Partial<Investment> = {}): Investment {
   return {
     id: newId('inv'), name: 'Investissement', kind: 'tangible', phase: 'initial', amountHT: 0, vatRatePct: 20,
-    vatRecoverable: true, month: 0, usefulLifeYears: 5, method: 'linear', decliningCoefficient: 2, ...partial,
+    vatRecoverable: true, vatRefundEligible: true, month: 0, usefulLifeYears: 5, method: 'linear', decliningCoefficient: 2, ...partial,
   };
 }
 
@@ -356,11 +364,11 @@ export function emptyModel(options: { startMonth?: string; years?: number; secto
     investments: [],
     financing: {
       equity: [], loans: [], grants: [], leases: [], overdraftRatePct: 0,
-      dividends: { payoutPct: 0, fromFiscalYearIndex: 1, paymentMonthOfFiscalYear: 7, withholdingRatePct: 0 },
+      dividends: { payoutPct: 0, fromFiscalYearIndex: 1, paymentMonthOfFiscalYear: 7, withholdingRatePct: 0, withholdingMode: 'legal' },
     },
     workingCapital: { cashSalesPct: 100, dsoDays: 0, dpoDays: 0, inventoryDays: 0, badDebtPct: 0, minimumCash: 0 },
     tax: {
-      regime: 'is', isCategory: 'standard', vatSubject: true, vatRegime: 'encaissement', vatPeriodicity: 'auto',
+      regime: 'is', isCategory: 'standard', vatSubject: true, vatRegime: 'encaissement', vatPeriodicity: 'auto', vatInvestmentRefund: false,
       activityStartMonth: 0, applyMinimumContributionExemption: options.projectType === undefined || options.projectType === 'creation',
       minimumContributionRateOverridePct: null, lossCarryforwardYears: 4, nonDeductibleByFiscalYear: [],
       autoEntrepreneurRatePct: 0, exemptions: [], localTaxes: [], overrides: [],
@@ -624,7 +632,7 @@ export function validateStudyModel(input: unknown): ValidationResult {
       phase: oneOf(x.phase, ['initial', 'expansion'] as const, 'initial'),
       amountHT: num(ctx, x.amountHT, `${xp}.amountHT`, { min: 0 }),
       vatRatePct: num(ctx, x.vatRatePct, `${xp}.vatRatePct`, { min: 0, max: 100 }),
-      vatRecoverable: bool(x.vatRecoverable, true), month: mo(x.month, `${xp}.month`),
+      vatRecoverable: bool(x.vatRecoverable, true), vatRefundEligible: bool(x.vatRefundEligible, true), month: mo(x.month, `${xp}.month`),
       usefulLifeYears: num(ctx, x.usefulLifeYears, `${xp}.usefulLifeYears`, { min: kind === 'land' || kind === 'goodwill' || kind === 'deposit' ? 0 : 1, max: 100, int: true, fallback: 5 }),
       method: oneOf(x.method, ['linear', 'declining'] as const, 'linear'),
       decliningCoefficient: num(ctx, x.decliningCoefficient, `${xp}.decliningCoefficient`, { min: 1, max: 5, fallback: 2 }),
@@ -667,6 +675,7 @@ export function validateStudyModel(input: unknown): ValidationResult {
       fromFiscalYearIndex: num(ctx, dv.fromFiscalYearIndex, 'financing.dividends.fromFiscalYearIndex', { min: 1, max: 31, int: true, fallback: 1 }),
       paymentMonthOfFiscalYear: num(ctx, dv.paymentMonthOfFiscalYear, 'financing.dividends.paymentMonthOfFiscalYear', { min: 1, max: 12, int: true, fallback: 7 }),
       withholdingRatePct: num(ctx, dv.withholdingRatePct, 'financing.dividends.withholdingRatePct', { min: 0, max: 100 }),
+      withholdingMode: oneOf(dv.withholdingMode, ['legal', 'custom'] as const, 'custom'),
     },
   };
 
@@ -687,6 +696,7 @@ export function validateStudyModel(input: unknown): ValidationResult {
     vatSubject: bool(t.vatSubject, true),
     vatRegime: oneOf(t.vatRegime, ['encaissement', 'debit'] as const, 'encaissement'),
     vatPeriodicity: oneOf(t.vatPeriodicity, ['auto', 'monthly', 'quarterly'] as const, 'auto'),
+    vatInvestmentRefund: bool(t.vatInvestmentRefund, false),
     activityStartMonth: num(ctx, t.activityStartMonth, 'tax.activityStartMonth', { min: -600, max: N, int: true }),
     applyMinimumContributionExemption: bool(t.applyMinimumContributionExemption, false),
     minimumContributionRateOverridePct: nullableNum(ctx, t.minimumContributionRateOverridePct, 'tax.minimumContributionRateOverridePct', { min: 0, max: 10 }),

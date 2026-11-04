@@ -108,7 +108,13 @@ export const RULES: readonly RuleDescriptor[] = [
     id: 'tva-deduction', tax: 'TVA', label: 'Droit à déduction au mois du paiement ; crédit reporté sur les périodes suivantes',
     effectiveFrom: null, effectiveTo: null, status: 'verified_official',
     source: { ...CGI_2026, reference: 'Art. 101-2° et 101-3°', line: '6551' },
-    note: 'Le délai d’un an et les remboursements de crédit ne sont pas modélisés.',
+    note: 'Le délai d’un an n’est pas modélisé. Seul le remboursement de l’art. 103 bis est modélisé (option).',
+  },
+  {
+    id: 'tva-remboursement-103bis', tax: 'TVA', label: 'Remboursement du crédit de TVA non imputable sur les biens d’investissement, hors matériel et mobilier de bureau et véhicules de transport de personnes',
+    effectiveFrom: null, effectiveTo: null, status: 'verified_official',
+    source: { ...CGI_2026, reference: 'Art. 103 bis', line: '6692–6728' },
+    note: 'Option de l’outil, désactivée par défaut ; établissements et entreprises publics exclus. Limité à la TVA des biens d’investissement payés dans le trimestre. Convention : demande déposée le mois suivant le trimestre, remboursement encaissé le mois d’après (délai légal de 30 jours) ; le crédit demandé n’est plus imputable.',
   },
   {
     id: 'tva-periodicity', tax: 'TVA', label: 'Déclaration mensuelle si CA taxable de l’année écoulée ≥ 1 000 000 MAD ; trimestrielle sinon et pour l’année civile de création (option mensuelle possible)',
@@ -162,8 +168,16 @@ export const RULES: readonly RuleDescriptor[] = [
     source: null, note: 'Montants ou taux saisis par l’utilisateur.',
   },
   {
-    id: 'ras-dividendes', tax: 'RAS', label: 'Retenue à la source sur dividendes', effectiveFrom: null, effectiveTo: null, status: 'user_defined',
-    source: null, note: 'Taux saisi par l’utilisateur ; versée pour le compte des associés (sans effet sur le résultat de la société).',
+    id: 'ras-dividendes', tax: 'RAS', label: 'Retenue à la source sur dividendes : 12,5 % (distributions 2025), 11,25 % (2026), 10 % (à compter de 2027)',
+    effectiveFrom: '2025-01-01', effectiveTo: null, status: 'verified_official',
+    source: { ...CGI_2026, reference: 'Art. 19-IV-B et 247-XXXVII-C', line: '1735–1740 ; 16998–17004' },
+    note: 'Mode « taux légal » : taux à la date de distribution. Les cas d’exonération ou de taux conventionnel (associés personnes morales, non-résidents) ne sont pas déterminés : choisir un taux saisi. Versée pour le compte des associés, sans effet sur le résultat de la société.',
+  },
+  {
+    id: 'ras-19-iv-a', tax: 'RAS', label: 'Retenue de 5 % sur les prestations et loyers versés par l’État, les établissements publics, les banques, les assurances et les entreprises dont le CA ≥ 200 MMAD',
+    effectiveFrom: null, effectiveTo: null, status: 'not_covered',
+    source: { ...CGI_2026, reference: 'Art. 19-IV-A, 15 bis et 15 ter', line: '1724–1733' },
+    note: 'Non modélisée : dépend de la nature des clients de l’entreprise.',
   },
   {
     id: 'ras-autres', tax: 'RAS', label: 'Autres retenues à la source (TVA art. 117-V, loyers, honoraires)', effectiveFrom: null, effectiveTo: null, status: 'not_covered',
@@ -309,4 +323,17 @@ export function legalVatRates(date: string): number[] {
 
 export function isLegalVatRate(ratePct: number, date: string): boolean {
   return legalVatRates(date).some((r) => Math.abs(r - ratePct) < 1e-9);
+}
+
+/** Months between the end of a quarter whose declaration shows the credit and the refund (art. 103 bis): filing in the following month, payment within 30 days. */
+export const VAT_INVESTMENT_REFUND_LAG_MONTHS = 2;
+
+// ─── Withholding ─────────────────────────────────────────────────────────────────────────────────
+
+/** Withholding rate on dividends distributed on `date` (art. 19-IV-B; transitional art. 247-XXXVII-C). Null before 2025. */
+export function legalDividendWithholdingPct(date: string): { ratePct: number; status: RuleStatus } | null {
+  if (date < '2025-01-01') return null;
+  if (date < '2026-01-01') return { ratePct: 12.5, status: 'verified_official' };
+  if (date < '2027-01-01') return { ratePct: 11.25, status: 'verified_official' };
+  return { ratePct: 10, status: Number(date.slice(0, 4)) > LAST_VERIFIED_FISCAL_YEAR + 1 ? 'assumed_unchanged' : 'verified_official' };
 }

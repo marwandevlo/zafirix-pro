@@ -54,7 +54,7 @@ export function richModel(years = 5, startMonth = '2026-01'): StudyModel {
     { id: 'lz1', name: 'Véhicule', monthlyRentHT: 4000, vatRatePct: 20, startMonth: 0, termMonths: 36, purchaseOptionHT: 20000, optionAssetLifeYears: 4 },
   ];
   m.financing.overdraftRatePct = 9;
-  m.financing.dividends = { payoutPct: 30, fromFiscalYearIndex: 2, paymentMonthOfFiscalYear: 7, withholdingRatePct: 0 };
+  m.financing.dividends = { payoutPct: 30, fromFiscalYearIndex: 2, paymentMonthOfFiscalYear: 7, withholdingRatePct: 0, withholdingMode: 'custom' };
   m.workingCapital = { cashSalesPct: 40, dsoDays: 45, dpoDays: 60, inventoryDays: 30, badDebtPct: 1, minimumCash: 50000 };
   m.tax.vatRegime = 'encaissement';
   return m;

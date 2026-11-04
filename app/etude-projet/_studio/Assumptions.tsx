@@ -80,11 +80,23 @@ function General({ model, set, onChange, disabled }: P) {
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
           <div className="flex flex-col gap-1">
             <label className="text-xs font-medium text-gray-600" htmlFor="h-start">{t('startMonth')}</label>
-            <input id="h-start" type="month" disabled={disabled} value={h.startMonth} onChange={(e) => e.target.value && set('horizon', { ...h, startMonth: e.target.value })}
+            <input id="h-start" type="month" min="2023-01" disabled={disabled} value={h.startMonth} onChange={(e) => e.target.value && set('horizon', { ...h, startMonth: e.target.value })}
+              aria-describedby={h.startMonth < '2023-01' ? 'h-start-help' : undefined}
               className="rounded-lg border border-gray-300 px-2.5 py-1.5 text-sm" />
+            {h.startMonth < '2023-01' && (
+              <p id="h-start-help" className="text-xs text-amber-700">{t(bi('Aucun taux d’IS vérifié avant 2023 : saisissez une règle fiscale de substitution.', 'لا يوجد سعر متحقق منه للضريبة على الشركات قبل 2023: أدخل قاعدة جبائية بديلة.'))}</p>
+            )}
           </div>
           <NumField label={`${t('horizon')} (${t('years')})`} value={h.years} integer min={1} max={MAX_YEARS} disabled={disabled} onChange={(v) => v != null && set('horizon', { ...h, years: v })} />
           <NumField label={t('fiscalYearStart')} value={h.fiscalYearStartMonth} integer min={1} max={12} disabled={disabled} onChange={(v) => v != null && set('horizon', { ...h, fiscalYearStartMonth: v })} />
+        </div>
+        <div className="mt-3 flex flex-wrap items-center gap-2" role="group" aria-label={t(bi('Horizons usuels', 'آفاق شائعة'))}>
+          {[3, 5, 7, 10, 15, 20, 30].map((y) => (
+            <button key={y} type="button" disabled={disabled} aria-pressed={h.years === y} onClick={() => set('horizon', { ...h, years: y })}
+              className={`rounded-full border px-3 py-1 text-xs font-medium ${h.years === y ? 'border-indigo-600 bg-indigo-600 text-white' : 'border-gray-300 text-gray-700 hover:bg-gray-50'} disabled:opacity-50`}>
+              {y} {t('years')}
+            </button>
+          ))}
         </div>
       </Card>
       <Card title={t(bi('Projet', 'المشروع'))}>
@@ -233,6 +245,9 @@ function Investments({ model, set, disabled, labels }: P) {
           <NumField label={t(bi('Montant HT', 'المبلغ دون رسوم'))} value={i.amountHT} min={0} disabled={disabled} onChange={(v) => v != null && u({ amountHT: v })} />
           <SelectField label={t(bi('TVA', 'الضريبة على القيمة المضافة'))} value={i.vatRatePct} disabled={disabled} options={vatOpts} onChange={(v) => u({ vatRatePct: v })} />
           <Toggle label={t(bi('TVA récupérable', 'ضريبة قابلة للاسترجاع'))} checked={i.vatRecoverable} disabled={disabled} onChange={(v) => u({ vatRecoverable: v })} />
+          {i.vatRecoverable && model.tax.vatInvestmentRefund && (
+            <Toggle label={t(bi('Éligible au remboursement (art. 103 bis : hors mobilier, matériel de bureau et véhicules de tourisme)', 'مؤهل للاسترداد (المادة 103 مكرر: باستثناء أثاث ومعدات المكتب وسيارات نقل الأشخاص)'))} checked={i.vatRefundEligible} disabled={disabled} onChange={(v) => u({ vatRefundEligible: v })} />
+          )}
           <MonthField label={t(bi('Date d’acquisition', 'تاريخ الاقتناء'))} value={i.month} labels={labels} disabled={disabled} onChange={(v) => v != null && u({ month: v })} />
           <NumField label={t(bi('Durée d’amortissement (ans)', 'مدة الاهتلاك (سنوات)'))} integer value={i.usefulLifeYears} min={0} max={50} disabled={disabled} onChange={(v) => v != null && u({ usefulLifeYears: v })} />
           <SelectField label={t(bi('Méthode', 'الطريقة'))} value={i.method} disabled={disabled} options={[{ value: 'linear', label: t(bi('Linéaire', 'خطية')) }, { value: 'declining', label: t(bi('Dégressive', 'متناقصة')) }]} onChange={(v) => u({ method: v })} />
@@ -297,9 +312,16 @@ function FinancingEditor({ model, set, disabled, labels }: P) {
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
           <NumField label={t(bi('Taux du découvert', 'معدل السحب على المكشوف'))} suffix="%" value={fin.overdraftRatePct} min={0} max={100} disabled={disabled} onChange={(v) => v != null && setFin({ overdraftRatePct: v })} />
           <NumField label={t(bi('Taux de distribution', 'نسبة التوزيع'))} suffix="%" value={fin.dividends.payoutPct} min={0} max={100} disabled={disabled} onChange={(v) => v != null && setFin({ dividends: { ...fin.dividends, payoutPct: v } })} />
-          <NumField label={t(bi('À partir de l’exercice n°', 'ابتداءً من السنة رقم'))} integer value={fin.dividends.fromFiscalYearIndex} min={0} max={MAX_YEARS} disabled={disabled} onChange={(v) => v != null && setFin({ dividends: { ...fin.dividends, fromFiscalYearIndex: v } })} help={t(bi('0 = premier exercice', '0 = السنة الأولى'))} />
+          <NumField label={t(bi('À partir de l’exercice n°', 'ابتداءً من السنة رقم'))} integer value={fin.dividends.fromFiscalYearIndex} min={1} max={MAX_YEARS + 1} disabled={disabled} onChange={(v) => v != null && setFin({ dividends: { ...fin.dividends, fromFiscalYearIndex: v } })} help={t(bi('Bénéfice de l’exercice n°, distribué au cours de l’exercice suivant (1 = premier exercice).', 'ربح السنة رقم، يوزع خلال السنة الموالية (1 = السنة الأولى).'))} />
           <NumField label={t(bi('Mois de paiement dans l’exercice', 'شهر الأداء في السنة'))} integer value={fin.dividends.paymentMonthOfFiscalYear} min={1} max={12} disabled={disabled} onChange={(v) => v != null && setFin({ dividends: { ...fin.dividends, paymentMonthOfFiscalYear: v } })} />
-          <NumField label={t(bi('Retenue à la source sur dividendes', 'الاقتطاع من المنبع على الأرباح'))} suffix="%" value={fin.dividends.withholdingRatePct} min={0} max={100} disabled={disabled} onChange={(v) => v != null && setFin({ dividends: { ...fin.dividends, withholdingRatePct: v } })} help={t(bi('Taux saisi : à confirmer par un professionnel selon le bénéficiaire.', 'سعر مُدخل: يؤكده مهني حسب المستفيد.'))} />
+          <SelectField label={t(bi('Retenue à la source sur dividendes', 'الاقتطاع من المنبع على الأرباح'))} value={fin.dividends.withholdingMode} disabled={disabled}
+            options={[{ value: 'legal', label: t(bi('Taux légal à la date de paiement (art. 19-IV-B)', 'السعر القانوني في تاريخ الأداء (المادة 19-IV-B)')) }, { value: 'custom', label: t(bi('Taux saisi', 'سعر مُدخل')) }]}
+            onChange={(v) => setFin({ dividends: { ...fin.dividends, withholdingMode: v } })} />
+          {fin.dividends.withholdingMode === 'custom' ? (
+            <NumField label={t(bi('Taux de retenue saisi', 'سعر الاقتطاع المُدخل'))} suffix="%" value={fin.dividends.withholdingRatePct} min={0} max={100} disabled={disabled} onChange={(v) => v != null && setFin({ dividends: { ...fin.dividends, withholdingRatePct: v } })} help={t(bi('À confirmer par un professionnel selon le bénéficiaire (non-résidents, conventions).', 'يؤكده مهني حسب المستفيد (غير المقيمين، الاتفاقيات).'))} />
+          ) : (
+            <p className="text-xs text-slate-500 dark:text-slate-400 self-end">{t(bi('Personnes physiques résidentes et sociétés : 12,5 % en 2025, 11,25 % en 2026, 10 % à partir de 2027 (art. 247-XXXVII-C). Autres bénéficiaires : à faire vérifier.', 'الأشخاص الذاتيون المقيمون والشركات: 12,5% سنة 2025، و11,25% سنة 2026، و10% ابتداءً من 2027 (المادة 247-XXXVII-C). باقي المستفيدين: يجب التحقق.'))}</p>
+          )}
         </div>
       </Card>
     </div>
@@ -341,6 +363,7 @@ function TaxEditor({ model, set, disabled, labels }: P) {
           <Toggle label={t(bi('Assujetti à la TVA', 'خاضع للضريبة على القيمة المضافة'))} checked={tax.vatSubject} disabled={disabled} onChange={(v) => u({ vatSubject: v })} />
           <SelectField label={t(bi('Régime de TVA', 'نظام الضريبة على القيمة المضافة'))} value={tax.vatRegime} disabled={disabled} options={[{ value: 'encaissement', label: t(bi('Encaissement', 'التحصيل')) }, { value: 'debit', label: t(bi('Débit (option)', 'الاستحقاق (اختيار)')) }]} onChange={(v) => u({ vatRegime: v })} />
           <SelectField label={t(bi('Périodicité TVA', 'دورية التصريح'))} value={tax.vatPeriodicity} disabled={disabled} options={[{ value: 'auto', label: t(bi('Selon le CA (art. 108)', 'حسب رقم المعاملات (المادة 108)')) }, { value: 'monthly', label: t(bi('Mensuelle', 'شهرية')) }, { value: 'quarterly', label: t(bi('Trimestrielle', 'فصلية')) }]} onChange={(v) => u({ vatPeriodicity: v })} />
+          <Toggle label={t(bi('Demander le remboursement du crédit de TVA sur investissements (art. 103 bis)', 'طلب استرداد دين الضريبة على الاستثمارات (المادة 103 مكرر)'))} checked={tax.vatInvestmentRefund} disabled={disabled || !tax.vatSubject} onChange={(v) => u({ vatInvestmentRefund: v })} />
           <NumField label={t(bi('Début d’activité (mois relatif, négatif si antérieur)', 'بداية النشاط (شهر نسبي، سالب إن كان سابقاً)'))} integer value={tax.activityStartMonth} min={-600} max={labels.length} disabled={disabled} onChange={(v) => v != null && u({ activityStartMonth: v })} />
           <Toggle label={t(bi('Exonération de cotisation minimale (36 premiers mois, art. 144-I-C)', 'إعفاء من الحد الأدنى للضريبة (36 شهراً الأولى)'))} checked={tax.applyMinimumContributionExemption} disabled={disabled} onChange={(v) => u({ applyMinimumContributionExemption: v })} />
           <NumField label={t(bi('Taux de cotisation minimale saisi (optionnel)', 'سعر الحد الأدنى المُدخل (اختياري)'))} suffix="%" nullable value={tax.minimumContributionRateOverridePct} min={0} max={10} disabled={disabled} onChange={(v) => u({ minimumContributionRateOverridePct: v })} />

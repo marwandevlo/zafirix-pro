@@ -30,6 +30,7 @@ export function Tax({ r }: { r: StudyResult }) {
   const inYear = (m: number) => m >= y.firstMonth && m < y.firstMonth + y.months;
   const ml = (m: number | null) => (m == null ? t(bi('Au-delà de l’horizon', 'خارج الأفق')) : monthLabel(r.calendar.labels[m], lang));
   const vat = r.vatPeriods.filter((p) => inYear(p.firstMonth));
+  const refundOn = r.vatPeriods.some((p) => p.refundClaimed > 0);
   const payments = r.taxPayments.filter((p) => inYear(p.month)).sort((a, b) => a.month - b.month);
   const taxes = Array.from(new Set(RULES.map((x) => x.tax)));
   const rules = RULES.filter((x) => taxFilter === 'all' || x.tax === taxFilter);
@@ -95,6 +96,7 @@ export function Tax({ r }: { r: StudyResult }) {
                   <th className={`${th} text-end`}>{t(bi('Déductible', 'القابلة للخصم'))}</th>
                   <th className={`${th} text-end`}>{t(bi('Crédit antérieur', 'الدين السابق'))}</th>
                   <th className={`${th} text-end`}>{t(bi('À payer', 'الواجب أداؤها'))}</th>
+                  {refundOn && <th className={`${th} text-end`}>{t(bi('Remboursement demandé (art. 103 bis)', 'الاسترداد المطلوب (المادة 103 مكرر)'))}</th>}
                   <th className={`${th} text-end`}>{t(bi('Crédit reporté', 'الدين المرحل'))}</th>
                   <th className={th}>{t(bi('Paiement', 'الأداء'))}</th>
                 </tr></thead>
@@ -106,6 +108,7 @@ export function Tax({ r }: { r: StudyResult }) {
                       <td className={tdn}>{f.mad(p.deductible)}</td>
                       <td className={tdn}>{f.mad(p.creditBroughtForward)}</td>
                       <td className={`${tdn} font-semibold`}>{f.mad(p.payable)}</td>
+                      {refundOn && <td className={tdn}>{p.refundClaimed > 0 ? `${f.mad(p.refundClaimed)} → ${ml(p.refundMonth)}` : '—'}</td>}
                       <td className={tdn}>{f.mad(p.creditCarriedForward)}</td>
                       <td className={td}>{p.payable === 0 ? '—' : ml(p.paymentMonth)}</td>
                     </tr>

@@ -380,13 +380,18 @@ function taxSection(ctx: Ctx): Section {
     })),
   });
   const fy = r.calendar.fiscalYears;
+  const refundOn = r.vatPeriods.some((p) => p.refundClaimed > 0);
   const vatRows: RRow[] = fy.map((f) => {
     const ps = r.vatPeriods.filter((p) => p.firstMonth >= f.firstMonth && p.lastMonth <= f.lastMonth);
-    const s = (k: 'collected' | 'deductible' | 'payable') => ps.reduce((a, p) => a + p[k], 0);
+    const s = (k: 'collected' | 'deductible' | 'payable' | 'refundClaimed') => ps.reduce((a, p) => a + p[k], 0);
     const lastP = ps[ps.length - 1];
-    return { label: f.label, cells: [mad(s('collected')), mad(s('deductible')), mad(s('payable')), mad(lastP ? lastP.creditCarriedForward : 0)] };
+    const cells = [mad(s('collected')), mad(s('deductible')), mad(s('payable')), mad(lastP ? lastP.creditCarriedForward : 0)];
+    if (refundOn) cells.splice(3, 0, mad(s('refundClaimed')));
+    return { label: f.label, cells };
   });
-  blocks.push({ kind: 'table', title: t(B('TVA par exercice', 'الضريبة على القيمة المضافة حسب السنة')), head: [t(STR.year), t(B('TVA collectée', 'الضريبة المحصلة')), t(B('TVA déductible', 'الضريبة القابلة للخصم')), t(B('TVA à payer', 'الضريبة الواجب أداؤها')), t(B('Crédit reporté', 'الدين الضريبي المرحل'))], rows: vatRows });
+  const vatHead = [t(STR.year), t(B('TVA collectée', 'الضريبة المحصلة')), t(B('TVA déductible', 'الضريبة القابلة للخصم')), t(B('TVA à payer', 'الضريبة الواجب أداؤها')), t(B('Crédit reporté', 'الدين الضريبي المرحل'))];
+  if (refundOn) vatHead.splice(4, 0, t(B('Remboursement demandé (art. 103 bis)', 'الاسترداد المطلوب (المادة 103 مكرر)')));
+  blocks.push({ kind: 'table', title: t(B('TVA par exercice', 'الضريبة على القيمة المضافة حسب السنة')), head: vatHead, rows: vatRows });
   blocks.push({ kind: 'notice', tone: 'info', text: t(B('La TVA déductible et collectée transite par le bilan ; elle n’est pas une charge du CPC, sauf la part non récupérable intégrée au coût.', 'الضريبة على القيمة المضافة القابلة للخصم والمحصلة تمر عبر الميزانية ولا تُعد تكلفة في حساب العائدات والتكاليف، باستثناء الجزء غير القابل للاسترجاع المدمج في التكلفة.')) });
   const taxes = [...new Set(r.taxPayments.map((p) => p.tax))];
   if (taxes.length) {
