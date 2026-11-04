@@ -343,6 +343,11 @@ export type StudyMetrics = {
   cashEnd: Indicator; minCash: Indicator; profitabilityIndex: Indicator;
 };
 
+/** First complete fiscal year, or the first one when none is complete (a one-month opening stub is not representative). */
+export function firstFullYear(x: StudyMetrics): YearMetrics | undefined {
+  return x.years.find((y) => !y.partial) ?? x.years[0];
+}
+
 export function computeMetrics(model: StudyModel, r: StudyResult): StudyMetrics {
   const M = r.monthly;
   const N = r.calendar.months;

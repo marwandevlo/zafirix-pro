@@ -2,6 +2,31 @@
 
 Nothing in this plan has been executed. Each step marked **Approval** needs a separate, explicit owner approval. The deployment freeze in force since 30 October 2026 (backup rescue, pending invoice payment) takes precedence over this plan.
 
+## Status on 4 November 2026
+
+**Production decision: NO-GO** until the freeze is lifted, the overdue invoice is settled and hosted verification has been run or its risk explicitly accepted by the owner.
+
+**Hosted Supabase verification: UNTESTED (not passed).**
+- Every result below comes from a local Postgres + PostgREST + auth gateway stack. That stack is not equivalent to hosted Supabase: authentication is a local stand-in, not Supabase Auth, and nothing runs through the hosted API gateway or network.
+- An empty free organisation, `zafirix-studio-verify`, was created at no cost. Supabase refuses to create any project on the account while "marwandevlo's Org" has overdue invoices, and the owner has no other account. Nothing was created in, or read from, the production project or the backup recovery project.
+- The owner may delete the empty organisation, or keep it for step 1 below once the invoice is settled.
+
+**Release package.**
+- Branch `feature/business-studio`, based on production `4fe5012`. It is pushed only to the private backup (`backup-private`, `marwandevlo/zafirix-recovery-private`), never to the public repository.
+- The release commit is the head of that branch. Its hash is recorded in the final report.
+- Contents: application code, tests, Amiri font (OFL) and these three documents. There is no migration, no new environment variable and no new runtime dependency.
+- Local results on the release commit:
+  - typecheck and lint clean;
+  - 78 unit/UI tests and 9 integration tests passed;
+  - 9 Playwright tests passed: 6 journey tests and 3 visual-review captures;
+  - 84 PDF and 84 workbooks generated over six horizons, 0 failing;
+  - 11 browser-downloaded files reopened, 0 failing;
+  - 0 serious or critical axe violations on 26 audited pages;
+  - 0 px mobile overflow;
+  - gitleaks clean.
+
+  Details are in `E2E_EVIDENCE.md`.
+
 ## What changes
 
 - **Code only.** Changes are under `app/etude-projet`, `app/lib/business-studio`, `app/api/business-studio`, `tests/business-studio`, `public/fonts/amiri`, `docs/business-studio` and this preflight script. Three shared files are also changed, and `scripts/business-studio-preflight.mjs` allows only these:
@@ -38,7 +63,7 @@ Expected: every line `ok`, then `all checks passed`. The script runs these local
 - containment and baseline checks;
 - typecheck;
 - lint on the Studio paths;
-- 72 unit/UI tests;
+- 78 unit/UI tests;
 - 9 integration tests.
 
 It does not contact Supabase or production.
@@ -61,12 +86,29 @@ Also confirm on the day of release:
 | Step | Action | Gate |
 |---|---|---|
 | 0 | Freeze lifted by the owner; backup rescue unaffected | **Approval** |
-| 1 | Hosted verification in an isolated Supabase project (no customer data): auth, RLS, sharing roles, clear-data detach, exports | **Approval** (may need a new project; see below) |
+| 1 | Hosted verification in an isolated Supabase project (no customer data): auth, RLS, sharing roles, clear-data detach, exports. **Not done; blocked by the overdue invoice.** If the owner releases without it, that is an explicit risk acceptance | **Approval** (needs a project the account can create once invoices are settled) |
 | 2 | Push `feature/business-studio` to the deployment repository and open a pull request to `main` (the branch is only on the private backup today) | **Approval** (code becomes visible in that repository) |
 | 3 | Vercel preview build of the pull request; run the preview checks below with a test account | Preview checks pass |
 | 4 | Merge to `main`; Vercel production build | **Approval** (production release) |
 | 5 | `node scripts/business-studio-preflight.mjs --post-deploy https://<production-host>` (unauthenticated GETs only) | All `ok` |
 | 6 | Manual check with an owner account (below) | Owner sign-off |
+
+Commands for steps 2 to 5, run only after the matching approval. `<release-commit>` is the commit named in the final report, and `<deploy-remote>` is the remote Vercel builds from.
+
+```bash
+git fetch backup-private feature/business-studio
+git checkout -B feature/business-studio <release-commit>
+git fetch <deploy-remote> main
+git merge-base --is-ancestor 4fe5012 <deploy-remote>/main   # main must still contain production
+git rebase <deploy-remote>/main                               # only if main moved past 4fe5012; then rerun the preflight
+npm ci && node scripts/business-studio-preflight.mjs          # every line ok
+git push <deploy-remote> feature/business-studio              # step 2, approval
+# open the pull request to main; wait for the Vercel preview; run the checks below on the preview URL (step 3)
+# merge the pull request (step 4, approval); wait for the production build to finish
+node scripts/business-studio-preflight.mjs --post-deploy https://<production-host>   # step 5
+```
+
+Do not run `supabase db push` or any migration script: this release has no database change.
 
 Preview / production manual check, with a test or owner account and no customer data:
 1. `/etude-projet` lists the user's existing legacy studies as "legacy" and opens the Studio home.
@@ -98,12 +140,14 @@ Preview / production manual check, with a test or owner account and no customer 
 - Project NPV uses unlevered FCFF without the interest tax shield, at the statutory rate (average rate under the IR regime).
 - Sharing is enforced by the API with the service-role client. Database RLS stays owner-only, so a shared study is only reachable through the Studio API.
 - The accessibility audit is automated (axe-core); no assisted screen-reader session took place.
-- Verification ran on a local Postgres + PostgREST stack, which is not equivalent to hosted Supabase.
+- **Hosted Supabase verification is untested (not passed).** Verification ran on a local Postgres + PostgREST stack, which is not equivalent to hosted Supabase. Login, cookies, RLS and the service-role client against the hosted API have not been exercised by this branch.
+- Tax rules after 2026 are assumed unchanged; each later finance law must be checked and the rule set versioned.
+- On the local stack the app-wide welcome-email call (`/api/email/welcome`, outside the Studio) answers 400 because the stack has no Auth admin API. It is expected to work on hosted Supabase, which is part of what step 1 would confirm.
 
 ## Approvals required (each separate)
 
 1. Lift the deployment freeze for this release.
-2. Hosted verification: use an existing isolated Supabase project if one exists, or approve creating one (it may be billed).
+2. Hosted verification: after the invoice is settled, create an isolated free project in `zafirix-studio-verify` (no customer data) and run step 1, or accept in writing that the release goes out without it.
 3. Push the branch to the deployment repository and open the pull request.
 4. Merge and release to production.
 

@@ -51,10 +51,10 @@ const sumKeys = (r: StudyResult, keys: LineKey[], g: 'year' | 'month' = 'year') 
   return parts[0].map((_, i) => parts.reduce((a, p) => a + p[i], 0));
 };
 
-function baseOptions(lang: Lang, opts: { stacked?: boolean; percent?: boolean; horizontal?: boolean; dualAxis?: boolean } = {}): ChartConfiguration['options'] {
+function baseOptions(lang: Lang, opts: { stacked?: boolean; percent?: boolean; horizontal?: boolean; dualAxis?: boolean; noLegend?: boolean } = {}): ChartConfiguration['options'] {
   const fmt = (v: number | string) => (opts.percent ? `${formatNumber(Number(v), lang, 0)} %` : formatNumber(Number(v), lang));
   const valueAxis = { stacked: opts.stacked, ticks: { callback: fmt }, grid: { color: '#EEF2F7' } };
-  const catAxis = { stacked: opts.stacked, grid: { display: false }, ticks: { maxRotation: 0, autoSkip: true, maxTicksLimit: 14 } };
+  const catAxis = { stacked: opts.stacked, grid: { display: false }, ticks: opts.horizontal ? { autoSkip: false } : { maxRotation: 0, autoSkip: true, autoSkipPadding: 16, maxTicksLimit: 12 } };
   return {
     responsive: true,
     maintainAspectRatio: false,
@@ -62,7 +62,7 @@ function baseOptions(lang: Lang, opts: { stacked?: boolean; percent?: boolean; h
     indexAxis: opts.horizontal ? 'y' : 'x',
     interaction: { mode: 'index', intersect: false },
     plugins: {
-      legend: { position: 'bottom', labels: { boxWidth: 10, font: { size: 11 } } },
+      legend: opts.noLegend ? { display: false } : { position: 'bottom', labels: { boxWidth: 10, font: { size: 11 } } },
       tooltip: { callbacks: { label: (c) => `${c.dataset.label ?? ''}: ${fmt(Array.isArray(c.raw) ? (c.raw[1] as number) - (c.raw[0] as number) : (c.parsed[opts.horizontal ? 'x' : 'y'] as number))}` } },
     },
     scales: opts.horizontal
@@ -170,19 +170,19 @@ export function dashboardCharts({ r, x, model, lang }: Ctx): ChartSpec[] {
   const wy = x.years.find((y) => !y.partial) ?? x.years[0];
   if (wy) {
     const S = (k: LineKey) => r.monthly[k].slice(wy.firstMonth, wy.lastMonth + 1).reduce((a, v) => a + v, 0) / 100;
-    const steps: Array<[Bi, number]> = [
+    const steps = ([
       [B('CA', 'رقم المعاملات'), S('revenue')], [B('Subventions d’exploitation', 'منح الاستغلال'), S('operatingGrants')], [B('Achats', 'المشتريات'), -S('cogs')],
       [B('Charges externes', 'التكاليف الخارجية'), -S('externalCharges')], [B('Impôts et taxes', 'الضرائب والرسوم'), -S('localTaxes')],
       [B('Personnel', 'المستخدمون'), -(S('salaries') + S('employerCharges'))], [B('Dotations', 'المخصصات'), -S('depreciation')],
       [B('Résultat financier', 'النتيجة المالية'), S('financialResult')], [B('Non courant', 'غير جاري'), S('nonCurrentResult')], [B('Impôt', 'الضريبة'), -S('incomeTax')],
-    ];
+    ] as Array<[Bi, number]>).filter(([, v], i) => i === 0 || v !== 0);
     let run = 0;
     const bars = steps.map(([, v]) => { const from = run; run += v; return [from, run] as [number, number]; });
     bars.push([0, run]);
     push(B(`Du CA au résultat net — ${wy.label}`, `من رقم المعاملات إلى النتيجة الصافية — ${wy.label}`), {
       type: 'bar',
       data: { labels: [...steps.map(([b]) => L(b, lang)), L(B('Résultat net', 'النتيجة الصافية'), lang)], datasets: [{ label: wy.label, data: bars as unknown as number[], backgroundColor: bars.map((b, i) => (i === bars.length - 1 ? PALETTE[0] : b[1] >= b[0] ? PALETTE[2] : PALETTE[8])) }] },
-      options: { ...baseOptions(lang), plugins: { legend: { display: false } } },
+      options: baseOptions(lang, { horizontal: true, noLegend: true }),
     }, allZero(steps.map(([, v]) => v)));
   }
 
@@ -195,7 +195,7 @@ export function dashboardCharts({ r, x, model, lang }: Ctx): ChartSpec[] {
       labels: [L(B('Apports', 'المساهمات'), lang), L(B('Emprunts', 'القروض'), lang), L(B('Subventions', 'المنح'), lang), L(B('CAF', 'التمويل الذاتي'), lang), L(B('Investissements', 'الاستثمارات'), lang), L(B('Dividendes', 'الأرباح الموزعة'), lang), L(B('Remboursements', 'التسديدات'), lang)],
       datasets: [{ label: L(B('Montant', 'المبلغ'), lang), data: [...sources, ...uses], backgroundColor: [PALETTE[2], PALETTE[2], PALETTE[2], PALETTE[2], PALETTE[8], PALETTE[8], PALETTE[8]] }],
     },
-    options: { ...baseOptions(lang, { horizontal: true }), plugins: { legend: { display: false } } },
+    options: baseOptions(lang, { horizontal: true, noLegend: true }),
   }, allZero(sources, uses));
 
   const debtService = x.years.map((y) => y.debtService / 100);

@@ -10,7 +10,7 @@ import type { StudyResult } from './engine';
 import {
   formatCentsMad, formatNumber, formatPercent, monthLabel, PROJECT_TYPE_LABEL, RULE_STATUS_BI, scenarioText, SECTOR_LABEL, STR, tr, type Bi, type Lang,
 } from './i18n';
-import type { Indicator, StudyMetrics } from './metrics';
+import { firstFullYear, type Indicator, type StudyMetrics } from './metrics';
 import type { StudyModel } from './model';
 import { sectorKpis } from './sectors';
 import { statementTable, type StatementId } from './statements';
@@ -19,7 +19,8 @@ import { LAST_INTEGRATED_FINANCE_LAW, RULES, TAX_RULES_VERSION } from './tax-rul
 export type ReportType = 'full' | 'bank' | 'investor' | 'financials' | 'tax' | 'scenarios' | 'actuals';
 export const REPORT_TYPES: readonly ReportType[] = ['full', 'bank', 'investor', 'financials', 'tax', 'scenarios', 'actuals'];
 
-export type CellUnit = 'mad' | 'pct' | 'ratio' | 'count' | 'months' | 'years';
+/** `mad_unit`: a unit price or cost in centimes, shown with its centimes (statements stay in whole MAD). */
+export type CellUnit = 'mad' | 'mad_unit' | 'pct' | 'ratio' | 'count' | 'months' | 'years';
 export type RCell = { v: number | null; u: CellUnit; reason?: string } | { s: string };
 export type RowStyle = 'section' | 'line' | 'detail' | 'subtotal' | 'total';
 /**
@@ -65,6 +66,7 @@ export function formatCell(c: RCell, lang: Lang): string {
   if (c.v == null || !Number.isFinite(c.v)) return lang === 'fr' && c.reason ? `${STR.notAvailable.fr} (${c.reason})` : STR.notAvailable[lang];
   switch (c.u) {
     case 'mad': return formatCentsMad(c.v, lang);
+    case 'mad_unit': return formatCentsMad(c.v, lang, c.v % 100 === 0 ? 0 : 2);
     case 'pct': return formatPercent(c.v, lang);
     case 'ratio': return formatNumber(c.v, lang, 2);
     case 'count': return formatNumber(c.v, lang, Number.isInteger(c.v) ? 0 : 1);
@@ -171,6 +173,13 @@ function projectSection(ctx: Ctx, short = false): Section {
 function assumptionsSection(ctx: Ctx): Section {
   const { model, t, lang } = ctx;
   const ml = (m: number) => monthLabel(ctx.r.calendar.labels[m] ?? `+${m}`, lang);
+  // Template lines left without an amount have no effect on the projection and are not printed.
+  const products = model.products.filter((p) => p.unitPrice !== 0 && (p.volumeMonth1 !== 0 || Object.keys(p.overrides).length > 0));
+  const expenses = model.expenses.filter((e) => (e.behavior === 'fixed' ? e.amountMonthly : e.pctOfRevenue) !== 0);
+  const staff = model.staff.filter((s) => s.headcount > 0 && s.grossMonthly > 0);
+  const investments = model.investments.filter((i) => i.amountHT > 0);
+  const omitted = model.products.length - products.length + model.expenses.length - expenses.length
+    + model.staff.length - staff.length + model.investments.length - investments.length;
   const blocks: Block[] = [];
   blocks.push({
     kind: 'kv', rows: [
@@ -184,20 +193,26 @@ function assumptionsSection(ctx: Ctx): Section {
       { label: t(B('Créances irrécouvrables', 'الديون غير القابلة للاسترداد')), cell: { v: model.workingCapital.badDebtPct, u: 'pct' } },
     ],
   });
-  if (model.products.length) blocks.push({
+  if (omitted > 0) {
+    blocks.push({ kind: 'notice', tone: 'info', text: t(B(
+      `${omitted} ligne(s) d’hypothèse sans montant (sans effet sur les calculs) ne sont pas reprises ci-dessous.`,
+      `${omitted} سطر(أسطر) من الفرضيات بدون مبلغ (دون أثر على الحسابات) غير مدرجة أدناه.`,
+    )) });
+  }
+  if (products.length) blocks.push({
     kind: 'table', title: t(B('Produits et services', 'المنتجات والخدمات')),
     head: [t(STR.name), t(B('Type', 'النوع')), t(B('Prix HT', 'الثمن دون رسوم')), t(B('Volume mois 1', 'الحجم الشهر 1')), t(B('Croissance an 2', 'نمو السنة 2')), t(B('Coût unitaire', 'التكلفة الوحدوية')), t(B('TVA', 'الضريبة على القيمة المضافة')), t(B('Lancement', 'الإطلاق'))],
-    rows: model.products.map((p) => ({
+    rows: products.map((p) => ({
       label: p.name, cells: [
-        txt(p.kind === 'subscription' ? t(B('Abonnement', 'اشتراك')) : t(B('Vente', 'بيع'))), mad(Math.round(p.unitPrice * 100)), { v: p.volumeMonth1, u: 'count' },
-        { v: p.volumeGrowthPct[0] ?? 0, u: 'pct' }, mad(Math.round(p.unitCost * 100)), { v: p.vatRatePct, u: 'pct' }, txt(ml(p.launchMonth)),
+        txt(p.kind === 'subscription' ? t(B('Abonnement', 'اشتراك')) : t(B('Vente', 'بيع'))), { v: Math.round(p.unitPrice * 100), u: 'mad_unit' }, { v: p.volumeMonth1, u: 'count' },
+        { v: p.volumeGrowthPct[0] ?? 0, u: 'pct' }, { v: Math.round(p.unitCost * 100), u: 'mad_unit' }, { v: p.vatRatePct, u: 'pct' }, txt(ml(p.launchMonth)),
       ],
     })),
   });
-  if (model.expenses.length) blocks.push({
+  if (expenses.length) blocks.push({
     kind: 'table', title: t(B('Charges d’exploitation', 'تكاليف الاستغلال')),
     head: [t(STR.name), t(B('Nature', 'الطبيعة')), t(B('Montant mensuel HT / % CA', 'المبلغ الشهري / % من رقم المعاملات')), t(B('Croissance', 'النمو')), t(B('TVA', 'الضريبة على القيمة المضافة')), t(B('Début', 'البداية'))],
-    rows: model.expenses.map((e) => ({
+    rows: expenses.map((e) => ({
       label: e.name, cells: [
         txt(e.behavior === 'fixed' ? t(B('Fixe', 'ثابتة')) : t(B('Variable', 'متغيرة'))),
         e.behavior === 'fixed' ? mad(Math.round(e.amountMonthly * 100)) : { v: e.pctOfRevenue, u: 'pct' },
@@ -205,16 +220,18 @@ function assumptionsSection(ctx: Ctx): Section {
       ],
     })),
   });
-  if (model.staff.length) blocks.push({
+  if (staff.length) blocks.push({
     kind: 'table', title: t(B('Personnel', 'المستخدمون')),
     head: [t(B('Poste', 'المنصب')), t(B('Effectif', 'العدد')), t(B('Salaire brut mensuel', 'الأجر الإجمالي الشهري')), t(B('Hausse annuelle', 'الزيادة السنوية')), t(B('Début', 'البداية'))],
-    rows: model.staff.map((s) => ({ label: s.role, cells: [{ v: s.headcount, u: 'count' }, mad(Math.round(s.grossMonthly * 100)), { v: s.annualRaisePct, u: 'pct' }, txt(ml(s.startMonth))] })),
+    rows: staff.map((s) => ({ label: s.role, cells: [{ v: s.headcount, u: 'count' }, mad(Math.round(s.grossMonthly * 100)), { v: s.annualRaisePct, u: 'pct' }, txt(ml(s.startMonth))] })),
   });
-  if (model.investments.length) blocks.push({
+  if (investments.length) blocks.push({
     kind: 'table', title: t(B('Investissements', 'الاستثمارات')),
     head: [t(STR.name), t(B('Montant HT', 'المبلغ دون رسوم')), t(B('TVA', 'الضريبة على القيمة المضافة')), t(B('Durée (ans)', 'المدة (سنوات)')), t(B('Méthode', 'الطريقة')), t(B('Date', 'التاريخ'))],
-    rows: model.investments.map((i) => ({
-      label: i.name, cells: [mad(Math.round(i.amountHT * 100)), { v: i.vatRatePct, u: 'pct' }, { v: i.usefulLifeYears, u: 'count' }, txt(i.method === 'linear' ? t(B('Linéaire', 'خطية')) : t(B('Dégressif', 'متناقصة'))), txt(ml(i.month))],
+    rows: investments.map((i) => ({
+      label: i.name, cells: i.kind === 'tangible' || i.kind === 'intangible'
+        ? [mad(Math.round(i.amountHT * 100)), { v: i.vatRatePct, u: 'pct' }, { v: i.usefulLifeYears, u: 'count' }, txt(i.method === 'linear' ? t(B('Linéaire', 'خطية')) : t(B('Dégressif', 'متناقصة'))), txt(ml(i.month))]
+        : [mad(Math.round(i.amountHT * 100)), { v: i.vatRatePct, u: 'pct' }, txt('—'), txt(t(B('Non amortissable', 'غير قابل للاهتلاك'))), txt(ml(i.month))],
     })),
   });
   const f = model.financing;
@@ -230,7 +247,7 @@ function assumptionsSection(ctx: Ctx): Section {
 
 function kpiSection(ctx: Ctx): Section {
   const { x, t, r } = ctx;
-  const first = x.years[0];
+  const first = firstFullYear(x);
   const last = x.years[x.years.length - 1];
   const rows: Array<{ label: string; cell: RCell; note?: string }> = [
     { label: t(STR.kpi_revenue), cell: mad(x.totals.revenue) },
@@ -243,10 +260,11 @@ function kpiSection(ctx: Ctx): Section {
     { label: t(STR.kpi_npv), cell: indCell(x.npv, ctx), note: x.npv.formula },
     { label: t(STR.kpi_irr), cell: indCell(x.irrProject, ctx) },
     { label: t(STR.kpi_irrEquity), cell: indCell(x.irrEquity, ctx) },
+    { label: t(STR.kpi_irrEquityBook), cell: indCell(x.irrEquityWithBookValue, ctx) },
     { label: t(STR.kpi_payback), cell: indCell(x.payback, ctx) },
     { label: t(STR.kpi_roi), cell: indCell(x.roi, ctx) },
     { label: t(STR.kpi_dscr), cell: indCell(x.minDscr, ctx) },
-    { label: t(STR.kpi_breakEven), cell: first ? indCell(first.breakEvenRevenue, ctx) : txt('—') },
+    { label: t(STR.kpi_breakEven), cell: first ? indCell(first.breakEvenRevenue, ctx) : txt('—'), note: first?.label },
     { label: t(STR.kpi_grossMargin), cell: last ? indCell(last.grossMarginPct, ctx) : txt('—') },
     { label: t(STR.kpi_capex), cell: mad(x.totals.capex) },
     { label: t(STR.kpi_headcount), cell: { v: last?.headcountEnd ?? 0, u: 'count' } },
@@ -417,15 +435,25 @@ function summarySection(ctx: Ctx): Section {
     )));
   }
   if (first && last) {
-    const n = years.length - 1;
-    const cagr = n > 0 && first.revenue > 0 && last.revenue > 0 ? (Math.pow(last.revenue / first.revenue, 1 / n) - 1) * 100 : null;
+    // Growth between partial years (a one-month opening stub, a truncated last year) would be meaningless.
+    const full = years.filter((y) => !y.partial);
+    const a = full[0] ?? first;
+    const b = full[full.length - 1] ?? last;
+    const n = b.index - a.index;
+    const cagr = full.length >= 2 && n > 0 && a.revenue > 0 && b.revenue > 0 ? (Math.pow(b.revenue / a.revenue, 1 / n) - 1) * 100 : null;
+    const partialFr = (y: typeof a) => (y.partial ? ' (exercice partiel)' : '');
+    const partialAr = (y: typeof a) => (y.partial ? ' (سنة مالية جزئية)' : '');
     items.push(t(B(
-      `Chiffre d’affaires : ${m(first.revenue)} en ${first.label}, ${m(last.revenue)} en ${last.label}${cagr == null ? '' : ` (croissance annuelle moyenne ${p(cagr)}, exercices partiels compris)`}.`,
-      `رقم المعاملات: ${m(first.revenue)} سنة ${first.label}، و${m(last.revenue)} سنة ${last.label}${cagr == null ? '' : ` (متوسط النمو السنوي ${p(cagr)}، بما في ذلك السنوات الجزئية)`}.`,
+      a === b
+        ? `Chiffre d’affaires : ${m(a.revenue)} en ${a.label}${partialFr(a)}.`
+        : `Chiffre d’affaires : ${m(a.revenue)} en ${a.label}${partialFr(a)}, ${m(b.revenue)} en ${b.label}${partialFr(b)}${cagr == null ? '' : ` (croissance annuelle moyenne ${p(cagr)} entre exercices complets)`}.`,
+      a === b
+        ? `رقم المعاملات: ${m(a.revenue)} سنة ${a.label}${partialAr(a)}.`
+        : `رقم المعاملات: ${m(a.revenue)} سنة ${a.label}${partialAr(a)}، و${m(b.revenue)} سنة ${b.label}${partialAr(b)}${cagr == null ? '' : ` (متوسط النمو السنوي ${p(cagr)} بين السنوات المالية الكاملة)`}.`,
     )));
     const firstPositive = years.find((y) => y.ebitda > 0);
     items.push(firstPositive
-      ? t(B(`EBE positif à partir de ${firstPositive.label} ; taux d’EBE ${p(last.ebitdaMarginPct.value)} en ${last.label}.`, `الفائض الإجمالي إيجابي ابتداءً من ${firstPositive.label}؛ نسبته ${p(last.ebitdaMarginPct.value)} سنة ${last.label}.`))
+      ? t(B(`EBE positif à partir de ${firstPositive.label} ; taux d’EBE ${p(b.ebitdaMarginPct.value)} en ${b.label}.`, `الفائض الإجمالي إيجابي ابتداءً من ${firstPositive.label}؛ نسبته ${p(b.ebitdaMarginPct.value)} سنة ${b.label}.`))
       : t(B('EBE négatif sur tout l’horizon.', 'الفائض الإجمالي سلبي طوال الأفق.')));
     items.push(t(B(`Résultat net cumulé : ${m(x.totals.netIncome)} ; CAF cumulée : ${m(x.totals.caf)}.`, `النتيجة الصافية المتراكمة: ${m(x.totals.netIncome)}؛ القدرة على التمويل الذاتي المتراكمة: ${m(x.totals.caf)}.`)));
   }

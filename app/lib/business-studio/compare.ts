@@ -43,6 +43,7 @@ export function compareStudies(a: ComparedStudy, b: ComparedStudy): Comparison {
   fromInd('npv', B('VAN (taux de chaque étude)', 'القيمة الحالية الصافية (معدل كل دراسة)'), (x) => x.npv, 'higher');
   fromInd('irr', B('TRI projet', 'معدل العائد الداخلي للمشروع'), (x) => x.irrProject, 'higher');
   fromInd('irrEquity', B('TRI actionnaires', 'معدل العائد الداخلي للمساهمين'), (x) => x.irrEquity, 'higher');
+  fromInd('irrEquityBook', B('TRI actionnaires (sortie comptable)', 'معدل العائد للمساهمين (خروج محاسبي)'), (x) => x.irrEquityWithBookValue, 'higher');
   fromInd('payback', B('Délai de récupération', 'مدة الاسترداد'), (x) => x.payback, 'lower');
   fromInd('roi', B('ROI', 'العائد على الاستثمار'), (x) => x.roi, 'higher');
   fromInd('minDscr', B('DSCR minimal', 'أدنى نسبة تغطية خدمة الدين'), (x) => x.minDscr, 'higher');

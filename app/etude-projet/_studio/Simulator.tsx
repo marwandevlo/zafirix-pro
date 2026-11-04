@@ -54,6 +54,7 @@ export function Simulator({ model, r, x, onChange, disabled }: {
     { label: t('kpi_npv'), base: x.npv, sim: sim.metrics.npv },
     { label: t('kpi_irr'), base: x.irrProject, sim: sim.metrics.irrProject },
     { label: t('kpi_irrEquity'), base: x.irrEquity, sim: sim.metrics.irrEquity },
+    { label: t('kpi_irrEquityBook'), base: x.irrEquityWithBookValue, sim: sim.metrics.irrEquityWithBookValue },
     { label: t('kpi_payback'), base: x.payback, sim: sim.metrics.payback },
     { label: t('kpi_dscr'), base: x.minDscr, sim: sim.metrics.minDscr },
   ] : [];

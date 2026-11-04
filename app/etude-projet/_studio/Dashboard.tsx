@@ -3,7 +3,7 @@
 import { useMemo } from 'react';
 import type { StudyResult } from '@/app/lib/business-studio/engine';
 import { monthLabel } from '@/app/lib/business-studio/i18n';
-import type { StudyMetrics } from '@/app/lib/business-studio/metrics';
+import { firstFullYear, type StudyMetrics } from '@/app/lib/business-studio/metrics';
 import type { StudyModel } from '@/app/lib/business-studio/model';
 import { sectorKpis } from '@/app/lib/business-studio/sectors';
 import { useIndicator } from './analysis-ui';
@@ -15,7 +15,7 @@ export function Dashboard({ model, r, x }: { model: StudyModel; r: StudyResult; 
   const f = useFormat();
   const charts = useMemo(() => dashboardCharts({ r, x, model, lang }), [r, x, model, lang]);
   const kpis = useMemo(() => sectorKpis(model, r, x), [model, r, x]);
-  const first = x.years[0];
+  const first = firstFullYear(x);
   const last = x.years[x.years.length - 1];
 
   const { show, tip } = useIndicator(r);
@@ -32,10 +32,11 @@ export function Dashboard({ model, r, x }: { model: StudyModel; r: StudyResult; 
     { label: t('kpi_npv'), value: show(x.npv), tone: tone(x.npv.value), hint: `${model.general.discountRatePct} %`, title: tip(x.npv) },
     { label: t('kpi_irr'), value: show(x.irrProject), title: tip(x.irrProject) },
     { label: t('kpi_irrEquity'), value: show(x.irrEquity), title: tip(x.irrEquity) },
+    { label: t('kpi_irrEquityBook'), value: show(x.irrEquityWithBookValue), title: tip(x.irrEquityWithBookValue) },
     { label: t('kpi_payback'), value: show(x.payback), title: tip(x.payback) },
     { label: t('kpi_roi'), value: show(x.roi), title: tip(x.roi) },
     { label: t('kpi_dscr'), value: show(x.minDscr), tone: x.minDscr.value != null && x.minDscr.value < 1 ? 'bad' : x.minDscr.value != null && x.minDscr.value < 1.2 ? 'warn' : 'default', title: tip(x.minDscr) },
-    { label: t('kpi_breakEven'), value: first ? show(first.breakEvenRevenue) : t('notAvailable'), hint: first && first.breakEvenMonth.value != null ? show(first.breakEvenMonth) : undefined, title: first ? tip(first.breakEvenRevenue) : undefined },
+    { label: t('kpi_breakEven'), value: first ? show(first.breakEvenRevenue) : t('notAvailable'), hint: first ? [first.label, first.breakEvenMonth.value != null ? show(first.breakEvenMonth) : ''].filter(Boolean).join(' · ') : undefined, title: first ? tip(first.breakEvenRevenue) : undefined },
     { label: t('kpi_grossMargin'), value: last ? show(last.grossMarginPct) : t('notAvailable'), title: last ? tip(last.grossMarginPct) : undefined },
     { label: t('kpi_capex'), value: `${f.mad(x.totals.capex)} ${t('mad')}` },
     { label: t('kpi_headcount'), value: f.num(last?.headcountEnd ?? 0, 1) },

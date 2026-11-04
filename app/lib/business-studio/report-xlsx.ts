@@ -9,6 +9,7 @@ import { formatCell, type Block, type RCell, type Report } from './report-model'
 
 const NUM_FMT = {
   mad: '#,##0.00;[Red]-#,##0.00',
+  mad_unit: '#,##0.00;[Red]-#,##0.00',
   pct: '0.0%;[Red]-0.0%',
   ratio: '0.00',
   count: '#,##0.##',
@@ -32,7 +33,8 @@ function writeCell(cell: ExcelJS.Cell, c: RCell, lang: Report['lang']) {
   if ('s' in c) { cell.value = c.s; return; }
   if (c.v == null || !Number.isFinite(c.v)) { cell.value = formatCell(c, lang); cell.alignment = { horizontal: 'center' }; return; }
   switch (c.u) {
-    case 'mad': cell.value = c.v / 100; break;
+    case 'mad':
+    case 'mad_unit': cell.value = c.v / 100; break;
     case 'pct': cell.value = c.v / 100; break;
     default: cell.value = c.v;
   }

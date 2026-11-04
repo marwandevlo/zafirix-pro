@@ -64,7 +64,7 @@ export function Tax({ r }: { r: StudyResult }) {
               {r.isYears.map((x) => (
                 <tr key={x.fiscalYearIndex}>
                   <td className={td}>{x.label}{x.partial ? ` (${t('partial')})` : ''}</td>
-                  <td className={td}>{x.regime}</td>
+                  <td className={td}>{t(x.regime === 'is' ? bi('IS', 'الضريبة على الشركات') : x.regime === 'ir_professional' ? bi('IR professionnel', 'الضريبة على الدخل المهني') : bi('Auto-entrepreneur', 'المقاول الذاتي'))}</td>
                   <td className={tdn}>{f.mad(x.accountingResult)}</td>
                   <td className={tdn}>{f.mad(x.nonDeductible)}</td>
                   <td className={tdn}>{f.mad(x.lossesUsed)}</td>

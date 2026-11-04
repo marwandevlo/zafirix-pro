@@ -249,9 +249,14 @@ function Investments({ model, set, disabled, labels }: P) {
             <Toggle label={t(bi('Éligible au remboursement (art. 103 bis : hors mobilier, matériel de bureau et véhicules de tourisme)', 'مؤهل للاسترداد (المادة 103 مكرر: باستثناء أثاث ومعدات المكتب وسيارات نقل الأشخاص)'))} checked={i.vatRefundEligible} disabled={disabled} onChange={(v) => u({ vatRefundEligible: v })} />
           )}
           <MonthField label={t(bi('Date d’acquisition', 'تاريخ الاقتناء'))} value={i.month} labels={labels} disabled={disabled} onChange={(v) => v != null && u({ month: v })} />
+          {i.kind !== 'tangible' && i.kind !== 'intangible' && (
+            <p className="text-xs text-gray-500 self-end">{t(bi('Non amortissable (terrain, fonds commercial, dépôt) : reste à son coût au bilan.', 'غير قابل للاهتلاك (أرض، أصل تجاري، ضمان): يبقى بتكلفته في الميزانية.'))}</p>
+          )}
+          {(i.kind === 'tangible' || i.kind === 'intangible') && <>
           <NumField label={t(bi('Durée d’amortissement (ans)', 'مدة الاهتلاك (سنوات)'))} integer value={i.usefulLifeYears} min={0} max={50} disabled={disabled} onChange={(v) => v != null && u({ usefulLifeYears: v })} />
           <SelectField label={t(bi('Méthode', 'الطريقة'))} value={i.method} disabled={disabled} options={[{ value: 'linear', label: t(bi('Linéaire', 'خطية')) }, { value: 'declining', label: t(bi('Dégressive', 'متناقصة')) }]} onChange={(v) => u({ method: v })} />
-          {i.method === 'declining' && (
+          </>}
+          {(i.kind === 'tangible' || i.kind === 'intangible') && i.method === 'declining' && (
             <NumField label={t(bi('Coefficient dégressif', 'المعامل المتناقص'))} value={i.decliningCoefficient} min={1} max={5} disabled={disabled} onChange={(v) => v != null && u({ decliningCoefficient: v })}
               help={legal == null ? t(bi('Pas de coefficient légal pour cette durée (CGI art. 10).', 'لا يوجد معامل قانوني لهذه المدة.')) : `${t(bi('Coefficient CGI art. 10', 'معامل المدونة العامة للضرائب'))} : ${legal}`} />
           )}

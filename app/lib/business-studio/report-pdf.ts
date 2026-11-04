@@ -185,7 +185,7 @@ export function renderReportPdf(report: Report, fonts?: PdfFonts): ArrayBuffer {
         const withNotes = b.rows.some((r) => r.note);
         const value = (c: RCell) => {
           const s = formatCell(c, report.lang);
-          return 'u' in c && c.u === 'mad' && c.v != null ? `${s} ${STR.mad[report.lang]}` : s;
+          return 'u' in c && (c.u === 'mad' || c.u === 'mad_unit') && c.v != null ? `${s} ${STR.mad[report.lang]}` : s;
         };
         const body = b.rows.map((r) => (withNotes ? [T(r.label), T(value(r.cell)), T(r.note ?? '')] : [T(r.label), T(value(r.cell))]));
         const textRows = b.rows.map((r) => 's' in r.cell);
@@ -194,7 +194,7 @@ export function renderReportPdf(report: Report, fonts?: PdfFonts): ArrayBuffer {
       }
       case 'table': {
         if (b.title) { ensure(10); writeLines(b.title, 10.5, 'bold'); y += 1; }
-        const hasMad = b.rows.some((r) => r.cells.some((c) => 'u' in c && c.u === 'mad'));
+        const hasMad = b.rows.some((r) => r.cells.some((c) => 'u' in c && (c.u === 'mad' || c.u === 'mad_unit')));
         if (hasMad && !/MAD|درهم/.test(b.head.join(' '))) {
           setFont('normal', 7);
           doc.setTextColor(100, 116, 139);
@@ -239,15 +239,32 @@ export function renderReportPdf(report: Report, fonts?: PdfFonts): ArrayBuffer {
     const columnStyles: Record<number, { halign?: 'left' | 'right' | 'center'; cellWidth?: number; fontStyle?: 'bold' | 'normal' }> = {};
     const n = head.length || body[0]?.length || 0;
     for (let i = 0; i < n; i += 1) columnStyles[i] = { halign: i === labelIndex ? (rtl ? 'right' : 'left') : 'right' };
+    let fontSize = 7.5;
     if (widths) widths.forEach((w, i) => { const idx = rtl ? n - 1 - i : i; columnStyles[idx] = { ...columnStyles[idx], cellWidth: CONTENT_W * w }; });
-    else columnStyles[labelIndex] = { ...columnStyles[labelIndex], cellWidth: Math.min(70, CONTENT_W * 0.38) };
+    else {
+      // Period columns share what the label leaves; numbers must stay on one line, so the label narrows first, then the font.
+      let labelW = Math.min(70, CONTENT_W * 0.38);
+      if (n > 1) {
+        const values = body.flatMap((row) => row.slice(1));
+        const need = (fs: number) => {
+          doc.setFont(font, 'bold');
+          doc.setFontSize(fs);
+          return Math.max(0, ...values.map((s) => doc.getTextWidth(s))) * 1.04 + 2 * 1.2 + 0.4;
+        };
+        const fits = (fs: number, lw: number) => need(fs) * (n - 1) <= CONTENT_W - lw;
+        const minLabel = CONTENT_W * 0.26;
+        while (!fits(fontSize, labelW) && labelW > minLabel) labelW = Math.max(minLabel, labelW - 2);
+        while (!fits(fontSize, labelW) && fontSize > 6) fontSize -= 0.25;
+      }
+      columnStyles[labelIndex] = { ...columnStyles[labelIndex], cellWidth: labelW };
+    }
     startAligned?.forEach((s, i) => { if (s) { const idx = rtl ? n - 1 - i : i; columnStyles[idx] = { ...columnStyles[idx], halign: rtl ? 'right' : 'left' }; } });
     autoTable(doc, {
       startY: y,
       head: head.length ? [order(head)] : undefined,
       body: body.map(order),
       margin: { left: MARGIN, right: MARGIN, top: MARGIN + 4, bottom: 18 + reserveBelow },
-      styles: { font, fontSize: 7.5, cellPadding: 1.2, overflow: 'linebreak', textColor: [30, 41, 59] },
+      styles: { font, fontSize, cellPadding: 1.2, overflow: 'linebreak', textColor: [30, 41, 59] },
       headStyles: { font, fontStyle: 'bold', fillColor: NAVY, textColor: 255, halign: 'center' },
       columnStyles,
       theme: 'grid',
