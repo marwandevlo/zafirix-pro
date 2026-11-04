@@ -64,6 +64,9 @@ export const STR = {
   total: { fr: 'Total', ar: 'المجموع' },
   partial: { fr: 'exercice partiel', ar: 'سنة مالية جزئية' },
   mad: { fr: 'MAD', ar: 'درهم' },
+  amountsInMad: { fr: 'Montants en MAD', ar: 'المبالغ بالدرهم' },
+  inMad: { fr: '(en MAD)', ar: '(بالدرهم)' },
+  inThousandsMad: { fr: '(en milliers de MAD)', ar: '(بآلاف الدراهم)' },
   notAvailable: { fr: 'n.d.', ar: 'غ.م.' },
 
   st_draft: { fr: 'Brouillon', ar: 'مسودة' },
@@ -197,7 +200,24 @@ export function formatCentsMad(cents: number, lang: Lang, digits = 0): string {
 
 export function formatPercent(v: number | null, lang: Lang, digits = 1): string {
   if (v == null || !Number.isFinite(v)) return STR.notAvailable[lang];
-  return `${formatNumber(v, lang, digits)} %`;
+  // No space before % in Arabic: a separated sign is moved away from its number by the bidi algorithm.
+  return lang === 'ar' ? `${formatNumber(v, lang, digits)}%` : `${formatNumber(v, lang, digits)} %`;
+}
+
+const DEFAULT_SCENARIO_AR: Record<string, string> = {
+  'Scénario de base': 'السيناريو الأساسي',
+  'Scénario optimiste': 'السيناريو المتفائل',
+  'Scénario pessimiste': 'السيناريو المتشائم',
+  'Hypothèses saisies, sans ajustement.': 'الفرضيات المُدخلة دون تعديل.',
+  'Ajustements saisis par l’utilisateur ; valeurs initiales indicatives : volumes +10 %, prix +3 %, charges −3 %.':
+    'تعديلات يدخلها المستخدم؛ القيم الأولية الإرشادية: الأحجام +10%، الأسعار +3%، التكاليف −3%.',
+  'Ajustements saisis par l’utilisateur ; valeurs initiales indicatives : volumes −15 %, prix −5 %, charges +5 %, clients +15 jours.':
+    'تعديلات يدخلها المستخدم؛ القيم الأولية الإرشادية: الأحجام −15%، الأسعار −5%، التكاليف +5%، أجل الزبناء +15 يوماً.',
+};
+
+/** Default scenario names and descriptions are stored in French; unchanged ones are shown in Arabic. User text is kept as typed. */
+export function scenarioText(text: string, lang: Lang): string {
+  return lang === 'ar' ? DEFAULT_SCENARIO_AR[text] ?? text : text;
 }
 
 /** YYYY-MM label, written YYYY/MM in Arabic so bidi keeps the order. */

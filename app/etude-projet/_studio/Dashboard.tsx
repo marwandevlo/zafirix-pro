@@ -53,7 +53,7 @@ export function Dashboard({ model, r, x }: { model: StudyModel; r: StudyResult; 
           <ul className="space-y-1 text-xs">
             {r.warnings.map((w, i) => (
               <li key={`${w.code}-${i}`} className={w.severity === 'error' ? 'text-red-700' : w.severity === 'warning' ? 'text-amber-800' : 'text-gray-600'}>
-                {w.month != null ? `${monthLabel(r.calendar.labels[w.month] ?? '', lang)} — ` : ''}{w.message}
+                {w.month != null ? `${monthLabel(r.calendar.labels[w.month] ?? '', lang)} — ` : ''}{lang === 'ar' ? w.messageAr : w.message}
               </li>
             ))}
           </ul>

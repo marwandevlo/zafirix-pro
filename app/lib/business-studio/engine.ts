@@ -150,7 +150,7 @@ export type VatPeriod = {
 
 export type TaxPayment = { month: number; tax: string; label: string; amount: Cents };
 
-export type EngineWarning = { code: string; message: string; severity: 'info' | 'warning' | 'error'; month?: number };
+export type EngineWarning = { code: string; message: string; messageAr: string; severity: 'info' | 'warning' | 'error'; month?: number };
 
 export type ChecksResult = {
   balanceSheetMaxAbsDiff: Cents;
@@ -297,12 +297,15 @@ export function computeStudy(input: StudyModel, scenarioId?: string): StudyResul
   };
   const dateOf = (m: number) => `${cal.labels[m]}-01`;
   const vatWarned = new Set<string>();
-  const checkVat = (rate: number, m: number, what: string) => {
+  const VAT_ITEM = { product: ['Produit', 'المنتج'], purchase: ['Achats', 'مشتريات'], expense: ['Charge', 'التكلفة'], investment: ['Investissement', 'الاستثمار'] } as const;
+  const checkVat = (rate: number, m: number, item: keyof typeof VAT_ITEM, name: string) => {
     if (!vatOn || m >= N) return;
-    const key = `${what}|${rate}|${cal.calYear[m]}`;
+    const key = `${item}|${name}|${rate}|${cal.calYear[m]}`;
     if (vatWarned.has(key) || isLegalVatRate(rate, dateOf(m))) return;
     vatWarned.add(key);
-    warnings.push({ code: 'vat_rate_not_legal', severity: 'warning', month: m, message: `${what} : taux de TVA ${rate} % non prévu par le CGI pour ${cal.calYear[m]} (art. 99 / 247-XXXXI).` });
+    const [fr, ar] = VAT_ITEM[item];
+    warnings.push({ code: 'vat_rate_not_legal', severity: 'warning', month: m, message: `${fr} « ${name} » : taux de TVA ${rate} % non prévu par le CGI pour ${cal.calYear[m]} (art. 99 / 247-XXXXI).`,
+      messageAr: `${ar} «${name}»: سعر الضريبة على القيمة المضافة ${rate}% غير منصوص عليه في المدونة العامة للضرائب لسنة ${cal.calYear[m]} (المادتان 99 و247-XXXXI).` });
   };
 
   // Payment pipelines.
@@ -381,7 +384,7 @@ export function computeStudy(input: StudyModel, scenarioId?: string): StudyResul
       det.revenue[m] = net;
       det.cogs[m] = cogs;
       const vat = vatOn ? applyRate(net, p.vatRatePct) : 0;
-      if (net !== 0) checkVat(p.vatRatePct, m, `Produit « ${p.name} »`);
+      if (net !== 0) checkVat(p.vatRatePct, m, 'product', p.name);
       det.vat[m] = vat;
       const ttc = net + vat;
       salesTtc[m] += ttc;
@@ -416,7 +419,7 @@ export function computeStudy(input: StudyModel, scenarioId?: string): StudyResul
       const purchaseCost = vatOn ? purchase : purchase + applyRate(purchase, purchaseVatRate);
       M.purchases[m] += purchaseCost;
       const pVat = vatOn ? applyRate(purchase, purchaseVatRate) : 0;
-      if (purchase !== 0 && vatOn) checkVat(purchaseVatRate, m, `Achats « ${p.name} »`);
+      if (purchase !== 0 && vatOn) checkVat(purchaseVatRate, m, 'purchase', p.name);
       vatDedInvoiced[m] += pVat;
       payablesInvoiced[m] += purchaseCost + pVat;
       schedulePayment(purchaseCost + pVat, pVat, m, wc.dpoDays, N, supplierPaid, supplierVatPaid);
@@ -443,7 +446,8 @@ export function computeStudy(input: StudyModel, scenarioId?: string): StudyResul
 
   if (openingInventory > 0 && openingStockProduct < 0) {
     for (let m = 0; m < N; m += 1) M.inventory[m] += openingInventory;
-    warnings.push({ code: 'opening_inventory_static', severity: 'info', message: 'Stock d’ouverture conservé tel quel : aucun produit avec un coût unitaire pour le consommer.' });
+    warnings.push({ code: 'opening_inventory_static', severity: 'info', message: 'Stock d’ouverture conservé tel quel : aucun produit avec un coût unitaire pour le consommer.',
+      messageAr: 'المخزون الافتتاحي محتفظ به كما هو: لا يوجد منتج بتكلفة وحدوية لاستهلاكه.' });
   }
   for (let m = 0; m < N; m += 1) {
     const prev = m === 0 ? openingInventory : M.inventory[m - 1];
@@ -467,7 +471,7 @@ export function computeStudy(input: StudyModel, scenarioId?: string): StudyResul
         : applyRate(M.revenue[m], e.pctOfRevenue);
       if (ht === 0) continue;
       const vat = applyRate(ht, e.vatRatePct);
-      if (e.vatRatePct > 0) checkVat(e.vatRatePct, m, `Charge « ${e.name} »`);
+      if (e.vatRatePct > 0) checkVat(e.vatRatePct, m, 'expense', e.name);
       const cost = deductible ? ht : ht + vat;
       det.amount[m] = cost;
       if (consumed) {
@@ -557,7 +561,7 @@ export function computeStudy(input: StudyModel, scenarioId?: string): StudyResul
     if (inv.amountHT <= 0 || inv.month >= N) continue;
     const ht = toCents(inv.amountHT);
     const vat = applyRate(ht, inv.vatRatePct);
-    if (inv.vatRatePct > 0) checkVat(inv.vatRatePct, inv.month, `Investissement « ${inv.name} »`);
+    if (inv.vatRatePct > 0) checkVat(inv.vatRatePct, inv.month, 'investment', inv.name);
     const recoverable = vatOn && inv.vatRecoverable;
     const cost = recoverable ? ht : ht + vat;
     M.capexCost[inv.month] += cost;
@@ -574,7 +578,8 @@ export function computeStudy(input: StudyModel, scenarioId?: string): StudyResul
         coefficient = inv.decliningCoefficient;
         const legal = legalDecliningCoefficient(L);
         if (legal != null && Math.abs(legal - coefficient) > 1e-9) {
-          warnings.push({ code: 'declining_coefficient', severity: 'info', message: `« ${inv.name} » : coefficient dégressif ${coefficient} saisi ; le CGI (art. 10) prévoit ${legal} pour ${L} ans.` });
+          warnings.push({ code: 'declining_coefficient', severity: 'info', message: `« ${inv.name} » : coefficient dégressif ${coefficient} saisi ; le CGI (art. 10) prévoit ${legal} pour ${L} ans.`,
+            messageAr: `«${inv.name}»: المعامل المتناقص المُدخل ${coefficient}؛ تنص المدونة العامة للضرائب (المادة 10) على ${legal} لمدة ${L} سنوات.` });
         }
         let nbv = cost;
         for (let j = 0; j < L; j += 1) {
@@ -864,7 +869,8 @@ export function computeStudy(input: StudyModel, scenarioId?: string): StudyResul
       const a = applyRate(toCents(ob.priorYearIsDue), 25);
       for (const q of [2, 5, 8, 11]) if (q < N && q <= fy0.lastMonth) { isPay[q] += a; acomptesPaidByFy[0] += a; taxPayments.push({ month: q, tax: 'IS', label: `Acompte IS ${fy0.label}`, amount: a }); }
     } else {
-      warnings.push({ code: 'acomptes_first_year', severity: 'info', message: 'L’horizon ne commence pas au début de l’exercice : les acomptes du premier exercice ne sont pas projetés.' });
+      warnings.push({ code: 'acomptes_first_year', severity: 'info', message: 'L’horizon ne commence pas au début de l’exercice : les acomptes du premier exercice ne sont pas projetés.',
+        messageAr: 'الأفق لا يبدأ في بداية السنة المالية: الدفعات المقدمة للسنة الأولى غير متوقعة.' });
     }
   }
 
@@ -943,7 +949,8 @@ export function computeStudy(input: StudyModel, scenarioId?: string): StudyResul
           else {
             rateStatus = 'not_covered';
             rateDetail = 'Aucune règle IS vérifiée avant 2023';
-            warnings.push({ code: 'is_rule_missing', severity: 'error', month: m, message: `Exercice ${fy.label} : aucun taux d’IS vérifié avant 2023. Saisissez une règle fiscale de substitution.` });
+            warnings.push({ code: 'is_rule_missing', severity: 'error', month: m, message: `Exercice ${fy.label} : aucun taux d’IS vérifié avant 2023. Saisissez une règle fiscale de substitution.`,
+              messageAr: `السنة المالية ${fy.label}: لا يوجد سعر متحقق منه للضريبة على الشركات قبل 2023. أدخل قاعدة جبائية بديلة.` });
           }
         }
         computed = applyRate(taxable, ratePct);
@@ -981,7 +988,8 @@ export function computeStudy(input: StudyModel, scenarioId?: string): StudyResul
         minimumContributionApplied: !cmExempt && cm > afterExemption, taxDue: due, regime: tax.regime,
       });
       if (fy.openYear > 2026 && isRegime && levers.isRateOverridePct == null && ov.isRate == null && !warnings.some((w) => w.code === 'is_assumed_unchanged')) {
-        warnings.push({ code: 'is_assumed_unchanged', severity: 'info', message: 'Exercices postérieurs à 2026 : taux d’IS et de cotisation minimale 2026 supposés inchangés (aucune loi de finances postérieure intégrée).' });
+        warnings.push({ code: 'is_assumed_unchanged', severity: 'info', message: 'Exercices postérieurs à 2026 : taux d’IS et de cotisation minimale 2026 supposés inchangés (aucune loi de finances postérieure intégrée).',
+          messageAr: 'السنوات المالية بعد 2026: يفترض أن سعري الضريبة على الشركات والحد الأدنى لسنة 2026 دون تغيير (لم يدمج أي قانون مالية لاحق).' });
       }
 
       // Balance of the year, due within the declaration deadline (3 months after the close).
@@ -1196,7 +1204,8 @@ export function computeStudy(input: StudyModel, scenarioId?: string): StudyResul
   }
 
   if (dividendRateMissing) {
-    warnings.push({ code: 'dividend_withholding_not_covered', severity: 'warning', message: 'Retenue sur dividendes : aucun taux légal intégré pour les distributions antérieures à 2025 ; le taux saisi a été utilisé.' });
+    warnings.push({ code: 'dividend_withholding_not_covered', severity: 'warning', message: 'Retenue sur dividendes : aucun taux légal intégré pour les distributions antérieures à 2025 ; le taux saisi a été utilisé.',
+      messageAr: 'الاقتطاع من المنبع على الأرباح: لا يوجد سعر قانوني مدمج للتوزيعات السابقة لسنة 2025؛ تم استعمال السعر المُدخل.' });
   }
   const bsMax = M.balanceDiff.reduce((s, v) => Math.max(s, Math.abs(v)), 0);
   const checks: ChecksResult = {
@@ -1204,7 +1213,8 @@ export function computeStudy(input: StudyModel, scenarioId?: string): StudyResul
     ok: bsMax === 0 && cfMax === 0 && pfMax === 0 && pnlMax === 0,
   };
   if (!checks.ok) {
-    warnings.push({ code: 'reconciliation_failed', severity: 'error', message: `Contrôles de cohérence en échec (bilan ${bsMax}, flux ${cfMax}, plan de financement ${pfMax}, CPC ${pnlMax} centimes).` });
+    warnings.push({ code: 'reconciliation_failed', severity: 'error', message: `Contrôles de cohérence en échec (bilan ${bsMax}, flux ${cfMax}, plan de financement ${pfMax}, CPC ${pnlMax} centimes).`,
+      messageAr: `فشل مراقبة الاتساق (الميزانية ${bsMax}، التدفقات ${cfMax}، مخطط التمويل ${pfMax}، حساب العائدات والتكاليف ${pnlMax} سنتيم).` });
   }
 
   // Payroll tax calendar.
@@ -1219,14 +1229,17 @@ export function computeStudy(input: StudyModel, scenarioId?: string): StudyResul
   const minCash = toCents(wc.minimumCash);
   const firstShort = M.cash.findIndex((c) => c < minCash);
   if (firstShort >= 0) {
-    warnings.push({ code: 'cash_below_minimum', severity: 'warning', month: firstShort, message: `Trésorerie inférieure au minimum souhaité à partir de ${cal.labels[firstShort]}.` });
+    warnings.push({ code: 'cash_below_minimum', severity: 'warning', month: firstShort, message: `Trésorerie inférieure au minimum souhaité à partir de ${cal.labels[firstShort]}.`,
+      messageAr: `الخزينة أقل من الحد الأدنى المرغوب ابتداءً من ${cal.labels[firstShort].replace('-', '/')}.` });
   }
   const firstNegEquity = M.equity.findIndex((e) => e < 0);
   if (firstNegEquity >= 0) {
-    warnings.push({ code: 'negative_equity', severity: 'warning', month: firstNegEquity, message: `Capitaux propres négatifs à partir de ${cal.labels[firstNegEquity]}.` });
+    warnings.push({ code: 'negative_equity', severity: 'warning', month: firstNegEquity, message: `Capitaux propres négatifs à partir de ${cal.labels[firstNegEquity]}.`,
+      messageAr: `أموال ذاتية سالبة ابتداءً من ${cal.labels[firstNegEquity].replace('-', '/')}.` });
   }
   if (tax.regime === 'auto_entrepreneur' && tax.autoEntrepreneurRatePct === 0) {
-    warnings.push({ code: 'ae_rate_missing', severity: 'warning', message: 'Régime auto-entrepreneur : taux non saisi, l’impôt projeté est nul.' });
+    warnings.push({ code: 'ae_rate_missing', severity: 'warning', message: 'Régime auto-entrepreneur : taux non saisi, l’impôt projeté est nul.',
+      messageAr: 'نظام المقاول الذاتي: السعر غير مُدخل، والضريبة المتوقعة منعدمة.' });
   }
 
   return {

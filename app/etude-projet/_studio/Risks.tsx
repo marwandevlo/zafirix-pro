@@ -44,7 +44,7 @@ const KIND: Record<FindingKind, { label: { fr: string; ar: string }; tone: 'blue
 
 export function Risks({ model, r, x, onChange, disabled }: { model: StudyModel; r: StudyResult; x: StudyMetrics; onChange: (m: StudyModel) => void; disabled: boolean }) {
   const { t, lang } = useStudio();
-  const list = useMemo(() => findings(model, r, x), [model, r, x]);
+  const list = useMemo(() => findings(model, r, x, lang), [model, r, x, lang]);
   const ranked = [...model.risks].sort((a, b) => b.likelihood * b.impact - a.likelihood * a.impact);
   const scoreTone = (s: number) => (s >= 15 ? 'red' : s >= 8 ? 'amber' : 'green') as 'red' | 'amber' | 'green';
 

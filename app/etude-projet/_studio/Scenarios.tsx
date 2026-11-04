@@ -6,7 +6,7 @@ import {
   type SensitivityMatrix, type SensitivityMetric, type StressResult, type TornadoBar,
 } from '@/app/lib/business-studio/analysis';
 import type { StudyResult } from '@/app/lib/business-studio/engine';
-import { monthLabel } from '@/app/lib/business-studio/i18n';
+import { monthLabel, scenarioText } from '@/app/lib/business-studio/i18n';
 import { NEUTRAL_LEVERS, newId, type Levers, type Scenario, type StudyModel } from '@/app/lib/business-studio/model';
 import { LEVER_DEFS, LEVER_LABEL, METRIC_LABEL, STRESS_LABEL, UNIT_LABEL, useIndicator } from './analysis-ui';
 import { ChartBox, groupedBarSpec, lineCompareSpec, tornadoSpec } from './charts';
@@ -69,7 +69,7 @@ export function Scenarios({ model, r, onChange, disabled }: { model: StudyModel;
                 const isActive = s.id === model.activeScenarioId;
                 return (
                   <tr key={s.id} className={`border-t border-gray-100 ${s.id === editing ? 'bg-amber-50/50' : ''}`}>
-                    <td className="py-1.5 pe-3 font-medium">{s.name} {isActive && <Badge tone="green">{t(bi('Actif', 'نشط'))}</Badge>}</td>
+                    <td className="py-1.5 pe-3 font-medium">{scenarioText(s.name, lang)} {isActive && <Badge tone="green">{t(bi('Actif', 'نشط'))}</Badge>}</td>
                     <td className="px-2">{t(KIND_LABEL[s.kind])}</td>
                     <td className="px-2 text-gray-600 max-w-[420px]">{moved.length ? moved.join(' · ') : t(bi('Aucun (hypothèses saisies)', 'لا شيء (الفرضيات المدخلة)'))}</td>
                     <td className="px-2 text-end whitespace-nowrap">
@@ -88,7 +88,7 @@ export function Scenarios({ model, r, onChange, disabled }: { model: StudyModel;
       </Card>
 
       {current && (
-        <Card title={`${t(bi('Leviers du scénario', 'روافع السيناريو'))} — ${current.name}`}>
+        <Card title={`${t(bi('Leviers du scénario', 'روافع السيناريو'))} — ${scenarioText(current.name, lang)}`}>
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 mb-3">
             <TextField label={t('name')} value={current.name} disabled={disabled} maxLength={120} onChange={(v) => updateScenario(current.id, { name: v })} />
             <TextField className="sm:col-span-1 lg:col-span-3" label={t(bi('Description et justification', 'الوصف والتبرير'))} value={current.description} disabled={disabled} onChange={(v) => updateScenario(current.id, { description: v })} />
@@ -111,7 +111,7 @@ export function Scenarios({ model, r, onChange, disabled }: { model: StudyModel;
             <table className="min-w-full text-xs">
               <thead><tr className="text-gray-500">
                 <th className="text-start py-1.5 pe-3">{t(bi('Indicateur', 'المؤشر'))}</th>
-                {summaries.map((s) => <th key={s.id} className="text-end px-2">{s.name}</th>)}
+                {summaries.map((s) => <th key={s.id} className="text-end px-2">{scenarioText(s.name, lang)}</th>)}
               </tr></thead>
               <tbody>
                 {([
@@ -140,9 +140,9 @@ export function Scenarios({ model, r, onChange, disabled }: { model: StudyModel;
           </div>
           <div className="grid grid-cols-1 xl:grid-cols-2 gap-4 mt-4">
             <ChartBox spec={groupedBarSpec(t(bi('Résultat net par exercice', 'النتيجة الصافية حسب السنة المالية')), yearLabels,
-              summaries.map((s) => ({ name: s.name, values: s.metrics.years.map((y) => y.netIncome) })), lang)} />
+              summaries.map((s) => ({ name: scenarioText(s.name, lang), values: s.metrics.years.map((y) => y.netIncome) })), lang)} />
             <ChartBox spec={lineCompareSpec(t(bi('Trésorerie mensuelle', 'الخزينة الشهرية')), monthLabels,
-              summaries.map((s) => ({ name: s.name, values: s.result.monthly.cash })), lang)} />
+              summaries.map((s) => ({ name: scenarioText(s.name, lang), values: s.result.monthly.cash })), lang)} />
           </div>
         </>)}
       </Card>

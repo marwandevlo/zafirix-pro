@@ -8,7 +8,7 @@ import { variance, type ActualsByMonth } from './actuals';
 import { compareScenarios, findings, runStressTests, sensitivityMatrix, tornado } from './analysis';
 import type { StudyResult } from './engine';
 import {
-  formatCentsMad, formatNumber, formatPercent, monthLabel, PROJECT_TYPE_LABEL, RULE_STATUS_BI, SECTOR_LABEL, STR, tr, type Bi, type Lang,
+  formatCentsMad, formatNumber, formatPercent, monthLabel, PROJECT_TYPE_LABEL, RULE_STATUS_BI, scenarioText, SECTOR_LABEL, STR, tr, type Bi, type Lang,
 } from './i18n';
 import type { Indicator, StudyMetrics } from './metrics';
 import type { StudyModel } from './model';
@@ -22,14 +22,20 @@ export const REPORT_TYPES: readonly ReportType[] = ['full', 'bank', 'investor', 
 export type CellUnit = 'mad' | 'pct' | 'ratio' | 'count' | 'months' | 'years';
 export type RCell = { v: number | null; u: CellUnit; reason?: string } | { s: string };
 export type RowStyle = 'section' | 'line' | 'detail' | 'subtotal' | 'total';
-export type RRow = { label: string; style?: RowStyle; cells: RCell[] };
+/**
+ * `key` is the statement line id. `sign` is the sign applied to the engine series on a single-series line;
+ * `terms` lists the lines a computed subtotal adds up, so the Excel renderer can write it as a live formula.
+ */
+export type RRow = { label: string; style?: RowStyle; cells: RCell[]; key?: string; sign?: 1 | -1; terms?: ReadonlyArray<readonly [string, 1 | -1]> };
 export type ChartSeries = { name: string; values: number[] };
+/** Donut charts read the first series as shares of a whole; pyramid charts read it as levels from top to bottom. */
+export type ChartType = 'bar' | 'line' | 'donut' | 'pyramid';
 export type Block =
   | { kind: 'paragraph'; text: string; userText?: boolean }
   | { kind: 'notice'; text: string; tone: 'info' | 'warning' | 'critical' }
-  | { kind: 'kv'; rows: Array<{ label: string; cell: RCell; note?: string }> }
-  | { kind: 'table'; title?: string; head: string[]; rows: RRow[]; source?: string }
-  | { kind: 'chart'; title: string; type: 'bar' | 'line'; labels: string[]; series: ChartSeries[]; unit: 'mad' | 'count' }
+  | { kind: 'kv'; title?: string; rows: Array<{ label: string; cell: RCell; note?: string }> }
+  | { kind: 'table'; id?: string; title?: string; head: string[]; rows: RRow[]; source?: string }
+  | { kind: 'chart'; title: string; type: ChartType; labels: string[]; series: ChartSeries[]; unit: 'mad' | 'count'; note?: string }
   | { kind: 'list'; title?: string; items: string[] };
 export type Section = { id: string; title: string; blocks: Block[] };
 
@@ -37,6 +43,10 @@ export type Report = {
   type: ReportType; lang: Lang; title: string; studyName: string; companyName: string; sector: string; projectType: string;
   generatedAt: string; revision: number | null; status: string; scenarioName: string; engineVersion: string; rulesVersion: string;
   checksOk: boolean; logoDataUrl: string; disclaimers: string[]; sections: Section[];
+  /** Label/value pairs shown on the cover of both formats, already translated. */
+  cover: Array<[string, string]>;
+  /** Fiscal years and months covered, used to check that every section uses the study horizon. */
+  horizon: { startMonth: string; years: number; months: number; fiscalYears: string[] };
 };
 
 export type ReportInput = {
@@ -79,15 +89,22 @@ function statementBlock(ctx: Ctx, id: StatementId, g: 'year' | 'month' | 'quarte
     periods = keep.map((i) => periods[i]);
     rows = rows.map((r) => ({ ...r, values: keep.map((i) => r.values[i]) }));
   }
+  const allMad = rows.every((row) => !row.isCount);
   return {
     kind: 'table',
+    id: g === 'year' && !months ? id : `${id}-${g}`,
     title: st.title[ctx.lang],
-    head: [ctx.t(B('Poste', 'البند')), ...periods.map((p) => `${monthLabel(p.label, ctx.lang)}${p.partial ? '*' : ''}`)],
-    rows: rows.map((row) => ({
-      label: row.def.label[ctx.lang],
-      style: row.def.style,
-      cells: row.def.terms.length === 0 ? periods.map(() => txt('')) : row.values.map((v) => (row.isCount ? { v, u: 'count' as const } : mad(v))),
-    })),
+    head: [ctx.t(allMad ? B('Poste (MAD)', 'البند (درهم)') : B('Poste', 'البند')), ...periods.map((p) => `${monthLabel(p.label, ctx.lang)}${p.partial ? '*' : ''}`)],
+    rows: rows.map((row): RRow => {
+      const single = row.def.terms.length === 1 && row.def.terms[0][0] === row.def.id;
+      return {
+        label: row.def.label[ctx.lang],
+        style: row.def.style,
+        key: row.def.id,
+        ...(single ? { sign: row.def.terms[0][1] } : row.def.terms.length > 0 && !row.isCount ? { terms: row.def.terms } : {}),
+        cells: row.def.terms.length === 0 ? periods.map(() => txt('')) : row.values.map((v) => (row.isCount ? { v, u: 'count' as const } : mad(v))),
+      };
+    }),
   };
 }
 
@@ -242,9 +259,82 @@ function kpiSection(ctx: Ctx): Section {
   return { id: 'kpis', title: t(B('Synthèse financière', 'الملخص المالي')), blocks };
 }
 
+/** First complete fiscal year, or the first one when none is complete: the reference year of the structure charts. */
+function referenceYear(r: StudyResult) {
+  return r.calendar.fiscalYears.find((f) => !f.partial) ?? r.calendar.fiscalYears[0];
+}
+
+function fySum(r: StudyResult, s: readonly number[], f: { firstMonth: number; lastMonth: number }): number {
+  let v = 0;
+  for (let m = f.firstMonth; m <= f.lastMonth; m += 1) v += s[m] ?? 0;
+  return v;
+}
+
+const KIND_LABEL: Record<string, Bi> = {
+  tangible: B('Immobilisations corporelles', 'أصول مادية'), intangible: B('Immobilisations incorporelles', 'أصول غير مادية'),
+  land: B('Terrains', 'أراضٍ'), goodwill: B('Fonds commercial', 'الأصل التجاري'), deposit: B('Dépôts et cautionnements', 'الودائع والضمانات'),
+};
+
+function financingDonut(ctx: Ctx): Block | null {
+  const { r, t } = ctx;
+  const sum = (k: keyof StudyResult['monthly']) => r.monthly[k].reduce((a, b) => a + b, 0);
+  const parts: Array<[Bi, number]> = [
+    [B('Apports en capital', 'المساهمات في الرأسمال'), sum('cashInEquity')],
+    [B('Emprunts', 'القروض'), sum('cashInLoans')],
+    [B('Subventions', 'المنح'), sum('cashInGrants')],
+  ];
+  const kept = parts.filter(([, v]) => v > 0);
+  if (kept.length === 0) return null;
+  return {
+    kind: 'chart', type: 'donut', unit: 'mad', title: t(B('Sources de financement externes sur l’horizon', 'مصادر التمويل الخارجية على مدى الأفق')),
+    labels: kept.map(([l]) => t(l)), series: [{ name: t(B('Montant', 'المبلغ')), values: kept.map(([, v]) => v) }],
+  };
+}
+
+function investmentDonut(ctx: Ctx): Block | null {
+  const { model, r, t } = ctx;
+  const byKind = new Map<string, number>();
+  for (const i of model.investments) {
+    if (i.month < 0 || i.month >= r.calendar.months || i.amountHT <= 0) continue;
+    byKind.set(i.kind, (byKind.get(i.kind) ?? 0) + Math.round(i.amountHT * 100));
+  }
+  if (byKind.size === 0) return null;
+  const entries = [...byKind.entries()].sort((a, b) => b[1] - a[1]);
+  return {
+    kind: 'chart', type: 'donut', unit: 'mad', title: t(B('Répartition des investissements HT', 'توزيع الاستثمارات دون رسوم')),
+    labels: entries.map(([k]) => t(KIND_LABEL[k] ?? B(k, k))), series: [{ name: t(B('Montant HT', 'المبلغ دون رسوم')), values: entries.map(([, v]) => v) }],
+  };
+}
+
 function chartBlocks(ctx: Ctx): Block[] {
   const { x, t, r } = ctx;
   const labels = x.years.map((y) => y.label);
+  const ref = referenceYear(r);
+  const M = r.monthly;
+  const fs = (s: readonly number[]) => fySum(r, s, ref);
+  const refNote = t(B(`Exercice de référence : ${ref.label}${ref.partial ? ' (partiel)' : ''}.`, `السنة المرجعية: ${ref.label}${ref.partial ? ' (جزئية)' : ''}.`));
+  const costParts: Array<[Bi, number]> = [
+    [B('Achats consommés', 'المشتريات المستهلكة'), fs(M.cogs)],
+    [B('Charges externes', 'التكاليف الخارجية'), fs(M.externalCharges)],
+    [B('Charges de personnel', 'تكاليف المستخدمين'), fs(M.salaries) + fs(M.employerCharges)],
+    [B('Impôts et taxes', 'الضرائب والرسوم'), fs(M.localTaxes)],
+    [B('Dotations aux amortissements', 'مخصصات الاهتلاك'), fs(M.depreciation)],
+    [B('Charges financières', 'التكاليف المالية'), fs(M.financialCharges)],
+  ].filter(([, v]) => (v as number) > 0) as Array<[Bi, number]>;
+  const products = r.products.map((p) => [p.name, fs(p.revenue)] as const).filter(([, v]) => v > 0).sort((a, b) => b[1] - a[1]);
+  const sigLevels: Array<[Bi, number]> = [
+    [B('Chiffre d’affaires', 'رقم المعاملات'), fs(M.revenue)],
+    [B('Marge brute', 'الهامش الإجمالي'), fs(M.revenue) - fs(M.cogs)],
+    [B('Valeur ajoutée', 'القيمة المضافة'), fs(M.revenue) - fs(M.cogs) - fs(M.externalCharges)],
+    [B('EBE', 'الفائض الإجمالي للاستغلال'), fs(M.ebitda)],
+    [B('Résultat d’exploitation', 'نتيجة الاستغلال'), fs(M.ebit)],
+    [B('Résultat courant', 'النتيجة الجارية'), fs(M.ebit) + fs(M.financialResult)],
+    [B('Résultat net', 'النتيجة الصافية'), fs(M.netIncome)],
+  ];
+  const debtService = x.years.map((_, i) => {
+    const f = r.calendar.fiscalYears[i];
+    return fySum(r, M.cashOutPrincipal, f) + fySum(r, M.cashOutInterest, f);
+  });
   const out: Block[] = [
     {
       kind: 'chart', type: 'bar', unit: 'mad', title: t(B('Chiffre d’affaires, EBE et résultat net par exercice', 'رقم المعاملات والفائض الإجمالي والنتيجة الصافية حسب السنة')), labels,
@@ -259,7 +349,108 @@ function chartBlocks(ctx: Ctx): Block[] {
       labels: r.calendar.labels.map((l) => monthLabel(l, ctx.lang)), series: [{ name: t(B('Trésorerie', 'الخزينة')), values: r.monthly.cash }],
     },
   ];
+  if (fs(M.revenue) !== 0) {
+    out.push({
+      kind: 'chart', type: 'pyramid', unit: 'mad', title: t(B('Pyramide des soldes intermédiaires de gestion', 'هرم الأرصدة الوسيطة للتسيير')), note: refNote,
+      labels: sigLevels.map(([l]) => t(l)), series: [{ name: ref.label, values: sigLevels.map(([, v]) => v) }],
+    });
+  }
+  if (costParts.length) {
+    out.push({
+      kind: 'chart', type: 'donut', unit: 'mad', title: t(B('Structure des charges', 'بنية التكاليف')), note: refNote,
+      labels: costParts.map(([l]) => t(l)), series: [{ name: ref.label, values: costParts.map(([, v]) => v) }],
+    });
+  }
+  if (products.length >= 2) {
+    out.push({
+      kind: 'chart', type: 'donut', unit: 'mad', title: t(B('Répartition du chiffre d’affaires par produit', 'توزيع رقم المعاملات حسب المنتج')), note: refNote,
+      labels: products.map(([n]) => n), series: [{ name: ref.label, values: products.map(([, v]) => v) }],
+    });
+  }
+  if (debtService.some((v) => v > 0)) {
+    out.push({
+      kind: 'chart', type: 'bar', unit: 'mad', title: t(B('CAF et service de la dette par exercice', 'القدرة على التمويل الذاتي وخدمة الدين حسب السنة')), labels,
+      series: [
+        { name: t(B('CAF', 'القدرة على التمويل الذاتي')), values: x.years.map((y) => y.caf) },
+        { name: t(B('Service de la dette (capital + intérêts)', 'خدمة الدين (الأصل + الفوائد)')), values: debtService },
+      ],
+    });
+  }
   return out;
+}
+
+function pctOf(part: number, whole: number): number | null {
+  return whole > 0 ? (part / whole) * 100 : null;
+}
+
+/** Executive summary: every sentence is derived from computed study values; nothing is generated or assumed. */
+function summarySection(ctx: Ctx): Section {
+  const { model, r, x, t, lang } = ctx;
+  const M = r.monthly;
+  const sum = (s: readonly number[]) => s.reduce((a, b) => a + b, 0);
+  const m = (c: number) => `${formatCentsMad(c, lang)} ${t(STR.mad)}`;
+  const p = (v: number | null) => (v == null ? STR.notAvailable[lang] : formatPercent(v, lang));
+  const capex = x.totals.capex;
+  const equity = sum(M.cashInEquity);
+  const loans = sum(M.cashInLoans);
+  const grants = sum(M.cashInGrants);
+  const ext = equity + loans + grants;
+  const years = x.years;
+  const first = years[0];
+  const last = years[years.length - 1];
+  const items: string[] = [];
+  items.push(t(B(
+    `Horizon : ${model.horizon.years} ans à partir de ${monthLabel(model.horizon.startMonth, 'fr')} (${r.calendar.fiscalYears.length} exercices, ${r.calendar.months} mois calculés).`,
+    `الأفق: ${model.horizon.years} سنوات ابتداءً من ${monthLabel(model.horizon.startMonth, 'ar')} (${r.calendar.fiscalYears.length} سنوات مالية، ${r.calendar.months} شهراً محسوباً).`,
+  )));
+  if (capex > 0 || ext > 0) {
+    items.push(t(B(
+      `Investissements HT : ${m(capex)}. Financements externes : ${m(ext)}, dont apports ${p(pctOf(equity, ext))}, emprunts ${p(pctOf(loans, ext))} et subventions ${p(pctOf(grants, ext))}.`,
+      `الاستثمارات دون رسوم: ${m(capex)}. التمويلات الخارجية: ${m(ext)}، منها مساهمات ${p(pctOf(equity, ext))} وقروض ${p(pctOf(loans, ext))} ومنح ${p(pctOf(grants, ext))}.`,
+    )));
+  }
+  if (first && last) {
+    const n = years.length - 1;
+    const cagr = n > 0 && first.revenue > 0 && last.revenue > 0 ? (Math.pow(last.revenue / first.revenue, 1 / n) - 1) * 100 : null;
+    items.push(t(B(
+      `Chiffre d’affaires : ${m(first.revenue)} en ${first.label}, ${m(last.revenue)} en ${last.label}${cagr == null ? '' : ` (croissance annuelle moyenne ${p(cagr)}, exercices partiels compris)`}.`,
+      `رقم المعاملات: ${m(first.revenue)} سنة ${first.label}، و${m(last.revenue)} سنة ${last.label}${cagr == null ? '' : ` (متوسط النمو السنوي ${p(cagr)}، بما في ذلك السنوات الجزئية)`}.`,
+    )));
+    const firstPositive = years.find((y) => y.ebitda > 0);
+    items.push(firstPositive
+      ? t(B(`EBE positif à partir de ${firstPositive.label} ; taux d’EBE ${p(last.ebitdaMarginPct.value)} en ${last.label}.`, `الفائض الإجمالي إيجابي ابتداءً من ${firstPositive.label}؛ نسبته ${p(last.ebitdaMarginPct.value)} سنة ${last.label}.`))
+      : t(B('EBE négatif sur tout l’horizon.', 'الفائض الإجمالي سلبي طوال الأفق.')));
+    items.push(t(B(`Résultat net cumulé : ${m(x.totals.netIncome)} ; CAF cumulée : ${m(x.totals.caf)}.`, `النتيجة الصافية المتراكمة: ${m(x.totals.netIncome)}؛ القدرة على التمويل الذاتي المتراكمة: ${m(x.totals.caf)}.`)));
+  }
+  const minMonth = x.minCash.month;
+  if (x.minCash.value != null) {
+    items.push(t(B(
+      `Trésorerie la plus basse : ${m(x.minCash.value)}${minMonth != null ? ` (${monthLabel(r.calendar.labels[minMonth], 'fr')})` : ''} ; trésorerie de fin d’horizon : ${m(x.cashEnd.value ?? 0)}.`,
+      `أدنى خزينة: ${m(x.minCash.value)}${minMonth != null ? ` (${monthLabel(r.calendar.labels[minMonth], 'ar')})` : ''}؛ الخزينة في نهاية الأفق: ${m(x.cashEnd.value ?? 0)}.`,
+    )));
+  }
+  if (x.minDscr.value != null) {
+    items.push(t(B(
+      `DSCR minimal : ${formatNumber(x.minDscr.value, 'fr', 2)} (les seuils bancaires usuels sont des pratiques de marché, non des règles légales).`,
+      `أدنى نسبة لتغطية خدمة الدين: ${formatNumber(x.minDscr.value, 'ar', 2)} (العتبات البنكية المعتادة ممارسات سوقية وليست قواعد قانونية).`,
+    )));
+  }
+  items.push(t(B(
+    `VAN (${formatPercent(model.general.discountRatePct, 'fr')}) : ${x.npv.value == null ? STR.notAvailable.fr : m(x.npv.value)} ; TRI projet : ${p(x.irrProject.value)} ; délai de récupération : ${formatCell(indCell(x.payback, ctx), 'fr')}.`,
+    `القيمة الحالية الصافية (${formatPercent(model.general.discountRatePct, 'ar')}): ${x.npv.value == null ? STR.notAvailable.ar : m(x.npv.value)}؛ معدل العائد الداخلي: ${p(x.irrProject.value)}؛ مدة الاسترداد: ${formatCell(indCell(x.payback, ctx), 'ar')}.`,
+  )));
+  const blocks: Block[] = [
+    { kind: 'notice', tone: r.checks.ok ? 'info' : 'critical', text: t(r.checks.ok ? STR.checksOk : STR.checksKo) },
+    { kind: 'list', title: t(B('Le projet en chiffres', 'المشروع بالأرقام')), items },
+  ];
+  const fin = financingDonut(ctx);
+  if (fin) blocks.push(fin);
+  const inv = investmentDonut(ctx);
+  if (inv) blocks.push(inv);
+  const critical = r.warnings.filter((w) => w.severity !== 'info');
+  if (critical.length) blocks.push({ kind: 'list', title: t(B('Points d’attention calculés', 'نقاط انتباه محسوبة')), items: critical.map((w) => (lang === 'ar' ? w.messageAr : w.message)) });
+  blocks.push({ kind: 'notice', tone: 'info', text: t(B('Synthèse établie automatiquement à partir des valeurs calculées de l’étude ; aucune appréciation n’est ajoutée.', 'ملخص منجز تلقائياً من القيم المحسوبة للدراسة؛ دون إضافة أي تقدير.')) });
+  return { id: 'summary', title: t(B('Synthèse exécutive', 'الملخص التنفيذي')), blocks };
 }
 
 function ratiosSection(ctx: Ctx): Section {
@@ -432,7 +623,7 @@ function scenariosSection(ctx: Ctx): Section {
     id: 'scenarios', title: t(B('Comparaison des scénarios', 'مقارنة السيناريوهات')),
     blocks: [
       {
-        kind: 'table', head: [t(B('Indicateur', 'المؤشر')), ...sc.map((s) => s.name)],
+        kind: 'table', head: [t(B('Indicateur', 'المؤشر')), ...sc.map((s) => scenarioText(s.name, ctx.lang))],
         rows: [
           row(B('CA cumulé', 'رقم المعاملات المتراكم'), (s) => mad(s.metrics.totals.revenue)),
           row(B('EBE cumulé', 'الفائض الإجمالي المتراكم'), (s) => mad(s.metrics.totals.ebitda)),
@@ -445,7 +636,7 @@ function scenariosSection(ctx: Ctx): Section {
           row(B('Contrôles', 'المراقبة'), (s) => txt(s.result.checks.ok ? 'OK' : t(B('ÉCHEC', 'فشل')))),
         ],
       },
-      { kind: 'list', title: t(B('Hypothèses des scénarios', 'فرضيات السيناريوهات')), items: model.scenarios.map((s) => `${s.name} : ${s.description || '—'}`) },
+      { kind: 'list', title: t(B('Hypothèses des scénarios', 'فرضيات السيناريوهات')), items: model.scenarios.map((s) => `${scenarioText(s.name, ctx.lang)}${ctx.lang === 'ar' ? ':' : ' :'} ${scenarioText(s.description, ctx.lang) || '—'}`) },
     ],
   };
 }
@@ -513,14 +704,15 @@ function risksSection(ctx: Ctx): Section {
 
 function findingsSection(ctx: Ctx): Section {
   const { model, r, x, t } = ctx;
-  const fs = findings(model, r, x);
+  const fs = findings(model, r, x, ctx.lang);
+  const severityLabel = { info: B('Information', 'معلومة'), warning: B('Attention', 'تنبيه'), critical: B('Critique', 'حرج') };
   const kindLabel = { calculated: B('Calcul', 'حساب'), assumption: B('Hypothèse', 'فرضية'), convention: B('Convention', 'اصطلاح') };
   return {
     id: 'findings', title: t(B('Analyse et alertes', 'التحليل والتنبيهات')),
     blocks: fs.length
       ? [
         { kind: 'notice', tone: 'info', text: t(B('Constats calculés à partir des valeurs de l’étude ; chacun indique s’il découle d’un calcul, d’une hypothèse saisie ou d’une convention. Aucun texte n’est généré par une IA.', 'ملاحظات محسوبة من قيم الدراسة؛ كل منها يبين إن كان ناتجاً عن حساب أو فرضية أو اصطلاح. لا يوجد نص منشأ بالذكاء الاصطناعي.')) },
-        { kind: 'table', head: [t(B('Constat', 'الملاحظة')), t(B('Nature', 'الطبيعة')), t(B('Gravité', 'الدرجة')), t(B('Détail', 'التفاصيل'))], rows: fs.map((f) => ({ label: f.title, cells: [txt(t(kindLabel[f.kind])), txt(f.severity), txt(f.detail)] })) },
+        { kind: 'table', head: [t(B('Constat', 'الملاحظة')), t(B('Nature', 'الطبيعة')), t(B('Gravité', 'الدرجة')), t(B('Détail', 'التفاصيل'))], rows: fs.map((f) => ({ label: f.title, cells: [txt(t(kindLabel[f.kind])), txt(t(severityLabel[f.severity])), txt(f.detail)] })) },
       ]
       : [{ kind: 'notice', tone: 'info', text: t(B('Aucun constat particulier.', 'لا توجد ملاحظات خاصة.')) }],
   };
@@ -568,7 +760,7 @@ function methodSection(ctx: Ctx): Section {
         ],
       },
       { kind: 'paragraph', text: t(B('Calcul mensuel en centimes entiers, agrégé par trimestre et par exercice. Les flux sont sommés ; les soldes de bilan sont pris à la clôture de la période.', 'حساب شهري بالسنتيمات الصحيحة، مجمع حسب الفصل والسنة المالية. تُجمع التدفقات وتؤخذ أرصدة الميزانية عند إقفال الفترة.')) },
-      ...(r.warnings.length ? [{ kind: 'list' as const, title: t(B('Avertissements du moteur', 'تنبيهات المحرك')), items: r.warnings.map((w) => w.message) }] : []),
+      ...(r.warnings.length ? [{ kind: 'list' as const, title: t(B('Avertissements du moteur', 'تنبيهات المحرك')), items: r.warnings.map((w) => (ctx.lang === 'ar' ? w.messageAr : w.message)) }] : []),
       { kind: 'notice', tone: 'warning', text: t(STR.forecastNotice) },
     ],
   };
@@ -589,17 +781,17 @@ export function buildReport(input: ReportInput): Report {
   let sections: Section[];
   switch (type) {
     case 'full':
-      sections = [projectSection(ctx), assumptionsSection(ctx), kpiSection(ctx), S('cpc'), S('sig'), S('bilan_actif'), S('bilan_passif'), S('tft'), S('financement'),
+      sections = [summarySection(ctx), projectSection(ctx), assumptionsSection(ctx), kpiSection(ctx), S('cpc'), S('sig'), S('bilan_actif'), S('bilan_passif'), S('tft'), S('financement'),
         S('tresorerie'), S('bfr'), S('investissements'), debtSection(ctx), taxSection(ctx), ratiosSection(ctx), investorSection(ctx), scenariosSection(ctx),
         sensitivitySection(ctx), risksSection(ctx), findingsSection(ctx), methodSection(ctx)];
       break;
     case 'bank':
-      sections = [projectSection(ctx, true), kpiSection(ctx), S('financement'), debtSection(ctx),
+      sections = [summarySection(ctx), projectSection(ctx, true), kpiSection(ctx), S('financement'), debtSection(ctx),
         statementSection(ctx, 'tresorerie', 'month', firstYearMonths, B('Plan de trésorerie mensuel — premiers 12 mois', 'مخطط الخزينة الشهري — أول 12 شهراً')),
         S('tresorerie'), S('cpc'), S('bilan_actif'), S('bilan_passif'), ratiosSection(ctx), sensitivitySection(ctx), risksSection(ctx), methodSection(ctx)];
       break;
     case 'investor':
-      sections = [projectSection(ctx, true), kpiSection(ctx), investorSection(ctx), S('cpc'), S('tft'), scenariosSection(ctx), sensitivitySection(ctx), risksSection(ctx), findingsSection(ctx), methodSection(ctx)];
+      sections = [summarySection(ctx), projectSection(ctx, true), kpiSection(ctx), investorSection(ctx), S('cpc'), S('tft'), scenariosSection(ctx), sensitivitySection(ctx), risksSection(ctx), findingsSection(ctx), methodSection(ctx)];
       break;
     case 'financials':
       sections = [S('cpc'), S('sig'), S('bilan_actif'), S('bilan_passif'), S('tft'), S('financement'), S('tresorerie'), S('bfr'), S('investissements'), S('dette'), S('paie'), S('tva'), S('is'), methodSection(ctx)];
@@ -617,12 +809,38 @@ export function buildReport(input: ReportInput): Report {
   const scenario = model.scenarios.find((s) => s.id === r.scenarioId);
   const disclaimers: string[] = [STR.forecastNotice[lang]];
   if (lang === 'ar') disclaimers.push(STR.arabicFrenchOnly.ar);
+  const generatedAt = input.generatedAt ?? new Date().toISOString();
+  const statusKey = `st_${input.status ?? ''}`;
+  const status = statusKey in STR ? tr(statusKey as keyof typeof STR, lang) : (input.status ?? '');
+  const sector = SECTOR_LABEL[model.sector]?.[lang] ?? model.sector;
+  const projectType = PROJECT_TYPE_LABEL[model.projectType]?.[lang] ?? model.projectType;
+  const company = model.profile.company;
+  const scenarioName = scenarioText(scenario?.name ?? r.scenarioId, lang);
+  const loansRequested = model.financing.loans.filter((l) => l.month >= 0 && l.month < N).reduce((a, l) => a + Math.round(l.principal * 100), 0);
+  const [gy, gm, gd] = generatedAt.slice(0, 10).split('-');
+  const cover: Array<[string, string]> = [
+    [lang === 'ar' ? 'الدراسة' : 'Étude', input.studyName],
+    [STR.company[lang], company.name || '—'],
+    [STR.sector[lang], sector],
+    [STR.projectType[lang], projectType],
+    [ctx.t(B('Ville', 'المدينة')), company.city || '—'],
+    [ctx.t(STR.horizon), lang === 'ar'
+      ? `المدة ${model.horizon.years} سنوات، من ${monthLabel(model.horizon.startMonth, lang)} إلى ${monthLabel(r.calendar.labels[N - 1] ?? '', lang)}`
+      : `${model.horizon.years} ans — de ${model.horizon.startMonth} à ${r.calendar.labels[N - 1] ?? ''}`],
+    [ctx.t(B('Investissements HT', 'الاستثمارات دون رسوم')), `${formatCentsMad(x.totals.capex, lang)} ${STR.mad[lang]}`],
+    [ctx.t(B('Emprunts sollicités', 'القروض المطلوبة')), `${formatCentsMad(loansRequested, lang)} ${STR.mad[lang]}`],
+    [STR.scenario[lang], scenarioName],
+    [STR.status[lang], status || '—'],
+    [STR.revision[lang], input.revision == null ? '—' : String(input.revision)],
+    [STR.generatedOn[lang], `${gd}/${gm}/${gy}`],
+    [STR.engine[lang], r.engineVersion],
+    [STR.rules[lang], r.rulesVersion],
+  ];
   return {
-    type, lang, title: tr(TITLE[type], lang), studyName: input.studyName, companyName: model.profile.company.name,
-    sector: SECTOR_LABEL[model.sector]?.[lang] ?? model.sector, projectType: PROJECT_TYPE_LABEL[model.projectType]?.[lang] ?? model.projectType,
-    generatedAt: input.generatedAt ?? new Date().toISOString(), revision: input.revision ?? null, status: input.status ?? '',
-    scenarioName: scenario?.name ?? r.scenarioId, engineVersion: r.engineVersion, rulesVersion: r.rulesVersion, checksOk: r.checks.ok,
-    logoDataUrl: model.profile.company.logoDataUrl, disclaimers, sections,
+    type, lang, title: tr(TITLE[type], lang), studyName: input.studyName, companyName: company.name, sector, projectType,
+    generatedAt, revision: input.revision ?? null, status, scenarioName, engineVersion: r.engineVersion, rulesVersion: r.rulesVersion, checksOk: r.checks.ok,
+    logoDataUrl: company.logoDataUrl, disclaimers, sections, cover,
+    horizon: { startMonth: model.horizon.startMonth, years: model.horizon.years, months: N, fiscalYears: r.calendar.fiscalYears.map((f) => f.label) },
   };
 }
 

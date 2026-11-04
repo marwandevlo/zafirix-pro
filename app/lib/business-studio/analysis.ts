@@ -7,7 +7,7 @@
 import { computeStudy, type LineKey, type StudyResult } from './engine';
 import { computeMetrics, type StudyMetrics } from './metrics';
 import { type Levers, NEUTRAL_LEVERS, type StudyModel } from './model';
-import { formatPct } from './money';
+import { formatCentsMad, formatNumber, formatPercent, monthLabel, type Lang } from './i18n';
 import { ruleById } from './tax-rules';
 
 const SIM_ID = '__simulation__';
@@ -147,101 +147,139 @@ export type Finding = {
   refs: Array<{ key: LineKey | string; month?: number; fiscalYear?: number }>;
 };
 
-const mad = (cents: number) => `${Math.round(cents / 100).toLocaleString('fr-FR')} MAD`;
+type Bi = { fr: string; ar: string };
+const bi = (fr: string, ar: string): Bi => ({ fr, ar });
 
-export function findings(model: StudyModel, r: StudyResult, x: StudyMetrics): Finding[] {
+/** Findings in the requested language; amounts, percentages and months are formatted for that language. */
+export function findings(model: StudyModel, r: StudyResult, x: StudyMetrics, lang: Lang = 'fr'): Finding[] {
   const out: Finding[] = [];
   const M = r.monthly;
   const N = r.calendar.months;
-  const lab = (m: number) => r.calendar.labels[m];
+  const lab = (m: number) => monthLabel(r.calendar.labels[m], lang);
+  const mad = (cents: number) => `${formatCentsMad(cents, lang)} ${lang === 'ar' ? 'درهم' : 'MAD'}`;
+  const pct = (share: number, digits: number) => formatPercent(share * 100, lang, digits);
+  const add = (f: Omit<Finding, 'title' | 'detail'> & { title: Bi; detail: Bi }) => out.push({ ...f, title: f.title[lang], detail: f.detail[lang] });
 
   if (!r.checks.ok) {
-    out.push({ id: 'reconciliation', kind: 'calculated', severity: 'critical', title: 'Contrôles de cohérence en échec', detail: 'Les états ne se rapprochent pas ; les résultats ne doivent pas être utilisés.', refs: [{ key: 'balanceDiff' }] });
+    add({ id: 'reconciliation', kind: 'calculated', severity: 'critical', title: bi('Contrôles de cohérence en échec', 'فشل مراقبة الاتساق'),
+      detail: bi('Les états ne se rapprochent pas ; les résultats ne doivent pas être utilisés.', 'القوائم غير متطابقة؛ لا يجب استعمال النتائج.'), refs: [{ key: 'balanceDiff' }] });
   }
   if (x.minCash.value != null && x.minCash.value < 0) {
-    out.push({
-      id: 'cash-negative', kind: 'calculated', severity: 'critical', title: 'Trésorerie négative',
-      detail: `La trésorerie descend à ${mad(x.minCash.value)} en ${lab(x.minCash.month!)} : un financement complémentaire de ce montant au moins est nécessaire.`,
+    add({
+      id: 'cash-negative', kind: 'calculated', severity: 'critical', title: bi('Trésorerie négative', 'خزينة سالبة'),
+      detail: bi(
+        `La trésorerie descend à ${mad(x.minCash.value)} en ${lab(x.minCash.month!)} : un financement complémentaire de ce montant au moins est nécessaire.`,
+        `تنخفض الخزينة إلى ${mad(x.minCash.value)} في ${lab(x.minCash.month!)}: يلزم تمويل إضافي بهذا المبلغ على الأقل.`,
+      ),
       refs: [{ key: 'cash', month: x.minCash.month }],
     });
   } else if (model.workingCapital.minimumCash > 0 && x.minCash.value != null && x.minCash.value < model.workingCapital.minimumCash * 100) {
-    out.push({
-      id: 'cash-below-minimum', kind: 'calculated', severity: 'warning', title: 'Trésorerie sous le minimum souhaité',
-      detail: `Point bas ${mad(x.minCash.value)} en ${lab(x.minCash.month!)} pour un minimum saisi de ${mad(model.workingCapital.minimumCash * 100)}.`,
+    add({
+      id: 'cash-below-minimum', kind: 'calculated', severity: 'warning', title: bi('Trésorerie sous le minimum souhaité', 'خزينة أقل من الحد الأدنى المرغوب'),
+      detail: bi(
+        `Point bas ${mad(x.minCash.value)} en ${lab(x.minCash.month!)} pour un minimum saisi de ${mad(model.workingCapital.minimumCash * 100)}.`,
+        `أدنى مستوى ${mad(x.minCash.value)} في ${lab(x.minCash.month!)} مقابل حد أدنى مُدخل قدره ${mad(model.workingCapital.minimumCash * 100)}.`,
+      ),
       refs: [{ key: 'cash', month: x.minCash.month }],
     });
   }
   const negEq = M.equity.findIndex((e) => e < 0);
   if (negEq >= 0) {
-    out.push({ id: 'equity-negative', kind: 'calculated', severity: 'critical', title: 'Capitaux propres négatifs', detail: `À partir de ${lab(negEq)}.`, refs: [{ key: 'equity', month: negEq }] });
+    add({ id: 'equity-negative', kind: 'calculated', severity: 'critical', title: bi('Capitaux propres négatifs', 'أموال ذاتية سالبة'),
+      detail: bi(`À partir de ${lab(negEq)}.`, `ابتداءً من ${lab(negEq)}.`), refs: [{ key: 'equity', month: negEq }] });
   }
   for (const y of x.years) {
     if (y.dscr.value != null && y.dscr.value < 1.2) {
-      out.push({
-        id: `dscr-${y.index}`, kind: 'convention', severity: y.dscr.value < 1 ? 'critical' : 'warning', title: `DSCR ${y.label} : ${y.dscr.value.toFixed(2).replace('.', ',')}`,
-        detail: y.dscr.value < 1 ? 'Les flux d’exploitation ne couvrent pas le service de la dette.' : 'Inférieur au seuil de 1,2 souvent demandé par les banques (pratique de marché).',
+      add({
+        id: `dscr-${y.index}`, kind: 'convention', severity: y.dscr.value < 1 ? 'critical' : 'warning',
+        title: bi(`DSCR ${y.label} : ${formatNumber(y.dscr.value, 'fr', 2)}`, `نسبة تغطية خدمة الدين ${y.label}: ${formatNumber(y.dscr.value, 'ar', 2)}`),
+        detail: y.dscr.value < 1
+          ? bi('Les flux d’exploitation ne couvrent pas le service de la dette.', 'تدفقات الاستغلال لا تغطي خدمة الدين.')
+          : bi('Inférieur au seuil de 1,2 souvent demandé par les banques (pratique de marché).', 'أقل من عتبة 1.2 التي تطلبها البنوك غالباً (ممارسة سوقية).'),
         refs: [{ key: 'cfo', fiscalYear: y.index }, { key: 'cashOutPrincipal', fiscalYear: y.index }],
       });
     }
     if (y.revenue > 0 && y.breakEvenRevenue.value == null) {
-      out.push({ id: `be-${y.index}`, kind: 'calculated', severity: 'warning', title: `Seuil de rentabilité ${y.label} inatteignable`, detail: y.breakEvenRevenue.reason ?? '', refs: [{ key: 'revenue', fiscalYear: y.index }] });
+      add({ id: `be-${y.index}`, kind: 'calculated', severity: 'warning', title: bi(`Seuil de rentabilité ${y.label} inatteignable`, `عتبة المردودية ${y.label} غير قابلة للبلوغ`),
+        detail: bi(y.breakEvenRevenue.reason ?? '', 'الهامش على التكاليف المتغيرة منعدم أو سالب.'), refs: [{ key: 'revenue', fiscalYear: y.index }] });
     } else if (y.safetyMarginPct.value != null && y.safetyMarginPct.value < 0) {
-      out.push({
-        id: `be-${y.index}`, kind: 'calculated', severity: 'warning', title: `Seuil de rentabilité ${y.label} non atteint`,
-        detail: `CA ${mad(y.revenue)} pour un CA critique de ${mad(y.breakEvenRevenue.value!)}.`, refs: [{ key: 'revenue', fiscalYear: y.index }],
+      add({
+        id: `be-${y.index}`, kind: 'calculated', severity: 'warning', title: bi(`Seuil de rentabilité ${y.label} non atteint`, `عتبة المردودية ${y.label} غير مبلوغة`),
+        detail: bi(`CA ${mad(y.revenue)} pour un CA critique de ${mad(y.breakEvenRevenue.value!)}.`, `رقم المعاملات ${mad(y.revenue)} مقابل رقم معاملات حرج قدره ${mad(y.breakEvenRevenue.value!)}.`),
+        refs: [{ key: 'revenue', fiscalYear: y.index }],
       });
     }
     if (y.revenue > 0 && y.grossMargin < 0) {
-      out.push({ id: `gm-${y.index}`, kind: 'calculated', severity: 'critical', title: `Marge brute négative en ${y.label}`, detail: 'Le coût des ventes dépasse le chiffre d’affaires.', refs: [{ key: 'cogs', fiscalYear: y.index }] });
+      add({ id: `gm-${y.index}`, kind: 'calculated', severity: 'critical', title: bi(`Marge brute négative en ${y.label}`, `هامش إجمالي سالب سنة ${y.label}`),
+        detail: bi('Le coût des ventes dépasse le chiffre d’affaires.', 'تكلفة المبيعات تتجاوز رقم المعاملات.'), refs: [{ key: 'cogs', fiscalYear: y.index }] });
     }
   }
   const firstProfit = x.years.find((y) => y.netIncome > 0);
-  out.push({
+  add({
     id: 'first-profit', kind: 'calculated', severity: 'info',
-    title: firstProfit ? `Premier exercice bénéficiaire : ${firstProfit.label}` : 'Aucun exercice bénéficiaire sur l’horizon',
-    detail: firstProfit ? `Résultat net ${mad(firstProfit.netIncome)}.` : 'Le projet reste déficitaire sur toute la durée étudiée.',
+    title: firstProfit
+      ? bi(`Premier exercice bénéficiaire : ${firstProfit.label}`, `أول سنة مالية رابحة: ${firstProfit.label}`)
+      : bi('Aucun exercice bénéficiaire sur l’horizon', 'لا توجد سنة مالية رابحة خلال الأفق'),
+    detail: firstProfit
+      ? bi(`Résultat net ${mad(firstProfit.netIncome)}.`, `النتيجة الصافية ${mad(firstProfit.netIncome)}.`)
+      : bi('Le projet reste déficitaire sur toute la durée étudiée.', 'يبقى المشروع عاجزاً طوال المدة المدروسة.'),
     refs: [{ key: 'netIncome' }],
   });
   if (x.peakFundingNeed.value && x.peakFundingNeed.value > 0) {
     const raised = x.totals.equityRaised + x.totals.loansRaised + x.totals.grants;
-    out.push({
+    add({
       id: 'funding', kind: 'calculated', severity: raised < x.peakFundingNeed.value ? 'warning' : 'info',
-      title: `Besoin de financement maximal : ${mad(x.peakFundingNeed.value)}`,
-      detail: `Ressources externes prévues : ${mad(raised)} (apports, emprunts, subventions).`,
+      title: bi(`Besoin de financement maximal : ${mad(x.peakFundingNeed.value)}`, `أقصى حاجة للتمويل: ${mad(x.peakFundingNeed.value)}`),
+      detail: bi(`Ressources externes prévues : ${mad(raised)} (apports, emprunts, subventions).`, `الموارد الخارجية المتوقعة: ${mad(raised)}، مساهمات وقروض ومنح.`),
       refs: [{ key: 'cashBeforeFinancing', month: x.peakFundingNeed.month }],
     });
   }
   const lastCredit = M.vatCreditAsset.slice(Math.max(0, N - 12));
   if (N >= 24 && lastCredit.every((v) => v > 0)) {
-    out.push({ id: 'vat-credit', kind: 'calculated', severity: 'warning', title: 'Crédit de TVA structurel', detail: 'Le crédit de TVA persiste sur les 12 derniers mois ; vérifier les taux de TVA. Le crédit d’exploitation n’est pas remboursable dans le cas général ; seul le remboursement de l’art. 103 bis sur investissements est modélisé (option à activer dans Hypothèses fiscales).', refs: [{ key: 'vatCreditAsset' }] });
+    add({ id: 'vat-credit', kind: 'calculated', severity: 'warning', title: bi('Crédit de TVA structurel', 'دين ضريبي هيكلي على القيمة المضافة'),
+      detail: bi(
+        'Le crédit de TVA persiste sur les 12 derniers mois ; vérifier les taux de TVA. Le crédit d’exploitation n’est pas remboursable dans le cas général ; seul le remboursement de l’art. 103 bis sur investissements est modélisé (option à activer dans Hypothèses fiscales).',
+        'يستمر دين الضريبة على القيمة المضافة خلال الأشهر الـ12 الأخيرة؛ تحقق من الأسعار. دين الاستغلال غير قابل للاسترداد في الحالة العامة؛ وحده استرداد المادة 103 مكرر على الاستثمارات منمذج، كخيار يُفعّل في الفرضيات الجبائية.',
+      ), refs: [{ key: 'vatCreditAsset' }] });
   }
   const revTotal = x.totals.revenue;
   if (revTotal > 0) {
     for (const p of r.products) {
       const share = p.revenue.reduce((s, v) => s + v, 0) / revTotal;
       if (r.products.length > 1 && share > 0.8) {
-        out.push({ id: `concentration-${p.id}`, kind: 'calculated', severity: 'info', title: 'Concentration du chiffre d’affaires', detail: `« ${p.name} » représente ${formatPct(share, 0)} du CA.`, refs: [{ key: 'revenue' }] });
+        add({ id: `concentration-${p.id}`, kind: 'calculated', severity: 'info', title: bi('Concentration du chiffre d’affaires', 'تركز رقم المعاملات'),
+          detail: bi(`« ${p.name} » représente ${pct(share, 0)} du CA.`, `«${p.name}» يمثل ${pct(share, 0)} من رقم المعاملات.`), refs: [{ key: 'revenue' }] });
       }
     }
     const payroll = M.salaries.reduce((s, v) => s + v, 0) + M.employerCharges.reduce((s, v) => s + v, 0);
-    out.push({ id: 'payroll-share', kind: 'calculated', severity: 'info', title: `Masse salariale : ${formatPct(payroll / revTotal, 1)} du CA`, detail: 'Coût employeur total rapporté au chiffre d’affaires de l’horizon.', refs: [{ key: 'salaries' }, { key: 'employerCharges' }] });
+    add({ id: 'payroll-share', kind: 'calculated', severity: 'info',
+      title: bi(`Masse salariale : ${pct(payroll / revTotal, 1)} du CA`, `كتلة الأجور: ${pct(payroll / revTotal, 1)} من رقم المعاملات`),
+      detail: bi('Coût employeur total rapporté au chiffre d’affaires de l’horizon.', 'التكلفة الإجمالية للمشغل منسوبة إلى رقم معاملات الأفق.'), refs: [{ key: 'salaries' }, { key: 'employerCharges' }] });
   }
   for (const p of model.products) {
     const high = p.volumeGrowthPct.find((g) => g > 50);
     if (high != null) {
-      out.push({ id: `growth-${p.id}`, kind: 'assumption', severity: 'warning', title: `Croissance saisie élevée pour « ${p.name} »`, detail: `${high} % par an : hypothèse à justifier (étude de marché, contrats, historique).`, refs: [{ key: 'revenue' }] });
+      add({ id: `growth-${p.id}`, kind: 'assumption', severity: 'warning', title: bi(`Croissance saisie élevée pour « ${p.name} »`, `نمو مُدخل مرتفع لـ«${p.name}»`),
+        detail: bi(`${formatPercent(high, 'fr', 0)} par an : hypothèse à justifier (étude de marché, contrats, historique).`, `${formatPercent(high, 'ar', 0)} سنوياً: فرضية يجب تبريرها بدراسة سوق أو عقود أو تاريخ.`), refs: [{ key: 'revenue' }] });
     }
     if (p.unitPrice > 0 && p.unitCost >= p.unitPrice) {
-      out.push({ id: `price-${p.id}`, kind: 'assumption', severity: 'warning', title: `Coût unitaire ≥ prix pour « ${p.name} »`, detail: 'Chaque vente détruit de la marge.', refs: [{ key: 'cogs' }] });
+      add({ id: `price-${p.id}`, kind: 'assumption', severity: 'warning', title: bi(`Coût unitaire ≥ prix pour « ${p.name} »`, `التكلفة الوحدوية ≥ الثمن لـ«${p.name}»`),
+        detail: bi('Chaque vente détruit de la marge.', 'كل عملية بيع تُفقد الهامش.'), refs: [{ key: 'cogs' }] });
     }
   }
   if (model.tax.localTaxes.length === 0 && model.tax.regime !== 'auto_entrepreneur') {
-    out.push({ id: 'local-taxes', kind: 'assumption', severity: 'info', title: 'Impôts locaux non saisis', detail: 'Taxe professionnelle, taxe de services communaux et droits d’enregistrement ne sont pas calculés automatiquement : saisissez-les avec leur base légale.', refs: [] });
+    add({ id: 'local-taxes', kind: 'assumption', severity: 'info', title: bi('Impôts locaux non saisis', 'الضرائب المحلية غير مُدخلة'),
+      detail: bi(
+        'Taxe professionnelle, taxe de services communaux et droits d’enregistrement ne sont pas calculés automatiquement : saisissez-les avec leur base légale.',
+        'الرسم المهني ورسم الخدمات الجماعية وواجبات التسجيل لا تحسب تلقائياً: أدخلها مع سندها القانوني.',
+      ), refs: [] });
   }
   for (const w of r.warnings) {
     if (w.code === 'is_assumed_unchanged' || w.code === 'is_rule_missing') {
       const rule = ruleById(w.code === 'is_assumed_unchanged' ? 'is-2026' : 'is-2023-2025');
-      out.push({ id: `rule-${w.code}`, kind: 'assumption', severity: w.severity === 'error' ? 'critical' : 'info', title: 'Règle fiscale à confirmer', detail: `${w.message}${rule ? ` Référence : ${rule.source?.reference ?? ''}.` : ''}`, refs: [{ key: 'incomeTax' }] });
+      const ref = rule?.source?.reference ?? '';
+      add({ id: `rule-${w.code}`, kind: 'assumption', severity: w.severity === 'error' ? 'critical' : 'info', title: bi('Règle fiscale à confirmer', 'قاعدة جبائية يجب تأكيدها'),
+        detail: bi(`${w.message}${rule ? ` Référence : ${ref}.` : ''}`, `${w.messageAr}${rule ? ` المرجع: ${ref}.` : ''}`), refs: [{ key: 'incomeTax' }] });
     }
   }
   return out;
