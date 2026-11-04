@@ -143,6 +143,7 @@ export function StudioHome() {
 
         <Card title={t('studies')} actions={
           <div className="flex flex-wrap gap-4">
+            {v2.length >= 2 && <Link href="/etude-projet/compare" className="text-xs font-medium text-blue-700 underline">{t(bi('Comparer deux études', 'مقارنة دراستين'))}</Link>}
             <Toggle label={t(bi('Afficher les archives', 'عرض المؤرشفة'))} checked={includeArchived} onChange={setIncludeArchived} />
             {company.id && <Toggle label={t(bi('Toutes mes entreprises', 'كل مقاولاتي'))} checked={allCompanies} onChange={setAllCompanies} />}
           </div>
