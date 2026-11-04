@@ -9,7 +9,7 @@ import { computeStudy } from '../../app/lib/business-studio/engine';
 import { formatCentsMad, formatNumber, monthLabel } from '../../app/lib/business-studio/i18n';
 import { computeMetrics } from '../../app/lib/business-studio/metrics';
 import { newRisk } from '../../app/lib/business-studio/model';
-import { buildReport, formatCell, REPORT_TYPES, type Block, type Report } from '../../app/lib/business-studio/report-model';
+import { buildReport, formatCell, REPORT_TYPES, type Block } from '../../app/lib/business-studio/report-model';
 import { renderReportPdf } from '../../app/lib/business-studio/report-pdf';
 import { renderReportXlsx } from '../../app/lib/business-studio/report-xlsx';
 import { richModel } from './fixtures';
@@ -30,8 +30,6 @@ function setup() {
   const metrics = computeMetrics(model, result);
   return { model, result, metrics };
 }
-
-const tables = (r: Report) => r.sections.flatMap((s) => s.blocks).filter((b): b is Extract<Block, { kind: 'table' }> => b.kind === 'table');
 
 test('every report type builds in French and Arabic with content', () => {
   const { model, result, metrics } = setup();

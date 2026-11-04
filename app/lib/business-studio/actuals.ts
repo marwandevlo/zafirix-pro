@@ -66,6 +66,16 @@ export function aggregateActuals(lines: readonly ActualLine[], monthLabels: read
   return { months: [...monthLabels], series, lineCount, ignoredLines: ignored };
 }
 
+/** Re-indexes actuals onto another calendar (e.g. an edited, unsaved horizon); months absent from the source are zero. */
+export function alignActuals(a: ActualsByMonth, monthLabels: readonly string[]): ActualsByMonth {
+  const pos = new Map(a.months.map((l, i) => [l, i]));
+  const series = Object.fromEntries(Object.entries(a.series).map(([k, s]) => [k, monthLabels.map((l) => {
+    const i = pos.get(l);
+    return i == null ? 0 : s[i];
+  })])) as ActualsByMonth['series'];
+  return { ...a, months: [...monthLabels], series };
+}
+
 export type VarianceRow = { key: string; label: string; forecast: Cents; actual: Cents; variance: Cents; variancePct: number | null };
 
 /** Forecast vs actual for a month range (inclusive), on comparable lines only. */

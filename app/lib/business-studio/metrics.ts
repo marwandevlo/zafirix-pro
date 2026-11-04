@@ -382,7 +382,7 @@ export function computeMetrics(model: StudyModel, r: StudyResult): StudyMetrics 
       equityRaised: total('cashInEquity'), loansRaised: total('cashInLoans'), grants: total('cashInGrants'),
       dividends: total('dividendsGross'), taxes: total('incomeTax') + total('localTaxes'),
     },
-    npv: ind(n0.npv, 'mad', `Σ FCFF actualisés au taux annuel de ${rate} % (fin de mois), sans valeur terminale`),
+    npv: ind(n0.npv, 'mad', `Σ FCFF actualisés au taux annuel de ${rate} % (fin de mois), sans valeur terminale ; FCFF = flux d’exploitation (IS pris en charge de l’exercice, sans décalage de paiement) + intérêts payés − charges financières × taux d’IS légal + flux d’investissement`),
     npvTerminal: nT == null
       ? ind(null, 'mad', 'VAN + valeur terminale de Gordon', { reason: 'Croissance terminale non saisie.' })
       : ind(nT.reason ? null : nT.npv, 'mad', `VAN + valeur terminale (FCFF des 12 derniers mois × (1 + ${g} %) ÷ (${rate} % − ${g} %))`, nT.reason ? { reason: nT.reason } : {}),

@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 
 import { buildCalendar, computeStudy, type StudyResult } from '../../app/lib/business-studio/engine';
 import { emptyModel, newInvestment, newLoan, newProduct, newExpense, validateStudyModel } from '../../app/lib/business-studio/model';
+import { computeWithLevers } from '../../app/lib/business-studio/analysis';
 import { richModel } from './fixtures';
 
 const total = (s: number[]) => s.reduce((a, b) => a + b, 0);
@@ -279,6 +280,39 @@ test('existing company with opening balance reconciles and consumes opening posi
   assert.equal(opening.rows.at(-1)!.closing, 0);
   assert.equal(total(opening.rows.map((x) => x.principal)), 250000 * 100);
   assert.ok(!r.warnings.some((w) => w.code === 'opening_inventory_static'));
+});
+
+test('raw-material expenses are consumed purchases, not external charges', () => {
+  const m = richModel(3);
+  const base = computeStudy(m);
+  m.expenses.push(newExpense({ id: 'rm', name: 'Matières', category: 'raw_materials', behavior: 'variable_revenue_pct', pctOfRevenue: 5 }));
+  const r = computeStudy(m);
+  assertReconciled(r, 'raw materials');
+  const rm = total(r.expenses.find((e) => e.id === 'rm')!.amount);
+  assert.ok(rm > 0);
+  assert.equal(total(r.monthly.cogs) - total(base.monthly.cogs), rm);
+  assert.equal(total(r.monthly.purchases) - total(base.monthly.purchases), rm);
+  assert.equal(total(r.monthly.externalCharges), total(base.monthly.externalCharges));
+  assert.equal(total(r.monthly.variableOpex), total(base.monthly.variableOpex));
+  assert.equal(total(r.monthly.ebitda), total(base.monthly.ebitda) - rm);
+});
+
+test('FCFF excludes the interest tax shield, so the financing rate cannot raise project NPV', () => {
+  const { result: r, metrics: base } = computeWithLevers(richModel(5), {});
+  const { metrics: hi } = computeWithLevers(richModel(5), { interestDeltaPts: 3 });
+  assert.ok(total(r.monthly.cashOutInterest) > 0);
+  assert.ok(hi.npv.value! <= base.npv.value!, `npv ${base.npv.value} -> ${hi.npv.value}`);
+  const taxedYear = r.isYears.find((y) => y.taxable > 0 && y.exemptionReduction === 0)!;
+  const fy = r.calendar.fiscalYears[taxedYear.fiscalYearIndex];
+  const m = Array.from({ length: fy.months }, (_, i) => fy.firstMonth + i).find((x) => r.monthly.financialCharges[x] > 0)!;
+  const t = taxedYear.ratePct / 100;
+  const isNet = (k: number) => r.monthly.incomeTaxPayable[k] - r.monthly.incomeTaxReceivable[k];
+  const dIsNet = isNet(m) - isNet(m - 1);
+  assert.equal(r.monthly.fcff[m], r.monthly.cfo[m] - dIsNet + r.monthly.cashOutInterest[m] - Math.round(r.monthly.financialCharges[m] * t) + r.monthly.cfi[m]);
+  for (const d of [1, 2, 4]) {
+    const { metrics } = computeWithLevers(richModel(5), { interestDeltaPts: d });
+    assert.ok(metrics.npv.value! <= base.npv.value!, `+${d} pts: npv ${base.npv.value} -> ${metrics.npv.value}`);
+  }
 });
 
 test('engine is deterministic', () => {

@@ -8,13 +8,13 @@ import { variance, type ActualsByMonth } from './actuals';
 import { compareScenarios, findings, runStressTests, sensitivityMatrix, tornado } from './analysis';
 import type { StudyResult } from './engine';
 import {
-  formatCentsMad, formatNumber, formatPercent, monthLabel, PROJECT_TYPE_LABEL, SECTOR_LABEL, STR, tr, type Bi, type Lang,
+  formatCentsMad, formatNumber, formatPercent, monthLabel, PROJECT_TYPE_LABEL, RULE_STATUS_BI, SECTOR_LABEL, STR, tr, type Bi, type Lang,
 } from './i18n';
 import type { Indicator, StudyMetrics } from './metrics';
 import type { StudyModel } from './model';
 import { sectorKpis } from './sectors';
 import { statementTable, type StatementId } from './statements';
-import { LAST_INTEGRATED_FINANCE_LAW, RULES, RULE_STATUS_LABEL, TAX_RULES_VERSION } from './tax-rules';
+import { LAST_INTEGRATED_FINANCE_LAW, RULES, TAX_RULES_VERSION } from './tax-rules';
 
 export type ReportType = 'full' | 'bank' | 'investor' | 'financials' | 'tax' | 'scenarios' | 'actuals';
 export const REPORT_TYPES: readonly ReportType[] = ['full', 'bank', 'investor', 'financials', 'tax', 'scenarios', 'actuals'];
@@ -376,7 +376,7 @@ function taxSection(ctx: Ctx): Section {
     rows: r.isYears.map((y) => ({
       label: `${y.label}${y.partial ? '*' : ''}`,
       cells: [mad(y.accountingResult), mad(y.nonDeductible), mad(y.lossesUsed), mad(y.taxable), { v: y.ratePct, u: 'pct' }, mad(y.computedTax),
-        mad(y.minimumContributionExempt ? 0 : y.minimumContribution), mad(y.taxDue), txt(y.rateStatus === 'override' ? t(B('Taux saisi', 'سعر مُدخل')) : (RULE_STATUS_LABEL[y.rateStatus] ?? y.rateStatus))],
+        mad(y.minimumContributionExempt ? 0 : y.minimumContribution), mad(y.taxDue), txt(t(RULE_STATUS_BI[y.rateStatus]))],
     })),
   });
   const fy = r.calendar.fiscalYears;
@@ -414,7 +414,7 @@ function rulesTable(ctx: Ctx): Block {
     head: [t(B('Règle', 'القاعدة')), t(B('Impôt', 'الضريبة')), t(B('Période', 'الفترة')), t(B('Statut', 'الوضعية')), t(B('Source', 'المصدر'))],
     rows: RULES.map((rule) => ({
       label: rule.label,
-      cells: [txt(rule.tax), txt(`${rule.effectiveFrom ?? '…'} → ${rule.effectiveTo ?? '…'}`), txt(RULE_STATUS_LABEL[rule.status]), txt(rule.source ? `${rule.source.document}, ${rule.source.reference}` : '—')],
+      cells: [txt(rule.tax), txt(`${rule.effectiveFrom ?? '…'} → ${rule.effectiveTo ?? '…'}`), txt(t(RULE_STATUS_BI[rule.status])), txt(rule.source ? `${rule.source.document}, ${rule.source.reference}` : '—')],
     })),
   };
 }

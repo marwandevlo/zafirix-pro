@@ -3,8 +3,20 @@
  * Arabic wording should be proofread by a native professional before external distribution.
  */
 
+import { LAST_VERIFIED_FISCAL_YEAR, RULE_STATUS_LABEL, type RuleStatus } from './tax-rules';
+
 export type Lang = 'fr' | 'ar';
 export type Bi = { fr: string; ar: string };
+
+export const RULE_STATUS_BI: Record<RuleStatus | 'override', Bi> = {
+  verified_official: { fr: RULE_STATUS_LABEL.verified_official, ar: 'مقروء في النص الرسمي (المدونة العامة للضرائب 2026) — غير مراجع من طرف خبير' },
+  verified_regulator: { fr: RULE_STATUS_LABEL.verified_regulator, ar: 'مصدر رسمي لهيئة التقنين — المراسيم غير مطلع عليها' },
+  convention: { fr: RULE_STATUS_LABEL.convention, ar: 'اصطلاح حسابي للبرنامج — يجب التحقق منه من طرف مهني' },
+  assumed_unchanged: { fr: RULE_STATUS_LABEL.assumed_unchanged, ar: `افتراض: استمرار قاعدة ${LAST_VERIFIED_FISCAL_YEAR} — لم يتم إدماج أي قانون مالية لاحق` },
+  user_defined: { fr: RULE_STATUS_LABEL.user_defined, ar: 'قيمة أدخلها المستخدم — يجب التحقق منها من طرف مهني' },
+  not_covered: { fr: RULE_STATUS_LABEL.not_covered, ar: 'غير مشمول بالبرنامج — يحدد مع مهني' },
+  override: { fr: 'Taux saisi par l’utilisateur — à valider par un professionnel', ar: 'سعر أدخله المستخدم — يجب التحقق منه من طرف مهني' },
+};
 
 export const STR = {
   appTitle: { fr: 'Étude de projet — Business Studio', ar: 'دراسة المشروع — استوديو الأعمال' },

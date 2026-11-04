@@ -494,8 +494,10 @@ export function validateStudyModel(input: unknown): ValidationResult {
   const c = rec(p.company);
   const pr = rec(p.project);
   const rawLogo = typeof c.logoDataUrl === 'string' ? c.logoDataUrl : '';
+  const logoFormatOk = rawLogo === '' || /^data:image\/(png|jpeg);base64,[A-Za-z0-9+/=]+$/.test(rawLogo);
   if (rawLogo.length > 400_000) ctx.issues.push({ path: 'profile.company.logoDataUrl', message: 'Logo trop volumineux (300 Ko maximum).', severity: 'error' });
-  const logo = rawLogo.length > 400_000 ? '' : rawLogo;
+  else if (!logoFormatOk) ctx.issues.push({ path: 'profile.company.logoDataUrl', message: 'Logo : seuls les formats PNG et JPEG (base64) sont acceptés.', severity: 'error' });
+  const logo = rawLogo.length > 400_000 || !logoFormatOk ? '' : rawLogo;
   const profile: StudyProfile = {
     company: {
       name: str(c.name, 200), tradingName: str(c.tradingName, 200),

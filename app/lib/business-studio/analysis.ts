@@ -7,20 +7,26 @@
 import { computeStudy, type LineKey, type StudyResult } from './engine';
 import { computeMetrics, type StudyMetrics } from './metrics';
 import { type Levers, NEUTRAL_LEVERS, type StudyModel } from './model';
+import { formatPct } from './money';
 import { ruleById } from './tax-rules';
 
 const SIM_ID = '__simulation__';
 
 /** Runs the model with ad-hoc levers stacked on top of a scenario's levers. */
+/** Adds lever deltas to a scenario's levers; the IS rate override replaces instead of adding. */
+export function mergeLevers(base: Levers, deltas: Partial<Levers>): Levers {
+  const out: Levers = { ...base };
+  for (const [k, v] of Object.entries(deltas) as Array<[keyof Levers, number | null | undefined]>) {
+    if (v == null) continue;
+    if (k === 'isRateOverridePct') out.isRateOverridePct = v;
+    else (out[k] as number) = ((base[k] as number) ?? 0) + v;
+  }
+  return out;
+}
+
 export function computeWithLevers(model: StudyModel, levers: Partial<Levers>, baseScenarioId?: string): { result: StudyResult; metrics: StudyMetrics } {
   const base = model.scenarios.find((s) => s.id === (baseScenarioId ?? model.activeScenarioId)) ?? model.scenarios[0];
-  const baseLevers = base?.levers ?? NEUTRAL_LEVERS;
-  const merged: Levers = { ...baseLevers };
-  for (const [k, v] of Object.entries(levers) as Array<[keyof Levers, number | null]>) {
-    if (v == null) continue;
-    if (k === 'isRateOverridePct') merged.isRateOverridePct = v;
-    else (merged[k] as number) = ((baseLevers[k] as number) ?? 0) + v;
-  }
+  const merged = mergeLevers(base?.levers ?? NEUTRAL_LEVERS, levers);
   const m: StudyModel = {
     ...model,
     scenarios: [...model.scenarios, { id: SIM_ID, name: 'Simulation', kind: 'custom', description: '', levers: merged, parentId: base?.id ?? null, createdAt: '' }],
@@ -172,7 +178,7 @@ export function findings(model: StudyModel, r: StudyResult, x: StudyMetrics): Fi
   for (const y of x.years) {
     if (y.dscr.value != null && y.dscr.value < 1.2) {
       out.push({
-        id: `dscr-${y.index}`, kind: 'convention', severity: y.dscr.value < 1 ? 'critical' : 'warning', title: `DSCR ${y.label} : ${y.dscr.value.toFixed(2)}`,
+        id: `dscr-${y.index}`, kind: 'convention', severity: y.dscr.value < 1 ? 'critical' : 'warning', title: `DSCR ${y.label} : ${y.dscr.value.toFixed(2).replace('.', ',')}`,
         detail: y.dscr.value < 1 ? 'Les flux d’exploitation ne couvrent pas le service de la dette.' : 'Inférieur au seuil de 1,2 souvent demandé par les banques (pratique de marché).',
         refs: [{ key: 'cfo', fiscalYear: y.index }, { key: 'cashOutPrincipal', fiscalYear: y.index }],
       });
@@ -214,11 +220,11 @@ export function findings(model: StudyModel, r: StudyResult, x: StudyMetrics): Fi
     for (const p of r.products) {
       const share = p.revenue.reduce((s, v) => s + v, 0) / revTotal;
       if (r.products.length > 1 && share > 0.8) {
-        out.push({ id: `concentration-${p.id}`, kind: 'calculated', severity: 'info', title: 'Concentration du chiffre d’affaires', detail: `« ${p.name} » représente ${(share * 100).toFixed(0)} % du CA.`, refs: [{ key: 'revenue' }] });
+        out.push({ id: `concentration-${p.id}`, kind: 'calculated', severity: 'info', title: 'Concentration du chiffre d’affaires', detail: `« ${p.name} » représente ${formatPct(share, 0)} du CA.`, refs: [{ key: 'revenue' }] });
       }
     }
     const payroll = M.salaries.reduce((s, v) => s + v, 0) + M.employerCharges.reduce((s, v) => s + v, 0);
-    out.push({ id: 'payroll-share', kind: 'calculated', severity: 'info', title: `Masse salariale : ${((payroll / revTotal) * 100).toFixed(1)} % du CA`, detail: 'Coût employeur total rapporté au chiffre d’affaires de l’horizon.', refs: [{ key: 'salaries' }, { key: 'employerCharges' }] });
+    out.push({ id: 'payroll-share', kind: 'calculated', severity: 'info', title: `Masse salariale : ${formatPct(payroll / revTotal, 1)} du CA`, detail: 'Coût employeur total rapporté au chiffre d’affaires de l’horizon.', refs: [{ key: 'salaries' }, { key: 'employerCharges' }] });
   }
   for (const p of model.products) {
     const high = p.volumeGrowthPct.find((g) => g > 50);

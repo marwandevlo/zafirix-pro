@@ -455,6 +455,8 @@ export function computeStudy(input: StudyModel, scenarioId?: string): StudyResul
     const det: ExpenseDetail = { id: e.id, name: e.name, category: e.category, costCenter: e.costCenter, amount: zeros(N) };
     const g = e.growthPct + (e.indexedOnInflation ? inflation : 0);
     const deductible = vatOn && e.vatDeductible;
+    // CGNC 612: consumed materials and supplies are purchases (achats consommés), not other external charges.
+    const consumed = e.category === 'raw_materials';
     for (let m = e.startMonth; m < N && (e.endMonth == null || m <= e.endMonth); m += 1) {
       const y = Math.floor(m / 12);
       const ht = e.behavior === 'fixed'
@@ -465,8 +467,13 @@ export function computeStudy(input: StudyModel, scenarioId?: string): StudyResul
       if (e.vatRatePct > 0) checkVat(e.vatRatePct, m, `Charge « ${e.name} »`);
       const cost = deductible ? ht : ht + vat;
       det.amount[m] = cost;
-      M.externalCharges[m] += cost;
-      if (e.behavior === 'fixed') M.fixedOpex[m] += cost; else M.variableOpex[m] += cost;
+      if (consumed) {
+        M.purchases[m] += cost;
+        M.cogs[m] += cost;
+      } else {
+        M.externalCharges[m] += cost;
+        if (e.behavior === 'fixed') M.fixedOpex[m] += cost; else M.variableOpex[m] += cost;
+      }
       const dVat = deductible ? vat : 0;
       vatDedInvoiced[m] += dVat;
       payablesInvoiced[m] += ht + vat;
@@ -1110,6 +1117,16 @@ export function computeStudy(input: StudyModel, scenarioId?: string): StudyResul
   let pfMax = 0;
   let pnlMax = 0;
   let cumBeforeFinancing = ob ? toCents(ob.cash) : 0;
+  // Unlevered FCFF removes the tax saving on financial charges at the year's statutory rate, whether the saving is
+  // immediate or deferred through loss carry-forwards; otherwise a higher interest rate could raise project NPV.
+  const interestShieldRate = new Array<number>(N).fill(0);
+  for (const y of isYears) {
+    const fy = cal.fiscalYears[y.fiscalYearIndex];
+    const incentiveShare = y.computedTax > 0 ? Math.max(0, y.computedTax - y.exemptionReduction) / y.computedTax : 1;
+    const isPct = y.taxable > 0 || y.rateStatus === 'override' ? y.ratePct : (resolveIsRate(0.01, y.openYear, tax.isCategory)?.ratePct ?? 0);
+    const statutory = y.regime === 'is' ? isPct / 100 : (y.taxable > 0 ? y.computedTax / y.taxable : 0);
+    for (let m = fy.firstMonth; m < Math.min(N, fy.firstMonth + fy.months); m += 1) interestShieldRate[m] = statutory * incentiveShare;
+  }
   for (let m = 0; m < N; m += 1) {
     const prev = (k: LineKey) => (m === 0 ? openingValue(k) : M[k][m - 1]);
     const d = (k: LineKey) => M[k][m] - prev(k);
@@ -1130,7 +1147,8 @@ export function computeStudy(input: StudyModel, scenarioId?: string): StudyResul
     const pnl = M.revenue[m] + M.operatingGrants[m] - M.cogs[m] - M.externalCharges[m] - M.localTaxes[m] - M.salaries[m]
       - M.employerCharges[m] - M.depreciation[m] - M.financialCharges[m] + M.grantRelease[m] - M.badDebts[m] - M.incomeTax[m];
     pnlMax = Math.max(pnlMax, Math.abs(pnl - M.netIncome[m]));
-    M.fcff[m] = M.cfo[m] + (M.cashOutInterest[m]) + M.cfi[m];
+    // Income tax is taken when expensed (not on the instalment schedule, which depends on the previous year's levered tax).
+    M.fcff[m] = M.cfo[m] - dIsNet + M.cashOutInterest[m] - roundHalfAwayFromZero(M.financialCharges[m] * interestShieldRate[m]) + M.cfi[m];
     M.fcfe[m] = dCash - M.cashInEquity[m] + M.dividendsGross[m];
     cumBeforeFinancing += M.cfo[m] + M.cashOutInterest[m] + M.cfi[m];
     M.cashBeforeFinancing[m] = cumBeforeFinancing;
