@@ -113,6 +113,13 @@ export async function startPostgrest({ dbPort = 55532, port = 55533 } = {}) {
 export async function startGateway({ admin, postgrestPort = 55533, port = 55521 }) {
   const server = http.createServer(async (req, res) => {
     const url = new URL(req.url, `http://127.0.0.1:${port}`);
+    if (req.headers.origin) {
+      res.setHeader('access-control-allow-origin', req.headers.origin);
+      res.setHeader('access-control-allow-headers', req.headers['access-control-request-headers'] ?? '*');
+      res.setHeader('access-control-allow-methods', 'GET,POST,PATCH,PUT,DELETE,OPTIONS');
+      res.setHeader('access-control-expose-headers', 'content-range,content-profile');
+    }
+    if (req.method === 'OPTIONS') { res.writeHead(204); res.end(); return; }
     if (url.pathname === '/auth/v1/user') {
       const auth = String(req.headers.authorization ?? '');
       const claims = auth.toLowerCase().startsWith('bearer ') ? verifyJwt(auth.slice(7)) : null;
