@@ -198,18 +198,23 @@ test('desktop FR: create, fill, save, reopen, analyse, generate and download', a
   await expect(page.locator('table').first()).toBeVisible();
   await page.screenshot({ path: join(OUT, 'desktop-fr-statements.png'), fullPage: true });
 
+  await expect(page.getByRole('heading', { name: 'Rapports et téléchargements' })).toBeVisible();
+  await expect(page.getByRole('button', { name: /Générer et télécharger/ })).toBeVisible();
   await tab(page, 'Rapports').click();
   const full = 'Étude de projet complète';
-  const files = {
-    fullPdfFr: await download(page, full, 'PDF · Français', 'desktop'),
-    fullXlsxFr: await download(page, full, 'XLSX · Français', 'desktop'),
-    fullPdfAr: await download(page, full, 'PDF · العربية', 'desktop'),
-    fullXlsxAr: await download(page, full, 'XLSX · العربية', 'desktop'),
-    bankPdfFr: await download(page, 'Dossier de financement bancaire', 'PDF · Français', 'desktop'),
+  const files: Record<string, Awaited<ReturnType<typeof download>>> = {
+    fullPdfFr: await download(page, full, 'Télécharger PDF', 'desktop'),
+    fullXlsxFr: await download(page, full, 'Télécharger Excel (.xlsx)', 'desktop'),
+    fullDocxFr: await download(page, full, 'Télécharger Word (.docx)', 'desktop'),
   };
+  await page.getByRole('group', { name: 'Langue / اللغة' }).getByRole('button', { name: 'العربية', exact: true }).click();
+  files.fullPdfAr = await download(page, 'دراسة المشروع الكاملة', 'تنزيل PDF', 'desktop');
+  files.fullXlsxAr = await download(page, 'دراسة المشروع الكاملة', 'تنزيل Excel (.xlsx)', 'desktop');
+  await page.getByRole('group', { name: 'Langue / اللغة' }).getByRole('button', { name: 'FR', exact: true }).click();
+  files.bankPdfFr = await download(page, 'Dossier de financement bancaire', 'Télécharger PDF', 'desktop');
   record('downloads', files);
 
-  await card(page, full).getByRole('button', { name: 'Aperçu · Français', exact: true }).click();
+  await card(page, full).getByRole('button', { name: 'Prévisualiser le rapport', exact: true }).click();
   const frame = page.locator('iframe[title]');
   await expect(frame).toBeVisible({ timeout: 120_000 });
   await expect(page.getByRole('link', { name: 'Ouvrir dans un nouvel onglet' })).toBeVisible();
@@ -249,10 +254,13 @@ test('desktop FR: every horizon recomputes and saves', async ({ page }, info) =>
   record('horizons', seen);
   await tab(page, 'Rapports').click();
   record('downloads30y', {
-    pdfFr: await download(page, 'Étude de projet complète', 'PDF · Français', 'h30'),
-    xlsxFr: await download(page, 'Étude de projet complète', 'XLSX · Français', 'h30'),
-    pdfAr: await download(page, 'Étude de projet complète', 'PDF · العربية', 'h30'),
+    pdfFr: await download(page, 'Étude de projet complète', 'Télécharger PDF', 'h30'),
+    xlsxFr: await download(page, 'Étude de projet complète', 'Télécharger Excel (.xlsx)', 'h30'),
+    docxFr: await download(page, 'Étude de projet complète', 'Télécharger Word (.docx)', 'h30'),
   });
+  await page.getByRole('group', { name: 'Langue / اللغة' }).getByRole('button', { name: 'العربية', exact: true }).click();
+  record('downloads30yAr', { pdfAr: await download(page, 'دراسة المشروع الكاملة', 'تنزيل PDF', 'h30') });
+  await page.getByRole('group', { name: 'Langue / اللغة' }).getByRole('button', { name: 'FR', exact: true }).click();
   await tab(page, 'Hypothèses').click();
   await page.getByRole('button', { name: '7 ans', exact: true }).click();
   await waitSaved(page);
@@ -341,12 +349,14 @@ test('mobile AR: RTL layout without overflow, reports downloadable', async ({ pa
   await page.screenshot({ path: join(OUT, 'mobile-ar-last-tab.png'), fullPage: true });
   expect(Object.values(overflow).every((px) => px <= 1), JSON.stringify(overflow)).toBe(true);
 
+  await expect(page.getByRole('heading', { name: 'التقارير والتنزيلات' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'إنشاء الدراسة وتنزيلها' })).toBeVisible();
   await tab(page, 'التقارير').click();
   const full = 'دراسة المشروع الكاملة';
   record('mobileDownloads', {
-    pdfAr: await download(page, full, 'PDF · العربية', 'mobile'),
-    xlsxAr: await download(page, full, 'XLSX · العربية', 'mobile'),
-    pdfFr: await download(page, full, 'PDF · Français', 'mobile'),
+    pdfAr: await download(page, full, 'تنزيل PDF', 'mobile'),
+    xlsxAr: await download(page, full, 'تنزيل Excel (.xlsx)', 'mobile'),
+    docxAr: await download(page, full, 'تنزيل Word (.docx)', 'mobile'),
   });
   await page.screenshot({ path: join(OUT, 'mobile-ar-reports.png'), fullPage: true });
 });

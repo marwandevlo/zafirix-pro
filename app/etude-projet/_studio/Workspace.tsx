@@ -13,6 +13,7 @@ import { Actuals } from './Actuals';
 import { Assumptions } from './Assumptions';
 import { ApiError, studioApi } from './client';
 import { Dashboard } from './Dashboard';
+import { StudyDownloads } from './downloads';
 import { Profile } from './Profile';
 import { Reports } from './Reports';
 import { Risks } from './Risks';
@@ -229,7 +230,7 @@ export function Workspace({ studyId }: { studyId: string }) {
 
   return (
     <div className="flex flex-col min-h-0 flex-1">
-      <header className="bg-white border-b border-gray-200 px-4 sm:px-6 py-3 space-y-2 shrink-0">
+      <header className="bg-white border-b border-gray-200 px-4 sm:px-6 py-3 space-y-2 shrink-0 max-h-[58vh] overflow-y-auto">
         <div className="flex flex-wrap items-center gap-3">
           <Link href="/etude-projet" className="text-xs text-gray-500 hover:text-gray-800">← {t('studies')}</Link>
           <input aria-label={t('name')} dir="auto" value={name} disabled={disabled} maxLength={200} onChange={(e) => rename(e.target.value)}
@@ -240,6 +241,11 @@ export function Workspace({ studyId }: { studyId: string }) {
           </span>
           <LangToggle />
         </div>
+        {computed && (
+          <StudyDownloads studyId={studyId} studyName={name} model={deferredValid!} r={computed.r} x={computed.x} revision={study.meta.revision}
+            status={status === 'approved' ? (study.meta.approval?.independent ? 'approved_independent' : 'approved_self') : status} hasCompany={Boolean(study.companyId)} unsaved={save !== 'saved'} />
+        )}
+        {!computed && <Notice tone="warning">{t(bi('Les téléchargements seront disponibles dès que les hypothèses permettent un calcul.', 'تصبح التنزيلات متاحة عندما تسمح الفرضيات بإجراء الحساب.'))}</Notice>}
         <div className="flex flex-wrap items-center gap-2">
           <label className="text-xs text-gray-600 flex items-center gap-1.5">
             {t('scenario')}

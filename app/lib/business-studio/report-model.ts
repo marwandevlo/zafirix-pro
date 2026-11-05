@@ -879,7 +879,12 @@ export function buildReport(input: ReportInput): Report {
   };
 }
 
-export function reportFileName(report: Report, ext: 'pdf' | 'xlsx'): string {
+/** A draft may be exported. The file then carries this label in every format. */
+export function isDraftStatus(status: string): boolean {
+  return /brouillon|^draft$|مسودة/i.test(status.trim());
+}
+
+export function reportFileName(report: Report, ext: 'pdf' | 'xlsx' | 'docx'): string {
   const base = `${report.studyName || 'etude'}-${report.type}-${report.lang}`.normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^A-Za-z0-9_-]+/g, '_').slice(0, 80);
   return `${base}.${ext}`;
 }

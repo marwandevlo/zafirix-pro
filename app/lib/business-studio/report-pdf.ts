@@ -7,7 +7,7 @@
 import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import { formatCentsMad, formatNumber, formatPercent, STR } from './i18n';
-import { formatCell, type Block, type RCell, type Report } from './report-model';
+import { formatCell, isDraftStatus, type Block, type RCell, type Report } from './report-model';
 
 export type PdfFonts = { regular: string; bold?: string };
 
@@ -108,7 +108,12 @@ export function renderReportPdf(report: Report, fonts?: PdfFonts): ArrayBuffer {
   setFont('bold', 22);
   doc.text(doc.splitTextToSize(T(report.title), CONTENT_W - 40) as string[], xStart, 30, { align });
   setFont('normal', 13);
-  doc.text(T(report.studyName), xStart, 55, { align });
+  doc.text(T(report.studyName), xStart, 48, { align });
+  if (isDraftStatus(report.status)) {
+    doc.setTextColor(251, 191, 36);
+    setFont('bold', 12);
+    doc.text(T(report.lang === 'ar' ? 'مسودة' : 'BROUILLON'), xStart, 64, { align });
+  }
   doc.setTextColor(30, 41, 59);
   y = 84;
   for (const [k, v] of report.cover) {
