@@ -16,10 +16,30 @@ const PAGE_H = 297;
 const MARGIN = 14;
 const CONTENT_W = PAGE_W - MARGIN * 2;
 const MAX_PERIOD_COLUMNS = 7;
-const NAVY: [number, number, number] = [27, 42, 74];
+const NAVY: [number, number, number] = [20, 43, 85];
+const GOLD: [number, number, number] = [244, 181, 68];
+const TEAL: [number, number, number] = [0, 175, 160];
 const SERIES_COLORS: Array<[number, number, number]> = [
-  [27, 42, 74], [217, 119, 6], [5, 150, 105], [190, 24, 93], [37, 99, 235], [124, 58, 237], [100, 116, 139], [202, 138, 4], [13, 148, 136], [220, 38, 38],
+  [20, 43, 85], [23, 107, 206], [0, 175, 160], [244, 181, 68], [232, 92, 105],
+  [91, 141, 239], [0, 120, 110], [184, 122, 20],
 ];
+
+/** Splits a wide year axis into balanced groups so the last page is not left with a single column. */
+function periodRanges(count: number, max: number): Array<[number, number]> {
+  if (count <= max) return [[0, count]];
+  const parts = Math.ceil(count / max);
+  const base = Math.floor(count / parts);
+  let extra = count - base * parts;
+  const out: Array<[number, number]> = [];
+  let from = 0;
+  for (let i = 0; i < parts; i += 1) {
+    const len = base + (extra > 0 ? 1 : 0);
+    if (extra > 0) extra -= 1;
+    out.push([from, from + len]);
+    from += len;
+  }
+  return out;
+}
 
 /** Characters missing from the standard WinAnsi fonts, used only when no embedded font is available. */
 function winAnsiSafe(s: string): string {
@@ -98,6 +118,8 @@ export function renderReportPdf(report: Report, fonts?: PdfFonts): ArrayBuffer {
   // Cover
   doc.setFillColor(...NAVY);
   doc.rect(0, 0, PAGE_W, 70, 'F');
+  doc.setFillColor(...GOLD);
+  doc.rect(0, 70, PAGE_W, 3.2, 'F');
   if (report.logoDataUrl.startsWith('data:image/')) {
     try {
       const fmt = report.logoDataUrl.startsWith('data:image/png') ? 'PNG' : 'JPEG';
@@ -110,7 +132,7 @@ export function renderReportPdf(report: Report, fonts?: PdfFonts): ArrayBuffer {
   setFont('normal', 13);
   doc.text(T(report.studyName), xStart, 48, { align });
   if (isDraftStatus(report.status)) {
-    doc.setTextColor(251, 191, 36);
+    doc.setTextColor(...GOLD);
     setFont('bold', 12);
     doc.text(T(report.lang === 'ar' ? 'مسودة' : 'BROUILLON'), xStart, 64, { align });
   }
@@ -129,7 +151,7 @@ export function renderReportPdf(report: Report, fonts?: PdfFonts): ArrayBuffer {
   doc.rect(MARGIN, y - 5, CONTENT_W, 10, 'F');
   setFont('bold', 10);
   doc.text(T(report.checksOk ? STR.checksOk[report.lang] : STR.checksKo[report.lang]), xStart + (rtl ? -3 : 3), y + 1.5, { align });
-  y = Math.max(y + 12, 236);
+  y += 12;
   for (const d of report.disclaimers) writeLines(d, 8.5, 'normal', [71, 85, 105]);
 
   // Table of contents placeholder (page 2), filled once section pages are known.
@@ -138,13 +160,16 @@ export function renderReportPdf(report: Report, fonts?: PdfFonts): ArrayBuffer {
   const sectionPages: number[] = [];
 
   for (const [si, section] of report.sections.entries()) {
-    newPage();
+    if (sectionPages.length === 0 || y > PAGE_H - 80) newPage();
+    else y += 8;
     sectionPages.push(doc.getNumberOfPages());
     setFont('bold', 15);
     doc.setTextColor(...NAVY);
     numbered(si + 1, section.title, xStart, y);
-    doc.setDrawColor(...NAVY);
+    doc.setDrawColor(...TEAL);
+    doc.setLineWidth(0.6);
     doc.line(MARGIN, y + 2, PAGE_W - MARGIN, y + 2);
+    doc.setLineWidth(0.2);
     doc.setTextColor(30, 41, 59);
     y += 10;
     section.blocks.forEach((b, i) => renderBlock(b, section.blocks[i + 1]));
@@ -209,6 +234,16 @@ export function renderReportPdf(report: Report, fonts?: PdfFonts): ArrayBuffer {
           y += 2;
         }
         const periodCols = b.head.length - 1;
+        if (periodCols > MAX_PERIOD_COLUMNS) {
+          const ranges = periodRanges(periodCols, MAX_PERIOD_COLUMNS);
+          for (let c = 0; c < ranges.length; c += 1) {
+            const [from, to] = ranges[c];
+            const head = [b.head[0], ...b.head.slice(1 + from, 1 + to)].map(T);
+            const body = b.rows.map((r) => [T(r.label), ...r.cells.slice(from, to).map((cell) => T(formatCell(cell, report.lang)))]);
+            table(head, body, null, b.rows.map((r) => r.style ?? 'line'), undefined, undefined, c === ranges.length - 1 ? footnoteReserve(next) : 0);
+          }
+          return;
+        }
         const textCols = b.head.slice(1).map((_, i) => b.rows.length > 0 && b.rows.every((r) => !r.cells[i] || 's' in r.cells[i]));
         const longest = (i: number) => Math.max(b.head[i + 1]?.length ?? 0, ...b.rows.map((r) => (r.cells[i] ? formatCell(r.cells[i], report.lang).length : 0)));
         const fixed: number[] = textCols.map((isText, i) => (!isText ? 0.12 : longest(i) <= 16 ? 0.12 : 0));
@@ -221,13 +256,12 @@ export function renderReportPdf(report: Report, fonts?: PdfFonts): ArrayBuffer {
           table(head, body, [label, ...fixed.map((w) => w || share)], b.rows.map((r) => r.style ?? 'line'), undefined, [true, ...textCols], footnoteReserve(next));
           return;
         }
-        const chunks = periodCols > MAX_PERIOD_COLUMNS + 1 ? Math.ceil(periodCols / MAX_PERIOD_COLUMNS) : 1;
-        for (let c = 0; c < chunks; c += 1) {
-          const from = chunks === 1 ? 0 : c * MAX_PERIOD_COLUMNS;
-          const to = chunks === 1 ? periodCols : Math.min(periodCols, from + MAX_PERIOD_COLUMNS);
+        const ranges = periodRanges(periodCols, MAX_PERIOD_COLUMNS);
+        for (let c = 0; c < ranges.length; c += 1) {
+          const [from, to] = ranges[c];
           const head = [b.head[0], ...b.head.slice(1 + from, 1 + to)].map(T);
           const body = b.rows.map((r) => [T(r.label), ...r.cells.slice(from, to).map((cell) => T(formatCell(cell, report.lang)))]);
-          table(head, body, null, b.rows.map((r) => r.style ?? 'line'), undefined, undefined, c === chunks - 1 ? footnoteReserve(next) : 0);
+          table(head, body, null, b.rows.map((r) => r.style ?? 'line'), undefined, undefined, c === ranges.length - 1 ? footnoteReserve(next) : 0);
         }
         return;
       }
@@ -244,7 +278,7 @@ export function renderReportPdf(report: Report, fonts?: PdfFonts): ArrayBuffer {
     const columnStyles: Record<number, { halign?: 'left' | 'right' | 'center'; cellWidth?: number; fontStyle?: 'bold' | 'normal' }> = {};
     const n = head.length || body[0]?.length || 0;
     for (let i = 0; i < n; i += 1) columnStyles[i] = { halign: i === labelIndex ? (rtl ? 'right' : 'left') : 'right' };
-    let fontSize = 7.5;
+    let fontSize = 8.5;
     if (widths) widths.forEach((w, i) => { const idx = rtl ? n - 1 - i : i; columnStyles[idx] = { ...columnStyles[idx], cellWidth: CONTENT_W * w }; });
     else {
       // Period columns share what the label leaves; numbers must stay on one line, so the label narrows first, then the font.
@@ -259,7 +293,7 @@ export function renderReportPdf(report: Report, fonts?: PdfFonts): ArrayBuffer {
         const fits = (fs: number, lw: number) => need(fs) * (n - 1) <= CONTENT_W - lw;
         const minLabel = CONTENT_W * 0.26;
         while (!fits(fontSize, labelW) && labelW > minLabel) labelW = Math.max(minLabel, labelW - 2);
-        while (!fits(fontSize, labelW) && fontSize > 6) fontSize -= 0.25;
+        while (!fits(fontSize, labelW) && fontSize > 7.5) fontSize -= 0.25;
       }
       columnStyles[labelIndex] = { ...columnStyles[labelIndex], cellWidth: labelW };
     }
@@ -269,8 +303,9 @@ export function renderReportPdf(report: Report, fonts?: PdfFonts): ArrayBuffer {
       head: head.length ? [order(head)] : undefined,
       body: body.map(order),
       margin: { left: MARGIN, right: MARGIN, top: MARGIN + 4, bottom: 18 + reserveBelow },
-      styles: { font, fontSize, cellPadding: 1.2, overflow: 'linebreak', textColor: [30, 41, 59] },
+      styles: { font, fontSize, cellPadding: 1.4, overflow: 'linebreak', textColor: [30, 41, 59], lineColor: [203, 213, 225], lineWidth: 0.15 },
       headStyles: { font, fontStyle: 'bold', fillColor: NAVY, textColor: 255, halign: 'center' },
+      showHead: 'everyPage',
       columnStyles,
       theme: 'grid',
       didParseCell: (data) => {
@@ -280,8 +315,9 @@ export function renderReportPdf(report: Report, fonts?: PdfFonts): ArrayBuffer {
         if (!styles) return;
         const st = styles[data.row.index];
         if (st === 'total' || st === 'subtotal' || st === 'section') data.cell.styles.fontStyle = 'bold';
-        if (st === 'section') data.cell.styles.fillColor = [232, 238, 247];
-        if (st === 'total') data.cell.styles.fillColor = [241, 245, 249];
+        if (st === 'section') data.cell.styles.fillColor = [230, 247, 246];
+        if (st === 'total') data.cell.styles.fillColor = [251, 243, 224];
+        if (st === 'subtotal') data.cell.styles.fillColor = [232, 241, 252];
       },
     });
     y = (doc as unknown as { lastAutoTable: { finalY: number } }).lastAutoTable.finalY + 5;
@@ -479,8 +515,10 @@ export function renderReportPdf(report: Report, fonts?: PdfFonts): ArrayBuffer {
     doc.setPage(p);
     setFont('normal', 7.5);
     doc.setTextColor(100, 116, 139);
-    doc.setDrawColor(226, 232, 240);
+    doc.setDrawColor(...GOLD);
+    doc.setLineWidth(0.6);
     doc.line(MARGIN, PAGE_H - 12, PAGE_W - MARGIN, PAGE_H - 12);
+    doc.setLineWidth(0.2);
     const left = T(`${report.studyName} — ${report.title}`);
     const right = `${p} / ${total}`;
     if (rtl) {

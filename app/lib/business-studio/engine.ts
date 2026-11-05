@@ -1227,7 +1227,7 @@ export function computeStudy(input: StudyModel, scenarioId?: string): StudyResul
 
   // Cash alerts.
   const minCash = toCents(wc.minimumCash);
-  const firstShort = M.cash.findIndex((c) => c < minCash);
+  const firstShort = minCash > 0 ? M.cash.findIndex((c) => c < minCash) : -1;
   if (firstShort >= 0) {
     warnings.push({ code: 'cash_below_minimum', severity: 'warning', month: firstShort, message: `Trésorerie inférieure au minimum souhaité à partir de ${cal.labels[firstShort]}.`,
       messageAr: `الخزينة أقل من الحد الأدنى المرغوب ابتداءً من ${cal.labels[firstShort].replace('-', '/')}.` });

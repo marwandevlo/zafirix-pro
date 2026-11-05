@@ -74,9 +74,20 @@ export const SECTOR_TEMPLATES: Record<SectorId, Template> = {
   }),
   real_estate: T({
     id: 'real_estate', label: 'Immobilier', labelAr: 'العقار',
-    products: [{ name: 'Loyers ou ventes de lots' }], expenses: [{ name: 'Gestion et syndic', category: 'admin' }, { name: 'Entretien', category: 'maintenance' }, { name: 'Assurance', category: 'insurance' }],
-    staff: ['Gestionnaire'], investments: [{ name: 'Terrain', kind: 'land' }, { name: 'Construction', life: 25 }],
-    inputs: [{ id: 'lettableAreaM2', label: 'Surface louable ou vendable (m²)', unit: 'm²' }],
+    products: [{ name: 'Ventes de lots — phase 1' }, { name: 'Loyers ou ventes de lots' }],
+    expenses: [
+      { name: 'Coût de construction', category: 'raw_materials' },
+      { name: 'Taxes et charges locales', category: 'other' },
+      { name: 'Gestion et syndic', category: 'admin' },
+      { name: 'Entretien', category: 'maintenance' },
+      { name: 'Assurance', category: 'insurance' },
+    ],
+    staff: ['Conducteur de travaux', 'Commercial', 'Gestionnaire'],
+    investments: [{ name: 'Terrain', kind: 'land' }, { name: 'Construction', life: 25 }],
+    inputs: [
+      { id: 'lettableAreaM2', label: 'Surface louable ou vendable (m²)', unit: 'm²' },
+      { id: 'unitsForSale', label: 'Unités à vendre', unit: 'unités' },
+    ],
   }),
   hospitality: T({
     id: 'hospitality', label: 'Hôtellerie / restauration', labelAr: 'الفندقة / المطاعم',
@@ -157,6 +168,9 @@ export function sectorKpis(model: StudyModel, r: StudyResult, x: StudyMetrics): 
       case 'lettableAreaM2':
       case 'warehouseM2':
         add(`revenuePer_${inp.id}`, 'CA par m²', 'mad', `CA ÷ ${inp.label}`, perYear((fi) => (v > 0 ? x.years[fi].revenue / v : null)), reason);
+        break;
+      case 'unitsForSale':
+        add('revenuePerUnit', 'CA par unité à vendre', 'mad', 'CA ÷ unités à vendre', perYear((fi) => (v > 0 ? x.years[fi].revenue / v : null)), reason);
         break;
       case 'hectares':
         add('revenuePerHa', 'CA par hectare', 'mad', 'CA ÷ surface cultivée', perYear((fi) => (v > 0 ? x.years[fi].revenue / v : null)), reason);

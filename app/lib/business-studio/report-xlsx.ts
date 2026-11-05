@@ -8,7 +8,7 @@ import { STR } from './i18n';
 import { formatCell, isDraftStatus, type Block, type RCell, type Report } from './report-model';
 
 const NUM_FMT = {
-  mad: '#,##0.00;[Red]-#,##0.00',
+  mad: '#,##0;[Red]-#,##0',
   mad_unit: '#,##0.00;[Red]-#,##0.00',
   pct: '0.0%;[Red]-0.0%',
   ratio: '0.00',
@@ -17,8 +17,8 @@ const NUM_FMT = {
   years: '0.0',
 } as const;
 
-const FILL_SECTION: ExcelJS.Fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE8EEF7' } };
-const FILL_HEAD: ExcelJS.Fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF1B2A4A' } };
+const FILL_SECTION: ExcelJS.Fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE6F7F6' } };
+const FILL_HEAD: ExcelJS.Fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF142B55' } };
 
 function sheetName(raw: string, used: Set<string>): string {
   const base = raw.replace(/[[\]:*?/\\]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 28) || 'Feuille';
@@ -76,7 +76,7 @@ function writeBlock(ws: ExcelJS.Worksheet, b: Block, lang: Report['lang'], row: 
       for (const kv of b.rows) {
         ws.getCell(row, 1).value = kv.label;
         writeCell(ws.getCell(row, 2), kv.cell, lang);
-        if ('u' in kv.cell && kv.cell.u === 'mad' && kv.cell.v != null) ws.getCell(row, 2).numFmt = `#,##0.00 "${lang === 'ar' ? 'درهم' : 'MAD'}";[Red]-#,##0.00 "${lang === 'ar' ? 'درهم' : 'MAD'}"`;
+        if ('u' in kv.cell && kv.cell.u === 'mad' && kv.cell.v != null) ws.getCell(row, 2).numFmt = `#,##0 "${lang === 'ar' ? 'درهم' : 'MAD'}";[Red]-#,##0 "${lang === 'ar' ? 'درهم' : 'MAD'}"`;
         if (kv.note) { ws.getCell(row, 3).value = kv.note; ws.getCell(row, 3).font = { italic: true, color: { argb: 'FF64748B' } }; }
         row += 1;
       }
@@ -184,10 +184,10 @@ export async function renderReportXlsx(report: Report): Promise<ArrayBuffer> {
 
   const cover = sheet(lang === 'ar' ? 'الغلاف' : 'Couverture');
   cover.getCell('A1').value = report.title;
-  cover.getCell('A1').font = { bold: true, size: 18 };
+  cover.getCell('A1').font = { bold: true, size: 18, color: { argb: 'FF142B55' } };
   if (isDraftStatus(report.status)) {
     cover.getCell('A2').value = lang === 'ar' ? 'مسودة — دراسة غير مصادق عليها' : 'BROUILLON — étude non validée';
-    cover.getCell('A2').font = { bold: true, size: 14, color: { argb: 'FFB45309' } };
+    cover.getCell('A2').font = { bold: true, size: 14, color: { argb: 'FFE85C69' } };
   }
   const coverRows: Array<[string, string]> = [
     ...report.cover,
@@ -205,11 +205,11 @@ export async function renderReportXlsx(report: Report): Promise<ArrayBuffer> {
   report.sections.forEach((s, i) => {
     const cell = toc.getCell(i + 3, 1);
     cell.value = { text: `${i + 1}. ${s.title}`, hyperlink: `#'${names[i]}'!A1` };
-    cell.font = { color: { argb: 'FF1D4ED8' }, underline: true };
+    cell.font = { color: { argb: 'FF176BCE' }, underline: true };
   });
   const tocControls = toc.getCell(report.sections.length + 4, 1);
   tocControls.value = { text: controlsName, hyperlink: `#'${controlsName}'!A1` };
-  tocControls.font = { color: { argb: 'FF1D4ED8' }, underline: true };
+  tocControls.font = { color: { argb: 'FF176BCE' }, underline: true };
 
   const registry: Registry = new Map();
   report.sections.forEach((s, i) => {
