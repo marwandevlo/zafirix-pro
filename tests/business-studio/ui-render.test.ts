@@ -14,6 +14,7 @@ import { Scenarios } from '../../app/etude-projet/_studio/Scenarios';
 import { Simulator } from '../../app/etude-projet/_studio/Simulator';
 import { Statements } from '../../app/etude-projet/_studio/Statements';
 import { Tax } from '../../app/etude-projet/_studio/Tax';
+import { StudyDownloads } from '../../app/etude-projet/_studio/downloads';
 import { StudioLangProvider } from '../../app/etude-projet/_studio/ui';
 import { richModel } from './fixtures';
 
@@ -47,6 +48,26 @@ test('every workspace screen renders in French and Arabic from engine values', (
     assert.ok(html.tax.includes(formatCentsMad(firstYearIs.taxDue, lang)), `tax/${lang} shows the IS due`);
     if (lang === 'ar') for (const out of Object.values(html)) assert.ok(/[\u0600-\u06FF]/.test(out));
   }
+});
+
+test('download actions are visible in French and Arabic before any approval', () => {
+  const model = richModel(5);
+  const r = computeStudy(model);
+  const x = computeMetrics(model, r);
+  const props = {
+    studyId: '00000000-0000-0000-0000-000000000000', studyName: 'Étude test', model, r, x,
+    revision: 1, status: 'draft', hasCompany: false, unsaved: false,
+  };
+  const fr = render('fr', StudyDownloads, props);
+  const ar = render('ar', StudyDownloads, props);
+  for (const label of ['Rapports et téléchargements', 'Générer et télécharger', 'Télécharger PDF', 'Télécharger Word (.docx)', 'Télécharger Excel (.xlsx)', 'Prévisualiser le rapport', 'BROUILLON']) {
+    assert.ok(fr.includes(label), `missing ${label}`);
+  }
+  for (const label of ['التقارير والتنزيلات', 'إنشاء الدراسة وتنزيلها', 'تنزيل PDF', 'تنزيل Word (.docx)', 'تنزيل Excel (.xlsx)', 'معاينة التقرير', 'مسودة']) {
+    assert.ok(ar.includes(label), `missing ${label}`);
+  }
+  assert.equal((fr.match(/<button/g) ?? []).length, 5);
+  assert.equal(fr.includes('disabled=""'), false);
 });
 
 test('locked screens render read-only inputs', () => {

@@ -5,7 +5,7 @@
 
 import ExcelJS from 'exceljs';
 import { STR } from './i18n';
-import { formatCell, type Block, type RCell, type Report } from './report-model';
+import { formatCell, isDraftStatus, type Block, type RCell, type Report } from './report-model';
 
 const NUM_FMT = {
   mad: '#,##0.00;[Red]-#,##0.00',
@@ -185,6 +185,10 @@ export async function renderReportXlsx(report: Report): Promise<ArrayBuffer> {
   const cover = sheet(lang === 'ar' ? 'الغلاف' : 'Couverture');
   cover.getCell('A1').value = report.title;
   cover.getCell('A1').font = { bold: true, size: 18 };
+  if (isDraftStatus(report.status)) {
+    cover.getCell('A2').value = lang === 'ar' ? 'مسودة — دراسة غير مصادق عليها' : 'BROUILLON — étude non validée';
+    cover.getCell('A2').font = { bold: true, size: 14, color: { argb: 'FFB45309' } };
+  }
   const coverRows: Array<[string, string]> = [
     ...report.cover,
     [lang === 'ar' ? 'المراقبة' : 'Contrôles', report.checksOk ? STR.checksOk[lang] : STR.checksKo[lang]],
