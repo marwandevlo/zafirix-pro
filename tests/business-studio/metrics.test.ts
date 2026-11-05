@@ -110,8 +110,11 @@ test('rich model metrics are finite and consistent', () => {
   assert.equal(x.totals.revenue, r.monthly.revenue.reduce((s, v) => s + v, 0));
   assert.equal(x.years.reduce((s, y) => s + y.revenue, 0), x.totals.revenue);
   assert.ok(x.npvTerminal.value != null);
-  assert.ok(x.saas != null);
-  assert.ok(x.saas!.ltv.value != null && x.saas!.cac.value != null);
+  assert.equal(x.saas, null);
+  m.sector = 'saas';
+  const saas = computeMetrics(m, computeStudy(m));
+  assert.ok(saas.saas != null);
+  assert.ok(saas.saas!.ltv.value != null && saas.saas!.cac.value != null);
   assert.ok(x.peakFundingNeed.value != null && x.peakFundingNeed.value >= 0);
   const scan = JSON.stringify(x);
   assert.ok(!scan.includes('NaN') && !scan.includes('Infinity'));

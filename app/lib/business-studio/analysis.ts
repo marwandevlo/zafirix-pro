@@ -168,8 +168,8 @@ export function findings(model: StudyModel, r: StudyResult, x: StudyMetrics, lan
     add({
       id: 'cash-negative', kind: 'calculated', severity: 'critical', title: bi('Trésorerie négative', 'خزينة سالبة'),
       detail: bi(
-        `La trésorerie descend à ${mad(x.minCash.value)} en ${lab(x.minCash.month!)} : un financement complémentaire de ce montant au moins est nécessaire.`,
-        `تنخفض الخزينة إلى ${mad(x.minCash.value)} في ${lab(x.minCash.month!)}: يلزم تمويل إضافي بهذا المبلغ على الأقل.`,
+        `La trésorerie nette, intérêts de découvert inclus, descend à ${mad(x.minCash.value)} en ${lab(x.minCash.month!)}. Ce solde n’est pas le besoin de financement maximal : celui-ci est calculé avant apports, emprunts et subventions.`,
+        `تنخفض الخزينة الصافية، مع فوائد السحب على المكشوف، إلى ${mad(x.minCash.value)} في ${lab(x.minCash.month!)}. هذا الرصيد ليس أقصى حاجة للتمويل: تلك تُحسب قبل المساهمات والقروض والمنح.`,
       ),
       refs: [{ key: 'cash', month: x.minCash.month }],
     });
@@ -230,7 +230,10 @@ export function findings(model: StudyModel, r: StudyResult, x: StudyMetrics, lan
     add({
       id: 'funding', kind: 'calculated', severity: raised < x.peakFundingNeed.value ? 'warning' : 'info',
       title: bi(`Besoin de financement maximal : ${mad(x.peakFundingNeed.value)}`, `أقصى حاجة للتمويل: ${mad(x.peakFundingNeed.value)}`),
-      detail: bi(`Ressources externes prévues : ${mad(raised)} (apports, emprunts, subventions).`, `الموارد الخارجية المتوقعة: ${mad(raised)}، مساهمات وقروض ومنح.`),
+      detail: bi(
+        `Ressources prévues : ${mad(raised)} (apports, emprunts, subventions). Ce besoin est le creux avant ces ressources. Le solde net le plus bas, découvert inclus, est ${mad(x.minCash.value ?? 0)}.`,
+        `الموارد المتوقعة: ${mad(raised)}، مساهمات وقروض ومنح. هذه الحاجة هي القعر قبل هذه الموارد. أدنى رصيد صاف، مع السحب على المكشوف، هو ${mad(x.minCash.value ?? 0)}.`,
+      ),
       refs: [{ key: 'cashBeforeFinancing', month: x.peakFundingNeed.month }],
     });
   }
@@ -264,8 +267,83 @@ export function findings(model: StudyModel, r: StudyResult, x: StudyMetrics, lan
     }
     if (p.unitPrice > 0 && p.unitCost >= p.unitPrice) {
       add({ id: `price-${p.id}`, kind: 'assumption', severity: 'warning', title: bi(`Coût unitaire ≥ prix pour « ${p.name} »`, `التكلفة الوحدوية ≥ الثمن لـ«${p.name}»`),
-        detail: bi('Chaque vente détruit de la marge.', 'كل عملية بيع تُفقد الهامش.'), refs: [{ key: 'cogs' }] });
+        detail: bi(
+          'Chaque unité détruit de la marge. Une baisse du volume améliore alors la VAN : ce n’est pas une erreur de signe. Aucune hypothèse saisie n’a été corrigée.',
+          'كل وحدة تُفقد الهامش. خفض الحجم يحسن حينئذ القيمة الحالية الصافية: هذا ليس خطأ في الإشارة. لم تُصحح أي فرضية مُدخلة.',
+        ), refs: [{ key: 'cogs' }] });
     }
+    if (p.kind === 'subscription' && model.sector !== 'saas') {
+      add({ id: `subscription-${p.id}`, kind: 'assumption', severity: 'warning',
+        title: bi(`« ${p.name} » est facturé comme un abonnement`, `«${p.name}» يُفوتر كاشتراك`),
+        detail: bi(
+          `Chaque mois ajoute ${formatNumber(p.volumeMonth1, 'fr')} nouvel abonné, facturé ${formatCentsMad(Math.round(p.unitPrice * 100), 'fr')} HT tant qu’il reste actif, après un churn de ${formatPercent(p.churnPctMonthly, 'fr', 0)}. La croissance de ${formatPercent(p.volumeGrowthPct[0] ?? 0, 'fr', 0)} s’applique aux nouveaux abonnés. Ce n’est pas un chiffre d’affaires mensuel unique, et ce n’est pas le modèle d’une vente immobilière ponctuelle.`,
+          `يضاف كل شهر ${formatNumber(p.volumeMonth1, 'ar')} مشترك جديد، يُفوتر ${formatCentsMad(Math.round(p.unitPrice * 100), 'ar')} دون رسوم ما دام نشطاً، بعد فقد شهري ${formatPercent(p.churnPctMonthly, 'ar', 0)}. النمو ${formatPercent(p.volumeGrowthPct[0] ?? 0, 'ar', 0)} يطبق على المشتركين الجدد. هذا ليس رقم معاملات شهرياً وحيداً، وليس نموذج بيع عقاري لمرة واحدة.`,
+        ), refs: [{ key: 'revenue' }] });
+    }
+  }
+  for (const e of model.expenses) {
+    if (e.behavior !== 'fixed' && e.pctOfRevenue === 0 && e.amountMonthly > 0) {
+      add({ id: `expense-ignored-${e.id}`, kind: 'assumption', severity: 'warning',
+        title: bi(`« ${e.name} » : montant mensuel non retenu`, `«${e.name}»: المبلغ الشهري غير محتسب`),
+        detail: bi(
+          `${formatCentsMad(Math.round(e.amountMonthly * 100), 'fr')} MAD par mois sont saisis, mais la charge est un pourcentage du chiffre d’affaires à ${formatPercent(e.pctOfRevenue, 'fr', 0)}. Le calcul utilise 0. Le montant n’a pas été réintégré.`,
+          `أُدخل ${formatCentsMad(Math.round(e.amountMonthly * 100), 'ar')} درهم شهرياً، لكن التكلفة نسبة من رقم المعاملات قدرها ${formatPercent(e.pctOfRevenue, 'ar', 0)}. الحساب يستعمل 0. لم يُعد إدراج المبلغ.`,
+        ), refs: [{ key: 'opex' }] });
+    }
+  }
+  const loanWords = `${model.profile.project.objectives} ${model.profile.project.description}`;
+  const contractualPrincipal = model.financing.loans.reduce((s, l) => s + l.principal, 0);
+  if (/pr[eê]t|emprunt|bancaire/i.test(loanWords) && contractualPrincipal === 0) {
+    add({ id: 'loan-text-only', kind: 'assumption', severity: 'warning',
+      title: bi('Financement bancaire cité, capital emprunté nul', 'تمويل بنكي مذكور ورأسمال مقترض منعدم'),
+      detail: bi(
+        'Le texte du projet mentionne un prêt ou un financement bancaire. Aucun capital n’est saisi dans les emprunts, donc aucun échéancier n’est calculé. Le texte n’a pas été converti en prêt.',
+        'يذكر نص المشروع قرضاً أو تمويلاً بنكياً. لا يوجد رأسمال مُدخل في القروض، لذلك لا يُحسب جدول استحقاق. لم يُحوَّل النص إلى قرض.',
+      ), refs: [{ key: 'cashInLoans' }] });
+  }
+  const overdraft = M.overdraftInterest.reduce((s, v) => s + v, 0);
+  if (overdraft > 0 && contractualPrincipal === 0) {
+    add({ id: 'overdraft-not-dscr', kind: 'calculated', severity: 'warning',
+      title: bi('Intérêts de découvert, sans DSCR contractuel', 'فوائد سحب على المكشوف، دون نسبة تغطية دين تعاقدي'),
+      detail: bi(
+        `Aucun emprunt n’est saisi. La trésorerie négative produit ${mad(overdraft)} d’intérêts de découvert au taux saisi de ${formatPercent(model.financing.overdraftRatePct, 'fr', 0)}. Ces intérêts restent dans le résultat et la trésorerie. Ils ne sont pas présentés comme un DSCR bancaire.`,
+        `لا يوجد قرض مُدخل. تنتج الخزينة السالبة ${mad(overdraft)} كفوائد سحب على المكشوف بالنسبة المُدخلة ${formatPercent(model.financing.overdraftRatePct, 'ar', 0)}. تبقى هذه الفوائد في النتيجة والخزينة. لا تُعرض كنسبة تغطية دين بنكي.`,
+      ), refs: [{ key: 'overdraftInterest' }] });
+  }
+  if (model.sector === 'real_estate') {
+    if (model.staff.every((s) => s.headcount <= 0 || s.grossMonthly <= 0)) {
+      add({ id: 'real-estate-staff', kind: 'assumption', severity: 'warning',
+        title: bi('Immobilier : personnel non saisi', 'العقار: المستخدمون غير مُدخلين'),
+        detail: bi('Aucune masse salariale n’entre dans le prévisionnel. Elle n’a pas été estimée.', 'لا تدخل أي كتلة أجور في التوقعات. لم تُقدر.'), refs: [{ key: 'salaries' }] });
+    }
+    const construction = model.investments.reduce((s, i) => s + i.amountHT, 0);
+    if (construction === 0) {
+      add({ id: 'real-estate-works', kind: 'assumption', severity: 'warning',
+        title: bi('Immobilier : pas de budget de terrain ni de travaux', 'العقار: لا ميزانية أرض ولا أشغال'),
+        detail: bi(
+          'Les lignes d’investissement sont à zéro. Une option d’achat de crédit-bail, si elle existe, est un décaissement à l’échéance du contrat, pas un coût de construction.',
+          'أسطر الاستثمار منعدمة. خيار شراء ائتمان إيجاري، إن وُجد، هو خروج نقدي عند نهاية العقد وليس تكلفة بناء.',
+        ), refs: [{ key: 'capexCost' }] });
+    }
+    add({ id: 'real-estate-vat', kind: 'assumption', severity: 'info',
+      title: bi('TVA immobilière non spécialisée', 'ضريبة القيمة المضافة العقارية غير متخصصة'),
+      detail: bi(
+        'Le moteur applique les taux de TVA saisis sur les produits, les achats et les charges. Il ne choisit pas un régime de promotion immobilière. Ce point reste à confirmer avec le régime réel de l’opération.',
+        'يطبق المحرك نسب الضريبة على القيمة المضافة المُدخلة على المنتجات والمشتريات والتكاليف. لا يختار نظاماً للإنعاش العقاري. يبقى هذا للتأكيد مع النظام الحقيقي للعملية.',
+      ), refs: [{ key: 'vatCreditAsset' }] });
+  }
+  const grantMonths = model.financing.grants.filter((g) => g.amount > 0).map((g) => g.month);
+  const capexMonths = [
+    ...model.investments.filter((i) => i.amountHT > 0).map((i) => i.month),
+    ...model.financing.leases.filter((l) => l.purchaseOptionHT > 0).map((l) => l.startMonth + l.termMonths),
+  ];
+  if (grantMonths.length > 0 && capexMonths.length > 0 && Math.min(...capexMonths) >= Math.min(...grantMonths) + 12) {
+    add({ id: 'grant-before-capex', kind: 'assumption', severity: 'warning',
+      title: bi('Subvention encaissée bien avant le décaissement d’investissement', 'منحة مقبوضة قبل خروج الاستثمار بمدة طويلة'),
+      detail: bi(
+        'La subvention et le principal décaissement d’investissement ne tombent pas dans le même exercice. Les dates saisies ont été conservées.',
+        'المنحة وأهم خروج للاستثمار لا يقعان في السنة المالية نفسها. التواريخ المُدخلة محفوظة.',
+      ), refs: [{ key: 'cashInGrants' }, { key: 'capexCost' }] });
   }
   if (model.tax.localTaxes.length === 0 && model.tax.regime !== 'auto_entrepreneur') {
     add({ id: 'local-taxes', kind: 'assumption', severity: 'info', title: bi('Impôts locaux non saisis', 'الضرائب المحلية غير مُدخلة'),

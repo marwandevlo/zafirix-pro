@@ -237,9 +237,9 @@ function yearMetrics(r: StudyResult): YearMetrics[] {
         : ind(month, 'month_label', 'Premier mois où la marge sur coûts variables cumulée couvre les charges fixes', { month });
     }
     const cfo = S('cfo');
-    const cashInterest = S('cashOutInterest');
-    const debtService = S('cashOutPrincipal') + cashInterest;
-    const dscrV = debtService > 0 ? div(cfo + cashInterest, debtService) : null;
+    const contractualInterest = S('cashOutInterest') - S('overdraftInterest');
+    const debtService = S('cashOutPrincipal') + contractualInterest;
+    const dscrV = debtService > 0 ? div(cfo + contractualInterest, debtService) : null;
     const currentAssets = E('inventory') + E('receivables') + E('vatDeductiblePending') + E('vatCreditAsset') + E('vatRefundReceivable') + E('incomeTaxReceivable') + E('localTaxPrepaid') + E('cashAsset');
     const currentLiabilities = E('payables') + E('vatCollectedPending') + E('vatPayable') + E('incomeTaxPayable') + E('socialPayable') + E('localTaxPayable') + E('overdraft') + E('currentDebtPortion');
     const equityEnd = E('equity');
@@ -259,8 +259,9 @@ function yearMetrics(r: StudyResult): YearMetrics[] {
       ebitdaMarginPct: ind(pct(ebitda, revenue), 'pct', 'EBE ÷ CA', revenue === 0 ? { reason: 'CA nul.' } : {}),
       netMarginPct: ind(pct(netIncome, revenue), 'pct', 'Résultat net ÷ CA', revenue === 0 ? { reason: 'CA nul.' } : {}),
       breakEvenRevenue, safetyMarginPct, breakEvenMonth,
-      dscr: ind(dscrV, 'ratio', '(Flux d’exploitation + intérêts payés) ÷ (principal + intérêts payés)', {
-        ...(debtService === 0 ? { reason: 'Aucun service de la dette.' } : {}), convention: 'Les banques exigent souvent un DSCR ≥ 1,2 (pratique de marché, non réglementaire).',
+      dscr: ind(dscrV, 'ratio', '(Flux d’exploitation + intérêts contractuels) ÷ (principal contractuel + intérêts contractuels). Les intérêts de découvert sont exclus.', {
+        ...(debtService === 0 ? { reason: 'Aucun emprunt contractuel. Les intérêts de découvert ne constituent pas un DSCR.' } : {}),
+        convention: 'Les banques exigent souvent un DSCR ≥ 1,2 (pratique de marché, non réglementaire).',
       }),
       roe: ind(equityEnd > 0 ? pct(netIncome, equityEnd) : null, 'pct', 'Résultat net ÷ capitaux propres de clôture', equityEnd <= 0 ? { reason: 'Capitaux propres nuls ou négatifs.' } : {}),
       roa: ind(pct(netIncome, E('totalAssets')), 'pct', 'Résultat net ÷ total actif de clôture'),
@@ -381,7 +382,7 @@ export function computeMetrics(model: StudyModel, r: StudyResult): StudyMetrics 
   const irrInd = (res: ReturnType<typeof irr>, formula: string): Indicator => ind(res.annualPct, 'pct', formula, res.reason ? { reason: res.reason } : {});
   return {
     years,
-    saas: saasMetrics(r),
+    saas: model.sector === 'saas' ? saasMetrics(r) : null,
     totals: {
       revenue: total('revenue'), ebitda: total('ebitda'), netIncome, caf: total('caf'), capex,
       equityRaised: total('cashInEquity'), loansRaised: total('cashInLoans'), grants: total('cashInGrants'),
@@ -397,10 +398,10 @@ export function computeMetrics(model: StudyModel, r: StudyResult): StudyMetrics 
     payback: ind(pb.months, 'months', 'Mois jusqu’à ce que le cumul des FCFF redevienne positif', pb.reason ? { reason: pb.reason } : {}),
     discountedPayback: ind(dpb.months, 'months', `Idem avec FCFF actualisés à ${rate} %`, dpb.reason ? { reason: dpb.reason } : {}),
     roi: ind(capex > 0 ? (netIncome / capex) * 100 : null, 'pct', 'Résultat net cumulé ÷ investissements cumulés', capex <= 0 ? { reason: 'Aucun investissement.' } : {}),
-    minDscr: ind(minDscr, 'ratio', 'Plus faible DSCR annuel', minDscr == null ? { reason: 'Aucun service de la dette.' } : {}),
-    peakFundingNeed: ind(Math.max(0, -minBefore), 'mad', 'Plus forte trésorerie négative cumulée avant financement (apports, emprunts, subventions)', minBefore < 0 ? { month: minBeforeAt } : { reason: 'Aucun besoin : l’exploitation et les investissements sont autofinancés.' }),
+    minDscr: ind(minDscr, 'ratio', 'Plus faible DSCR annuel sur la dette contractuelle', minDscr == null ? { reason: 'Aucun emprunt contractuel.' } : {}),
+    peakFundingNeed: ind(Math.max(0, -minBefore), 'mad', 'Creux de la trésorerie cumulée avant apports, emprunts et subventions. Les intérêts de découvert sont réintégrés : ce n’est pas le solde net le plus bas.', minBefore < 0 ? { month: minBeforeAt } : { reason: 'Aucun besoin : l’exploitation et les investissements sont autofinancés.' }),
     cashEnd: ind(M.cash[N - 1], 'mad', 'Trésorerie nette de fin d’horizon (disponibilités − découvert)'),
-    minCash: ind(minCash, 'mad', 'Trésorerie nette la plus basse', { month: minCashAt }),
+    minCash: ind(minCash, 'mad', 'Solde de trésorerie nette le plus bas, intérêts de découvert inclus. Distinct du besoin de financement maximal.', { month: minCashAt }),
     profitabilityIndex: ind(pvOutflows > 0 ? pvInflows / pvOutflows : null, 'ratio', 'VA des FCFF positifs ÷ VA des FCFF négatifs', pvOutflows <= 0 ? { reason: 'Aucun flux négatif.' } : {}),
   };
 }

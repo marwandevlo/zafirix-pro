@@ -596,7 +596,22 @@ export function validateStudyModel(input: unknown): ValidationResult {
       overrides,
     };
   });
+  const sectorId = oneOf(r.sector, SECTORS, 'services');
   for (const pd of products) {
+    if (sectorId !== 'saas' && pd.kind === 'subscription' && pd.unitPrice > 0 && pd.volumeMonth1 > 0) {
+      ctx.issues.push({
+        path: `products.${pd.id}.kind`,
+        message: `« ${pd.name} » est un abonnement hors activité SaaS : le prix est facturé chaque mois à chaque abonné restant. Confirmez ce choix avant de l’interpréter comme un chiffre d’affaires ponctuel. Aucune valeur saisie n’a été modifiée.`,
+        severity: 'warning',
+      });
+    }
+    if (pd.unitPrice > 0 && pd.unitCost >= pd.unitPrice) {
+      ctx.issues.push({
+        path: `products.${pd.id}.unitCost`,
+        message: `« ${pd.name} » : le coût unitaire est supérieur ou égal au prix. Une baisse de volume améliore la VAN parce que chaque unité est déficitaire. Aucune valeur saisie n’a été modifiée.`,
+        severity: 'warning',
+      });
+    }
     if (pd.endMonth != null && pd.endMonth < pd.launchMonth) {
       ctx.issues.push({ path: `products.${pd.id}.endMonth`, message: `« ${pd.name} » : fin avant le lancement.`, severity: 'error' });
     }
@@ -681,6 +696,37 @@ export function validateStudyModel(input: unknown): ValidationResult {
       withholdingMode: oneOf(dv.withholdingMode, ['legal', 'custom'] as const, 'custom'),
     },
   };
+  const financingNarrative = `${profile.project.objectives} ${profile.project.description}`;
+  const loanPrincipal = financing.loans.reduce((s, l) => s + l.principal, 0);
+  if (/pr[eê]t|emprunt|bancaire/i.test(financingNarrative) && loanPrincipal === 0) {
+    ctx.issues.push({
+      path: 'financing.loans',
+      message: 'Le texte du projet mentionne un financement bancaire, mais aucun capital emprunté n’est saisi. Le texte n’a pas été converti en emprunt.',
+      severity: 'warning',
+    });
+  }
+  for (const e of expenses) {
+    if (e.behavior !== 'fixed' && e.pctOfRevenue === 0 && e.amountMonthly > 0) {
+      ctx.issues.push({
+        path: `expenses.${e.id}.amountMonthly`,
+        message: `« ${e.name} » : le montant mensuel est ignoré tant que la charge est un pourcentage du chiffre d’affaires à 0 %. Confirmez le mode de calcul avant de le changer.`,
+        severity: 'warning',
+      });
+    }
+  }
+  if (sectorId === 'real_estate' && products.some((pd) => pd.unitPrice > 0)) {
+    if (staff.reduce((s, x) => s + x.headcount * x.grossMonthly, 0) === 0) {
+      ctx.issues.push({ path: 'staff', message: 'Immobilier : aucune masse salariale saisie. Le modèle ne l’a pas inventée.', severity: 'warning' });
+    }
+    if (investments.reduce((s, x) => s + x.amountHT, 0) === 0) {
+      ctx.issues.push({ path: 'investments', message: 'Immobilier : aucun budget de terrain ou de construction saisi. L’option d’achat d’un crédit-bail n’est pas une ligne de travaux.', severity: 'warning' });
+    }
+    ctx.issues.push({
+      path: 'tax.vatRegime',
+      message: 'Immobilier : la TVA saisie sur les produits et les charges est appliquée. Les régimes propres à la promotion immobilière ne sont pas sélectionnés automatiquement.',
+      severity: 'warning',
+    });
+  }
 
   const w = rec(r.workingCapital);
   const workingCapital: WorkingCapital = {

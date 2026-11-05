@@ -115,7 +115,11 @@ function statementSection(ctx: Ctx, id: StatementId, g: 'year' | 'month' = 'year
   const sectionTitle = title ? ctx.t(title) : (block.kind === 'table' ? block.title ?? id : id);
   const blocks: Block[] = [block.kind === 'table' && block.title === sectionTitle ? { ...block, title: undefined } : block];
   if (ctx.r.calendar.fiscalYears.some((f) => f.partial) && g === 'year') {
-    blocks.push({ kind: 'notice', tone: 'info', text: ctx.t(B('* Exercice partiel (moins de 12 mois sur l’horizon).', '* سنة مالية جزئية (أقل من 12 شهراً ضمن الأفق).')) });
+    const open = ctx.model.horizon.fiscalYearStartMonth;
+    blocks.push({ kind: 'notice', tone: 'info', text: ctx.t(B(
+      `* Exercice partiel : moins de 12 mois tombent dans l’horizon. L’exercice s’ouvre au mois ${open}. L’étoile ne désigne pas une année civile complète.`,
+      `* سنة مالية جزئية: أقل من 12 شهراً تقع ضمن الأفق. تبدأ السنة المالية في الشهر ${open}. النجمة لا تعني سنة مدنية كاملة.`,
+    )) });
   }
   return { id: `st-${id}${g === 'month' ? '-m' : ''}`, title: sectionTitle, blocks };
 }
@@ -215,7 +219,14 @@ function assumptionsSection(ctx: Ctx): Section {
     rows: expenses.map((e) => ({
       label: e.name, cells: [
         txt(e.behavior === 'fixed' ? t(B('Fixe', 'ثابتة')) : t(B('Variable', 'متغيرة'))),
-        e.behavior === 'fixed' ? mad(Math.round(e.amountMonthly * 100)) : { v: e.pctOfRevenue, u: 'pct' },
+        e.behavior === 'fixed'
+          ? mad(Math.round(e.amountMonthly * 100))
+          : e.pctOfRevenue === 0 && e.amountMonthly > 0
+            ? txt(t(B(
+              `${formatPercent(0, ctx.lang)} — montant mensuel non retenu ${formatCentsMad(Math.round(e.amountMonthly * 100), ctx.lang)}`,
+              `${formatPercent(0, ctx.lang)} — مبلغ شهري غير محتسب ${formatCentsMad(Math.round(e.amountMonthly * 100), ctx.lang)}`,
+            )))
+            : { v: e.pctOfRevenue, u: 'pct' as const },
         { v: e.growthPct, u: 'pct' }, { v: e.vatRatePct, u: 'pct' }, txt(ml(e.startMonth)),
       ],
     })),
@@ -239,7 +250,15 @@ function assumptionsSection(ctx: Ctx): Section {
     ...f.equity.map((e) => ({ label: `${t(B('Apport', 'مساهمة'))} — ${e.name}`, cells: [mad(Math.round(e.amount * 100)), txt('—'), txt('—'), txt(ml(e.month))] })),
     ...f.loans.map((l) => ({ label: `${t(B('Emprunt', 'قرض'))} — ${l.name}`, cells: [mad(Math.round(l.principal * 100)), { v: l.annualRatePct, u: 'pct' as const }, { v: l.termMonths, u: 'months' as const }, txt(ml(l.month))] })),
     ...f.grants.map((g) => ({ label: `${t(B('Subvention', 'منحة'))} — ${g.name}`, cells: [mad(Math.round(g.amount * 100)), txt('—'), txt('—'), txt(ml(g.month))] })),
-    ...f.leases.map((l) => ({ label: `${t(B('Crédit-bail', 'الائتمان الإيجاري'))} — ${l.name}`, cells: [mad(Math.round(l.monthlyRentHT * 100)), txt('—'), { v: l.termMonths, u: 'months' as const }, txt(ml(l.startMonth))] })),
+    ...f.leases.map((l) => ({
+      label: `${t(B('Crédit-bail', 'الائتمان الإيجاري'))} — ${l.name}${l.purchaseOptionHT > 0
+        ? t(B(
+          ` — option d’achat ${formatCentsMad(Math.round(l.purchaseOptionHT * 100), ctx.lang)} à l’échéance`,
+          ` — خيار شراء ${formatCentsMad(Math.round(l.purchaseOptionHT * 100), ctx.lang)} عند النهاية`,
+        ))
+        : ''}`,
+      cells: [mad(Math.round(l.monthlyRentHT * 100)), txt('—'), { v: l.termMonths, u: 'months' as const }, txt(ml(l.startMonth))],
+    })),
   ];
   if (finRows.length) blocks.push({ kind: 'table', title: t(B('Financement', 'التمويل')), head: [t(STR.name), t(B('Montant', 'المبلغ')), t(B('Taux', 'النسبة')), t(B('Durée', 'المدة')), t(B('Date', 'التاريخ'))], rows: finRows });
   return { id: 'assumptions', title: t(B('Hypothèses', 'الفرضيات')), blocks };
@@ -862,7 +881,14 @@ export function buildReport(input: ReportInput): Report {
     [ctx.t(STR.horizon), lang === 'ar'
       ? `المدة ${model.horizon.years} سنوات، من ${monthLabel(model.horizon.startMonth, lang)} إلى ${monthLabel(r.calendar.labels[N - 1] ?? '', lang)}`
       : `${model.horizon.years} ans — de ${model.horizon.startMonth} à ${r.calendar.labels[N - 1] ?? ''}`],
-    [ctx.t(B('Investissements HT', 'الاستثمارات دون رسوم')), `${formatCentsMad(x.totals.capex, lang)} ${STR.mad[lang]}`],
+    [ctx.t(B('Investissements HT', 'الاستثمارات دون رسوم')), (() => {
+      const lined = model.investments.reduce((s, i) => s + Math.round(i.amountHT * 100), 0);
+      const option = model.financing.leases.reduce((s, l) => s + Math.round(l.purchaseOptionHT * 100), 0);
+      const note = lined === 0 && option > 0
+        ? (lang === 'ar' ? ' (خيار شراء ائتمان إيجاري)' : ' (option d’achat de crédit-bail)')
+        : '';
+      return `${formatCentsMad(x.totals.capex, lang)} ${STR.mad[lang]}${note}`;
+    })()],
     [ctx.t(B('Emprunts sollicités', 'القروض المطلوبة')), `${formatCentsMad(loansRequested, lang)} ${STR.mad[lang]}`],
     [STR.scenario[lang], scenarioName],
     [STR.status[lang], status || '—'],
