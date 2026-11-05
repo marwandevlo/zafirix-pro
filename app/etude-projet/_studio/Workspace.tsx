@@ -9,6 +9,7 @@ import { validateStudyModel, type StudyModel, type ValidationIssue } from '@/app
 import { scenarioText, STR } from '@/app/lib/business-studio/i18n';
 import { SHARING_MODES, type Sharing } from '@/app/lib/business-studio/model';
 import type { StatusAction, StudyRecord } from '@/app/lib/business-studio/server-store';
+import { CopilotPanel, StudyProgress } from './Copilot';
 import { Actuals } from './Actuals';
 import { Assumptions } from './Assumptions';
 import { ApiError, studioApi } from './client';
@@ -53,6 +54,7 @@ export function Workspace({ studyId }: { studyId: string }) {
   const [actionError, setActionError] = useState('');
   const [busy, setBusy] = useState(false);
   const [tab, setTab] = useState<Tab>('dashboard');
+  const [pane, setPane] = useState<'study' | 'chat'>('study');
   const [viewScenario, setViewScenario] = useState<string | null>(null);
 
   const latest = useRef<{ model: StudyModel | null; name: string }>({ model: null, name: '' });
@@ -229,7 +231,12 @@ export function Workspace({ studyId }: { studyId: string }) {
   const needsResult = tab !== 'profile' && tab !== 'assumptions' && tab !== 'versions';
 
   return (
-    <div className="flex flex-col min-h-0 flex-1">
+    <div className="flex min-h-0 flex-1">
+      <div className={`${pane === 'chat' ? 'flex' : 'hidden'} min-h-0 w-full shrink-0 border-slate-200 lg:flex lg:w-[400px] lg:border-e`}>
+        <CopilotPanel studyId={studyId} model={model} revision={study.meta.revision} readOnly={readOnly} flush={flush} dirty={() => dirty.current}
+          onApplied={accept} onGenerate={() => { setTab('reports'); setPane('study'); }} onShowStudy={() => setPane('study')} />
+      </div>
+      <div className={`${pane === 'study' ? 'flex' : 'hidden'} min-h-0 min-w-0 flex-1 flex-col lg:flex`}>
       <header className="bg-white border-b border-gray-200 px-4 sm:px-6 py-3 space-y-2 shrink-0 max-h-[58vh] overflow-y-auto">
         <div className="flex flex-wrap items-center gap-3">
           <Link href="/etude-projet" className="text-xs text-gray-500 hover:text-gray-800">← {t('studies')}</Link>
@@ -240,6 +247,7 @@ export function Workspace({ studyId }: { studyId: string }) {
             {saveLabel[save]} · {t('revision')} {study.meta.revision}
           </span>
           <LangToggle />
+          <button type="button" className="lg:hidden rounded-lg bg-[#142B55] px-3 py-2 text-xs font-medium text-white" onClick={() => setPane('chat')}>{t(bi('Consultant', 'المستشار'))}</button>
         </div>
         {computed && (
           <StudyDownloads studyId={studyId} studyName={name} model={deferredValid!} r={computed.r} x={computed.x} revision={study.meta.revision}
@@ -297,6 +305,7 @@ export function Workspace({ studyId }: { studyId: string }) {
             {t(bi(`${errors.length} erreur(s) de saisie : l’enregistrement est suspendu et les résultats affichés sont ceux de la dernière saisie valide.`, `${errors.length} خطأ في الإدخال: الحفظ معلق والنتائج المعروضة هي نتائج آخر إدخال صالح.`))}
           </Notice>
         )}
+        <StudyProgress model={model} />
         <Tabs tabs={tabs} value={tab} onChange={setTab} label={t('appTitle')} />
         <div role="tabpanel" aria-label={tabs.find((x) => x.id === tab)?.label} className="pt-1">
           {needsResult && !computed ? (
@@ -324,6 +333,7 @@ export function Workspace({ studyId }: { studyId: string }) {
         <p className="text-[10px] text-gray-500 pt-4" dir="ltr">
           {computed ? `${computed.r.engineVersion} · ${computed.r.rulesVersion}` : ''} · {lang.toUpperCase()}
         </p>
+      </div>
       </div>
     </div>
   );

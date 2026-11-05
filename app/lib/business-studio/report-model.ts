@@ -40,12 +40,16 @@ export type Block =
   | { kind: 'list'; title?: string; items: string[] };
 export type Section = { id: string; title: string; blocks: Block[] };
 
+export type ReportHighlight = { label: string; value: string; hint: string };
+
 export type Report = {
   type: ReportType; lang: Lang; title: string; studyName: string; companyName: string; sector: string; projectType: string;
   generatedAt: string; revision: number | null; status: string; scenarioName: string; engineVersion: string; rulesVersion: string;
   checksOk: boolean; logoDataUrl: string; disclaimers: string[]; sections: Section[];
   /** Label/value pairs shown on the cover of both formats, already translated. */
   cover: Array<[string, string]>;
+  /** Four engine KPIs drawn as cards on the cover and in the workbook. */
+  highlights: ReportHighlight[];
   /** Fiscal years and months covered, used to check that every section uses the study horizon. */
   horizon: { startMonth: string; years: number; months: number; fiscalYears: string[] };
 };
@@ -503,6 +507,17 @@ function summarySection(ctx: Ctx): Section {
   if (inv) blocks.push(inv);
   const critical = r.warnings.filter((w) => w.severity !== 'info');
   if (critical.length) blocks.push({ kind: 'list', title: t(B('Points d’attention calculés', 'نقاط انتباه محسوبة')), items: critical.map((w) => (lang === 'ar' ? w.messageAr : w.message)) });
+  blocks.push({
+    kind: 'table',
+    title: t(B('Nature des informations', 'طبيعة المعلومات')),
+    head: [t(B('Nature', 'الطبيعة')), t(B('Dans ce rapport', 'في هذا التقرير'))],
+    rows: [
+      { label: t(B('Cible déclarée par le porteur', 'هدف مصرح به من صاحب المشروع')), cells: [txt(model.profile.project.objectives || model.profile.project.description ? t(B('Texte saisi présent. Il n’est pas vérifié.', 'يوجد نص مُدخل. لم يتم التحقق منه.')) : t(B('Non renseignée.', 'غير مدخل.')))] },
+      { label: t(B('Valeur simulée', 'قيمة محاكاة')), cells: [txt(t(B('Chiffre d’affaires, résultat, trésorerie, VAN, TRI et DSCR sont des sorties du moteur à partir des hypothèses enregistrées.', 'رقم المعاملات والنتيجة والخزينة والقيمة الحالية ومعدل العائد ونسبة تغطية الدين مخرجات المحرك من الفرضيات المسجلة.')))] },
+      { label: t(B('Donnée vérifiée', 'معطى تم التحقق منه')), cells: [txt(t(B('Ce rapport ne certifie aucune écriture comptable.', 'هذا التقرير لا يشهد على أي قيد محاسبي.')))] },
+      { label: t(B('Hypothèse non confirmée', 'فرضية غير مؤكدة')), cells: [txt(t(B('Régime fiscal, TVA applicable au projet et hypothèses de marché : non vérifiés. Les règles codées ne sont pas un avis.', 'النظام الجبائي والضريبة على القيمة المضافة وفرضيات السوق غير مؤكدة. القواعد المبرمجة ليست رأياً مهنياً.')))] },
+    ],
+  });
   blocks.push({ kind: 'notice', tone: 'info', text: t(B('Synthèse établie automatiquement à partir des valeurs calculées de l’étude ; aucune appréciation n’est ajoutée.', 'ملخص منجز تلقائياً من القيم المحسوبة للدراسة؛ دون إضافة أي تقدير.')) });
   return { id: 'summary', title: t(B('Synthèse exécutive', 'الملخص التنفيذي')), blocks };
 }
@@ -822,6 +837,19 @@ function methodSection(ctx: Ctx): Section {
 
 // ─── Assembly ────────────────────────────────────────────────────────────────────────────────────
 
+function reportHighlights(ctx: Ctx): ReportHighlight[] {
+  const { x, lang, t } = ctx;
+  const y = firstFullYear(x);
+  if (!y) return [];
+  const money = (cents: number | null) => (cents == null ? STR.notAvailable[lang] : `${formatCentsMad(cents, lang)} ${STR.mad[lang]}`);
+  return [
+    { label: t(B('Chiffre d’affaires', 'رقم المعاملات')), value: money(y.revenue), hint: y.label },
+    { label: t(B('Résultat net', 'النتيجة الصافية')), value: money(y.netIncome), hint: y.label },
+    { label: t(B('VAN', 'القيمة الحالية الصافية')), value: money(x.npv.value), hint: `${ctx.model.general.discountRatePct} %` },
+    { label: 'DSCR', value: x.minDscr.value == null ? STR.notAvailable[lang] : formatNumber(x.minDscr.value, lang, 2), hint: x.minDscr.reason ?? t(B('minimum', 'الأدنى')) },
+  ];
+}
+
 const TITLE: Record<ReportType, keyof typeof STR> = {
   full: 'rep_full', bank: 'rep_bank', investor: 'rep_investor', financials: 'rep_financials', tax: 'rep_tax', scenarios: 'rep_scenarios', actuals: 'rep_actuals',
 };
@@ -900,7 +928,7 @@ export function buildReport(input: ReportInput): Report {
   return {
     type, lang, title: tr(TITLE[type], lang), studyName: input.studyName, companyName: company.name, sector, projectType,
     generatedAt, revision: input.revision ?? null, status, scenarioName, engineVersion: r.engineVersion, rulesVersion: r.rulesVersion, checksOk: r.checks.ok,
-    logoDataUrl: company.logoDataUrl, disclaimers, sections, cover,
+    logoDataUrl: company.logoDataUrl, disclaimers, sections, cover, highlights: reportHighlights(ctx),
     horizon: { startMonth: model.horizon.startMonth, years: model.horizon.years, months: N, fiscalYears: r.calendar.fiscalYears.map((f) => f.label) },
   };
 }

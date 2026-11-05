@@ -14,6 +14,7 @@ import { formatCell, isDraftStatus, type Block, type Report } from './report-mod
 const NAVY = '142B55';
 const GOLD = 'F4B544';
 const TEAL = '00AFA0';
+const VIOLET = '6D4CFF';
 
 /** Splits a wide year axis into balanced groups so the last table is not a single column. */
 function periodRanges(count: number, max: number): Array<[number, number]> {
@@ -186,6 +187,20 @@ export async function renderReportDocx(report: Report, images: ReadonlyMap<strin
     report.cover,
     rtl,
   ));
+  if (report.highlights.length) {
+    children.push(new Paragraph({
+      bidirectional: rtl,
+      alignment: rtl ? AlignmentType.RIGHT : AlignmentType.LEFT,
+      spacing: { before: 160, after: 80 },
+      border: { bottom: { style: BorderStyle.SINGLE, size: 8, color: VIOLET, space: 1 } },
+      children: [run(rtl ? 'مؤشرات المحرك' : 'Indicateurs du moteur', { bold: true, size: 24, color: NAVY })],
+    }));
+    children.push(table(
+      [rtl ? 'المؤشر' : 'Indicateur', rtl ? 'القيمة' : 'Valeur', rtl ? 'الإطار' : 'Repère'],
+      report.highlights.map((h) => [h.label, h.value, h.hint]),
+      rtl,
+    ));
+  }
   for (const disclaimer of report.disclaimers) children.push(para(disclaimer, { size: 16, color: '475569', rtl }));
   report.sections.forEach((section, index) => {
     children.push(new Paragraph({

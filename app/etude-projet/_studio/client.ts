@@ -2,6 +2,7 @@
 
 import { supabase } from '@/app/lib/supabase';
 import type { ActualsByMonth } from '@/app/lib/business-studio/actuals';
+import type { CopilotThread } from '@/app/lib/business-studio/copilot';
 import type { StudyModel, ValidationIssue } from '@/app/lib/business-studio/model';
 import type { Sharing, StatusAction, StudyRecord, StudySummary, VersionSummary } from '@/app/lib/business-studio/server-store';
 
@@ -53,7 +54,31 @@ export const studioApi = {
     call<{ actuals: ActualsByMonth; truncated: boolean; includeUnvalidated: boolean }>(`/studies/${encodeURIComponent(id)}/actuals${includeUnvalidated ? '?includeUnvalidated=1' : ''}`),
   importLegacy: (legacyId: string) =>
     call<{ study: StudyRecord; notes: string[] }>(`/legacy/${encodeURIComponent(legacyId)}/import`, json('POST', {})),
+  copilotGet: (id: string) => call<{ thread: PublicThread }>(`/studies/${encodeURIComponent(id)}/copilot`).then((r) => r.thread),
+  copilotApply: (id: string, input: { confirm: true; revision: number; changeIds: string[] }) =>
+    call<{ study: StudyRecord; thread: PublicThread }>(`/studies/${encodeURIComponent(id)}/copilot/apply`, json('POST', input)),
+  copilotUndo: (id: string, input: { confirm: true; revision: number }) =>
+    call<{ study: StudyRecord; thread: PublicThread }>(`/studies/${encodeURIComponent(id)}/copilot/undo`, json('POST', input)),
 };
+
+export type PublicThread = {
+  messages: CopilotThread['messages'];
+  pending: CopilotThread['pending'];
+  canUndo: boolean;
+  undoRevision: number | null;
+  usage: CopilotThread['usage'];
+  threadRevision: number;
+};
+
+export async function streamCopilot(id: string, body: { message: string; clientId: string; locale: string; threadRevision: number }, signal: AbortSignal): Promise<Response> {
+  const { data } = await supabase.auth.getSession();
+  const headers = new Headers({ 'Content-Type': 'application/json' });
+  const token = data.session?.access_token;
+  if (token) headers.set('Authorization', `Bearer ${token}`);
+  return fetch(`/api/business-studio/studies/${encodeURIComponent(id)}/copilot`, {
+    method: 'POST', body: JSON.stringify(body), headers, signal, cache: 'no-store',
+  });
+}
 
 let fontCache: Promise<{ regular: string; bold: string }> | null = null;
 

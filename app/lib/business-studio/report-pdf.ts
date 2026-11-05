@@ -17,10 +17,12 @@ const MARGIN = 14;
 const CONTENT_W = PAGE_W - MARGIN * 2;
 const MAX_PERIOD_COLUMNS = 7;
 const NAVY: [number, number, number] = [20, 43, 85];
+const BLUE: [number, number, number] = [23, 107, 206];
 const GOLD: [number, number, number] = [244, 181, 68];
 const TEAL: [number, number, number] = [0, 175, 160];
+const VIOLET: [number, number, number] = [109, 76, 255];
 const SERIES_COLORS: Array<[number, number, number]> = [
-  [20, 43, 85], [23, 107, 206], [0, 175, 160], [244, 181, 68], [232, 92, 105],
+  [20, 43, 85], [23, 107, 206], [0, 175, 160], [109, 76, 255], [244, 181, 68], [232, 92, 105],
   [91, 141, 239], [0, 120, 110], [184, 122, 20],
 ];
 
@@ -138,6 +140,34 @@ export function renderReportPdf(report: Report, fonts?: PdfFonts): ArrayBuffer {
   }
   doc.setTextColor(30, 41, 59);
   y = 84;
+  const cards = report.highlights.slice(0, 4);
+  if (cards.length) {
+    const gap = 2;
+    const cardW = (CONTENT_W - gap * (cards.length - 1)) / cards.length;
+    const cardH = 24;
+    const accents = [NAVY, BLUE, TEAL, VIOLET];
+    cards.forEach((card, i) => {
+      const x = rtl ? PAGE_W - MARGIN - cardW - i * (cardW + gap) : MARGIN + i * (cardW + gap);
+      doc.setFillColor(255, 255, 255);
+      doc.setDrawColor(...accents[i % accents.length]);
+      doc.setLineWidth(0.45);
+      doc.rect(x, y, cardW, cardH, 'FD');
+      doc.setFillColor(...accents[i % accents.length]);
+      doc.rect(x, y, cardW, 1.4, 'F');
+      setFont('normal', 7);
+      doc.setTextColor(71, 85, 105);
+      doc.text((doc.splitTextToSize(T(card.label), cardW - 3) as string[])[0] ?? '', x + cardW / 2, y + 7, { align: 'center' });
+      setFont('bold', 8);
+      doc.setTextColor(...NAVY);
+      doc.text((doc.splitTextToSize(T(card.value), cardW - 3) as string[])[0] ?? '', x + cardW / 2, y + 13, { align: 'center' });
+      setFont('normal', 6.5);
+      doc.setTextColor(100, 116, 139);
+      doc.text((doc.splitTextToSize(T(card.hint), cardW - 3) as string[])[0] ?? '', x + cardW / 2, y + 19, { align: 'center' });
+    });
+    y += cardH + 6;
+    doc.setTextColor(30, 41, 59);
+    doc.setLineWidth(0.2);
+  }
   for (const [k, v] of report.cover) {
     setFont('bold', 10.5);
     doc.text(T(k), xStart, y, { align });
@@ -167,8 +197,11 @@ export function renderReportPdf(report: Report, fonts?: PdfFonts): ArrayBuffer {
     doc.setTextColor(...NAVY);
     numbered(si + 1, section.title, xStart, y);
     doc.setDrawColor(...TEAL);
-    doc.setLineWidth(0.6);
+    doc.setLineWidth(0.7);
     doc.line(MARGIN, y + 2, PAGE_W - MARGIN, y + 2);
+    doc.setDrawColor(...VIOLET);
+    doc.setLineWidth(0.35);
+    doc.line(MARGIN, y + 3.3, PAGE_W - MARGIN, y + 3.3);
     doc.setLineWidth(0.2);
     doc.setTextColor(30, 41, 59);
     y += 10;
@@ -312,8 +345,9 @@ export function renderReportPdf(report: Report, fonts?: PdfFonts): ArrayBuffer {
         if (data.section !== 'body') return;
         if (textRows?.[data.row.index] && data.column.index === valueIndex) data.cell.styles.halign = rtl ? 'right' : 'left';
         if (textRows && data.column.index === labelIndex) data.cell.styles.fontStyle = 'bold';
-        if (!styles) return;
-        const st = styles[data.row.index];
+        const st = styles?.[data.row.index];
+        if ((st == null || st === 'line' || st === 'detail') && data.row.index % 2 === 1) data.cell.styles.fillColor = [248, 250, 252];
+        if (!st) return;
         if (st === 'total' || st === 'subtotal' || st === 'section') data.cell.styles.fontStyle = 'bold';
         if (st === 'section') data.cell.styles.fillColor = [230, 247, 246];
         if (st === 'total') data.cell.styles.fillColor = [251, 243, 224];

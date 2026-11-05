@@ -1,11 +1,11 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import type { StudyResult } from '@/app/lib/business-studio/engine';
 import { STR, tr } from '@/app/lib/business-studio/i18n';
 import type { StudyMetrics } from '@/app/lib/business-studio/metrics';
 import type { StudyModel } from '@/app/lib/business-studio/model';
-import { REPORT_TYPES, type ReportType } from '@/app/lib/business-studio/report-model';
+import { buildReport, REPORT_TYPES, type ReportType } from '@/app/lib/business-studio/report-model';
 import { generateStudyFile, saveDownload } from './downloads';
 import { bi, Button, Card, Notice, Toggle, useStudio } from './ui';
 
@@ -32,6 +32,9 @@ export function Reports({ studyId, studyName, model, r, x, revision, status, has
   const [includeUnvalidated, setIncludeUnvalidated] = useState(false);
   const [preview, setPreview] = useState<{ url: string; name: string; data: ArrayBuffer; title: string } | null>(null);
   const previewRef = useRef<HTMLDivElement>(null);
+  const highlights = useMemo(() => buildReport({
+    type: 'investor', lang, model, result: r, metrics: x, studyName, revision, status,
+  }).highlights, [lang, model, r, x, studyName, revision, status]);
 
   useEffect(() => () => { if (preview) URL.revokeObjectURL(preview.url); }, [preview]);
   useEffect(() => { if (preview) previewRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }); }, [preview]);
@@ -65,6 +68,15 @@ export function Reports({ studyId, studyName, model, r, x, revision, status, has
       {!r.checks.ok && <Notice tone="critical">{t('checksKo')}</Notice>}
       <Notice>{t(bi('Chaque rapport comporte une page de garde, un sommaire, la pagination, la version du moteur et du référentiel fiscal, et l’avertissement « prévisionnel ». Les valeurs proviennent du même calcul que les écrans.', 'يتضمن كل تقرير صفحة غلاف وفهرساً وترقيماً للصفحات وإصدار المحرك والمرجع الجبائي وتنبيه «توقعي». القيم مستمدة من نفس الحساب المعروض في الشاشات.'))}</Notice>
       {error && <Notice tone="critical">{t(bi('Échec de la génération', 'فشل الإنشاء'))} ({error})</Notice>}
+      <div className="grid grid-cols-2 gap-2 lg:grid-cols-4">
+        {highlights.map((h, i) => (
+          <div key={h.label} className="rounded-xl border border-slate-200 bg-white p-3" style={{ borderTop: `3px solid ${['#142B55', '#176BCE', '#00AFA0', '#6D4CFF'][i % 4]}` }}>
+            <p className="text-[11px] text-slate-600">{h.label}</p>
+            <p className="mt-1 text-sm font-semibold text-[#142B55]">{h.value}</p>
+            <p className="mt-1 text-[10px] text-slate-500">{h.hint}</p>
+          </div>
+        ))}
+      </div>
       <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
         {REPORT_TYPES.map((type) => (
           <Card key={type} title={t(STR[LABEL[type]])}>

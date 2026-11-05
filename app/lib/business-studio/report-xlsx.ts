@@ -119,6 +119,9 @@ function writeBlock(ws: ExcelJS.Worksheet, b: Block, lang: Report['lang'], row: 
         });
         if (b.id && r.key) registry.set(`${b.id}.${r.key}`, { sheet: ws.name, row, cols: r.cells.length, values: r.cells.map(cellValue) });
         if (r.style === 'section') for (let i = 1; i <= b.head.length; i += 1) ws.getCell(row, i).fill = FILL_SECTION;
+        else if (r.style === 'total') for (let i = 1; i <= b.head.length; i += 1) ws.getCell(row, i).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFBF3E0' } };
+        else if (r.style === 'subtotal') for (let i = 1; i <= b.head.length; i += 1) ws.getCell(row, i).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE8F1FC' } };
+        else if (row % 2 === 0) for (let i = 1; i <= b.head.length; i += 1) ws.getCell(row, i).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF8FAFC' } };
         if (r.style === 'total') for (let i = 1; i <= b.head.length; i += 1) ws.getCell(row, i).border = { top: { style: 'thin' }, bottom: { style: 'double' } };
         row += 1;
       }
@@ -194,6 +197,17 @@ export async function renderReportXlsx(report: Report): Promise<ArrayBuffer> {
     [lang === 'ar' ? 'المراقبة' : 'Contrôles', report.checksOk ? STR.checksOk[lang] : STR.checksKo[lang]],
   ];
   coverRows.forEach(([k, v], i) => { cover.getCell(i + 3, 1).value = k; cover.getCell(i + 3, 1).font = { bold: true }; cover.getCell(i + 3, 2).value = v; });
+  const accents = ['FF142B55', 'FF176BCE', 'FF00AFA0', 'FF6D4CFF'];
+  report.highlights.forEach((h, i) => {
+    const col = i + 4;
+    cover.getCell(3, col).value = h.label;
+    cover.getCell(3, col).font = { bold: true, color: { argb: 'FFFFFFFF' }, size: 10 };
+    cover.getCell(3, col).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: accents[i % accents.length] } };
+    cover.getCell(4, col).value = h.value;
+    cover.getCell(4, col).font = { bold: true, color: { argb: 'FF142B55' } };
+    cover.getCell(5, col).value = h.hint;
+    cover.getCell(5, col).font = { color: { argb: 'FF64748B' }, size: 9 };
+  });
   let r = coverRows.length + 5;
   for (const d of report.disclaimers) { cover.mergeCells(r, 1, r, 8); cover.getCell(r, 1).value = d; cover.getCell(r, 1).alignment = { wrapText: true }; cover.getRow(r).height = 60; r += 1; }
 
